@@ -23,6 +23,10 @@ public class ElectricTrainData {
     // Already accounts for running resistance, gradient and the supply.
     public float maxSpeed;
 
+    // Acceleration the traction can currently deliver, in Blocks/Second².
+    // Tapers with speed because the effort is power-limited.
+    public float availableAcceleration;
+
     // Gradient along the direction of travel (rise / run). Positive = uphill.
     public double trackGrade = 0d;
     // Curve-limited speed from the lateral acceleration limit, in Blocks/Second.
