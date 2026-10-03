@@ -255,38 +255,4 @@ public final class TrainTractionModel {
     public static double auxiliaryPower(int carriages) {
         return Math.max(1, carriages) * 2_000d;
     }
-
-    // ------------------------------------------------------------------
-    // Curves
-    // ------------------------------------------------------------------
-
-    /**
-     * Speed a curve allows, as a fixed percentage of the design maximum
-     * [m/s]. While any carriage is on a turn the train is held to this, so it
-     * slows down entering a curve and only speeds up again once it is clear.
-     *
-     * @return the curve ceiling, or {@link Double#MAX_VALUE} when curve limits
-     *         are disabled (so callers can simply {@code min} against it)
-     */
-    public static double curveSpeedLimit() {
-        if (!CEEConfigs.server().trainValues.electricTrainCurveSpeedLimit.get())
-            return Double.MAX_VALUE;
-        double pct = CEEConfigs.server().trainValues.electricTrainCurveSpeedPercent.get();
-        double clamped = Math.max(0d, Math.min(1d, pct / 100d));
-        return designMaxSpeed() * clamped;
-    }
-
-    /**
-     * Fraction of its rated power a train may draw in a curve.
-     *
-     * <p>The train is already travelling slower, so it needs less power; cutting
-     * the traction as well represents easing off through the curve, and it means
-     * the electrical demand drops out of the curve as well as the speed.
-     */
-    public static double curvePowerScale() {
-        if (!CEEConfigs.server().trainValues.electricTrainCurveSpeedLimit.get())
-            return 1d;
-        double pct = CEEConfigs.server().trainValues.electricTrainCurvePowerPercent.get();
-        return Math.max(0d, Math.min(1d, pct / 100d));
-    }
 }

@@ -5,6 +5,7 @@ import com.george_vi.electroenergetics.CEEItems;
 import com.george_vi.electroenergetics.CEERegistries;
 import com.george_vi.electroenergetics.CreateElectroEnergetics;
 import com.george_vi.electroenergetics.client.ElectricPropertiesOverlay;
+import com.george_vi.electroenergetics.client.ElectricTrainHud;
 import com.george_vi.electroenergetics.content.accumulator.AccumulatorBlockEntity;
 import com.george_vi.electroenergetics.content.clamp_meter.ClampMeterRenderer;
 import com.george_vi.electroenergetics.content.connector.ConnectorBlock;
@@ -134,6 +135,8 @@ public class ModEvents {
     @SubscribeEvent
     public static void registerGuiOverlays(RegisterGuiLayersEvent event) {
         event.registerAbove(VanillaGuiLayers.CROSSHAIR, CreateElectroEnergetics.rl("electric_properties_overlay"), ElectricPropertiesOverlay.INSTANCE);
+        // Above the hotbar, so it clears Create's own train HUD (experience bar).
+        event.registerAbove(VanillaGuiLayers.HOTBAR, CreateElectroEnergetics.rl("electric_train_hud"), ElectricTrainHud.INSTANCE);
     }
 
     @SubscribeEvent

@@ -29,8 +29,10 @@ public class ElectricTrainData {
 
     // Gradient along the direction of travel (rise / run). Positive = uphill.
     public double trackGrade = 0d;
-    // Whether the consist is currently on a curve, used to ease off traction.
-    public boolean inCurve = false;
+
+    // Electrical power actually being drawn by the traction [W]. Reported on
+    // the driver's HUD.
+    public double displayPower = 0d;
 
     public AttachedNode trainNode;
     public AttachedNode groundNode;

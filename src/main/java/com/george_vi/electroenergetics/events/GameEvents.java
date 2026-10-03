@@ -15,6 +15,7 @@ import com.george_vi.electroenergetics.content.fuse.BlownFuseTracker;
 import com.george_vi.electroenergetics.content.fuse.FuseBlockItem;
 import com.george_vi.electroenergetics.content.linemans_stick.LinemansStickClientHandler;
 import com.george_vi.electroenergetics.content.linemans_stick.LinemansStickItem;
+import com.george_vi.electroenergetics.content.railway_electrification.TrainHudData;
 import com.george_vi.electroenergetics.content.railway_electrification.gauges.ClientTrainGaugeData;
 import com.george_vi.electroenergetics.content.railway_electrification.sound_effects.ElectricTrainSounds;
 import com.george_vi.electroenergetics.content.wire.WireSync;
@@ -86,6 +87,9 @@ public class GameEvents {
         CEEHoldInteractionHandler.tick();
         ElectricTrainSounds.tick();
         ClientTrainGaugeData.tick();
+        // Drop HUD samples for trains that no longer exist on the client, so the
+        // cache cannot grow without bound over a long session.
+        TrainHudData.retain(id -> com.simibubi.create.CreateClient.RAILWAYS.trains.containsKey(id));
         LinemansStickClientHandler.tick();
         FuseBlockItem.tickClient();
         ElectricalPanelClientTicker.tick();

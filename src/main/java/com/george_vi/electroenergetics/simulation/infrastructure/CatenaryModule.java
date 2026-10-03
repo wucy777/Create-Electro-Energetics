@@ -18,7 +18,6 @@ import com.simibubi.create.Create;
 import com.simibubi.create.content.trains.entity.Carriage;
 import com.simibubi.create.content.trains.entity.CarriageContraptionEntity;
 import com.simibubi.create.content.trains.entity.Train;
-import com.simibubi.create.content.trains.entity.TravellingPoint;
 import net.createmod.catnip.math.VecHelper;
 import net.createmod.catnip.platform.CatnipServices;
 import net.minecraft.core.BlockPos;
@@ -215,10 +214,6 @@ public class CatenaryModule {
                             : trainData.lastVoltage);
             double powerScale = TrainTractionModel.powerScaleForVoltage(tractionVoltage);
 
-            // Ease off while in a curve, so the electrical demand drops there too.
-            if (isInCurve(train))
-                powerScale *= TrainTractionModel.curvePowerScale();
-
             // Gradient along the direction of travel, taken from the consist's
             // own geometry: the rise between its leading and trailing anchors
             // divided by their horizontal run.
@@ -231,6 +226,7 @@ public class CatenaryModule {
             // Guard against a non-finite demand producing a broken resistance.
             if (!(electricalPower > 0d) || Double.isNaN(electricalPower))
                 electricalPower = TrainTractionModel.MIN_DEMAND;
+            trainData.displayPower = electricalPower;
             double trainResistance = lastVoltage * lastVoltage / electricalPower;
 
             builder.connect(groundNode, trainNode, ElectricalProperties.resistor(trainResistance));
@@ -295,31 +291,10 @@ public class CatenaryModule {
             // Store total current for ammeter displays on train contraptions
             trainData.displayCurrent = totalCurrent;
 
-            // Sync voltage and current to clients for gauge displays (with throttling to reduce network traffic)
-            // Only send when values change significantly or every 5 ticks minimum
-            trainData.ticksSinceGaugeSync++;
-            boolean significantVoltageChange = Math.abs(voltage - trainData.lastSyncedVoltage) > Math.max(voltage, trainData.lastSyncedVoltage) * GAUGE_SYNC_THRESHOLD;
-            boolean significantCurrentChange = Math.abs(totalCurrent - trainData.lastSyncedCurrent) > Math.max(totalCurrent, trainData.lastSyncedCurrent) * GAUGE_SYNC_THRESHOLD;
-            boolean shouldSync = trainData.ticksSinceGaugeSync >= 5 || significantVoltageChange || significantCurrentChange;
-
-            if (shouldSync && !train.carriages.isEmpty()) {
-                Carriage.DimensionalCarriageEntity firstCarriage = train.carriages.getFirst().getDimensionalIfPresent(level.dimension());
-                if (firstCarriage != null && firstCarriage.entity != null) {
-                    CarriageContraptionEntity entity = firstCarriage.entity.get();
-                    if (entity != null) {
-                        Vec3 trainPos = entity.position();
-                        CatnipServices.NETWORK.sendToClientsAround(
-                            level,
-                            trainPos,
-                            100,
-                            new SyncTrainGaugeDataPacket(train.id, voltage, totalCurrent)
-                        );
-                        trainData.lastSyncedVoltage = voltage;
-                        trainData.lastSyncedCurrent = totalCurrent;
-                        trainData.ticksSinceGaugeSync = 0;
-                    }
-                }
-            }
+            // The gauge/HUD sync happens further down, once the traction values
+            // for this tick have been worked out -- the driver's HUD needs the
+            // modelled speed ceiling, power and gradient as well, and those are
+            // only known after the solve.
 
             if (!active) {
                 if (trainData.accumulatorCharge > 0) {
@@ -389,15 +364,6 @@ public class CatenaryModule {
 
             trainData.trackGrade = grade;
 
-            // While any carriage is on a turn, ease off a fixed percentage of the
-            // traction. The speed side of the curve penalty is applied in
-            // maxTurnSpeed(), which Create evaluates with look-ahead so the train
-            // brakes before the curve rather than inside it.
-            boolean inCurve = active && isInCurve(train);
-            trainData.inCurve = inCurve;
-            if (inCurve)
-                powerScale *= TrainTractionModel.curvePowerScale();
-
             if (active) {
                 // Speed the traction can sustain against resistance and gradient.
                 trainData.maxSpeed = (float) TrainTractionModel.maxSustainableSpeed(
@@ -407,7 +373,43 @@ public class CatenaryModule {
                 trainData.availableAcceleration = (float) TrainTractionModel.availableAcceleration(
                         trainSpeedMs, grade, carriages, powerScale);
             } else {
+                // No traction with no supply. The ceiling still has to be a sane
+                // non-zero number though: the client divides speed by it to size
+                // the speed bar, so leaving 0 here would make that readout vanish.
+                trainData.maxSpeed = (float) TrainTractionModel.designMaxSpeed();
                 trainData.availableAcceleration = 0f;
+            }
+
+            // Sync to clients for the gauges and the driver's HUD, now that this
+            // tick's traction values are known. Throttled: only when something
+            // moved appreciably, or every few ticks as a keep-alive.
+            trainData.ticksSinceGaugeSync++;
+            boolean significantVoltageChange = Math.abs(voltage - trainData.lastSyncedVoltage)
+                    > Math.max(voltage, trainData.lastSyncedVoltage) * GAUGE_SYNC_THRESHOLD;
+            boolean significantCurrentChange = Math.abs(totalCurrent - trainData.lastSyncedCurrent)
+                    > Math.max(totalCurrent, trainData.lastSyncedCurrent) * GAUGE_SYNC_THRESHOLD;
+            boolean shouldSync = trainData.ticksSinceGaugeSync >= 5
+                    || significantVoltageChange || significantCurrentChange;
+
+            if (shouldSync && !train.carriages.isEmpty()) {
+                Carriage.DimensionalCarriageEntity firstCarriage =
+                        train.carriages.getFirst().getDimensionalIfPresent(level.dimension());
+                if (firstCarriage != null && firstCarriage.entity != null) {
+                    CarriageContraptionEntity entity = firstCarriage.entity.get();
+                    if (entity != null) {
+                        CatnipServices.NETWORK.sendToClientsAround(
+                                level,
+                                entity.position(),
+                                100,
+                                new SyncTrainGaugeDataPacket(train.id, voltage, totalCurrent,
+                                        trainData.maxSpeed, (float) trainData.displayPower,
+                                        grade, active)
+                        );
+                        trainData.lastSyncedVoltage = voltage;
+                        trainData.lastSyncedCurrent = totalCurrent;
+                        trainData.ticksSinceGaugeSync = 0;
+                    }
+                }
             }
 
         }
@@ -416,28 +418,6 @@ public class CatenaryModule {
     /** Voltage the catenary is nominally at; used for creative-supply trains. */
     private static double maxVoltageForTraction() {
         return CEEConfigs.server().voltageValues.trainMaxVoltage.get();
-    }
-
-    /**
-     * Whether any carriage of the consist is currently on a turn.
-     *
-     * <p>Uses Create's own curve flag on the leading and trailing travelling
-     * points, which is the same test Create applies when driving a train
-     * manually, so a train slows for exactly the curves the game considers
-     * curves.
-     */
-    private static boolean isInCurve(Train train) {
-        if (!CEEConfigs.server().trainValues.electricTrainCurveSpeedLimit.get())
-            return false;
-        for (Carriage carriage : train.carriages) {
-            TravellingPoint leading = carriage.getLeadingPoint();
-            if (leading != null && leading.edge != null && leading.edge.isTurn())
-                return true;
-            TravellingPoint trailing = carriage.getTrailingPoint();
-            if (trailing != null && trailing.edge != null && trailing.edge.isTurn())
-                return true;
-        }
-        return false;
     }
 
     /**
