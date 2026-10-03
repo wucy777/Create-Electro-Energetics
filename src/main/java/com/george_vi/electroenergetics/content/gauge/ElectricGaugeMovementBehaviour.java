@@ -2,6 +2,7 @@ package com.george_vi.electroenergetics.content.gauge;
 
 import com.george_vi.electroenergetics.config.CEEConfigs;
 import com.george_vi.electroenergetics.content.railway_electrification.ElectricTrainData;
+import com.george_vi.electroenergetics.content.railway_electrification.TrainTractionModel;
 import com.george_vi.electroenergetics.content.railway_electrification.gauges.ClientTrainGaugeData;
 import com.george_vi.electroenergetics.mixin_interfaces.ICEETrainExtension;
 import com.mojang.blaze3d.vertex.PoseStack;
@@ -34,6 +35,20 @@ public class ElectricGaugeMovementBehaviour implements MovementBehaviour {
 
     public ElectricGaugeMovementBehaviour(boolean voltmeter) {
         this.voltmeter = voltmeter;
+    }
+
+    /**
+     * Rated electrical power of the consist this gauge is attached to, used to
+     * scale the ammeter dial. Falls back to a single carriage when the train
+     * cannot be resolved.
+     */
+    private static double ratedPowerOf(MovementContext context) {
+        if (context.contraption.entity instanceof CarriageContraptionEntity carriageEntity) {
+            var carriage = carriageEntity.getCarriage();
+            if (carriage != null && carriage.train != null)
+                return TrainTractionModel.ratedElectricalPower(carriage.train.carriages.size());
+        }
+        return TrainTractionModel.ratedElectricalPower(1);
     }
 
     @Override
@@ -74,13 +89,10 @@ public class ElectricGaugeMovementBehaviour implements MovementBehaviour {
             double maxVoltage = CEEConfigs.server().voltageValues.trainMaxVoltage.get();
             dialTarget = (float) Mth.clamp((voltage - minVoltage) / (maxVoltage - minVoltage), 0, 1);
         } else {
-            // Scale from 0 to maximum theoretical current
-            // Max current = Max Power / Min voltage
+            // Scale from 0 to the consist's rated current.
+            // Max current = rated power / min voltage
             double minVoltage = CEEConfigs.server().voltageValues.trainMinVoltage.get();
-            double maxPower = Math.max(
-                CEEConfigs.server().resistanceValues.electricTrainAccelerationPowerConsumption.get(),
-                CEEConfigs.server().resistanceValues.electricTrainCruisePowerConsumption.get()
-            );
+            double maxPower = ratedPowerOf(context);
             double maxCurrent = maxPower / minVoltage;
             dialTarget = (float) Mth.clamp(current / maxCurrent, 0, 1);
         }

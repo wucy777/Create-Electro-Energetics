@@ -3,6 +3,7 @@ package com.george_vi.electroenergetics.simulation.infrastructure;
 import com.george_vi.electroenergetics.CEERegistries;
 import com.george_vi.electroenergetics.config.CEEConfigs;
 import com.george_vi.electroenergetics.content.railway_electrification.ElectricTrainData;
+import com.george_vi.electroenergetics.content.railway_electrification.TrainTractionModel;
 import com.george_vi.electroenergetics.content.railway_electrification.gauges.SyncTrainGaugeDataPacket;
 import com.george_vi.electroenergetics.content.railway_electrification.pantograph.TrainPantographEntry;
 import com.george_vi.electroenergetics.content.railway_electrification.sound_effects.UpdateElectricTrainSoundPacket;
@@ -198,29 +199,33 @@ public class CatenaryModule {
 
             double trainSpeedMs = Math.abs(train.speed) * 20d;
             double accelerationMs2 = acceleration * 400d;
-            double massKg = Math.max(1d, train.carriages.size()) * CEEConfigs.server().resistanceValues.electricTrainMassPerCarriage.get();
+            int carriages = Math.max(1, train.carriages.size());
 
-            double basicResistance = (
-                    CEEConfigs.server().resistanceValues.electricTrainBasicResistanceA.get()
-                            + CEEConfigs.server().resistanceValues.electricTrainBasicResistanceB.get() * trainSpeedMs
-                            + CEEConfigs.server().resistanceValues.electricTrainBasicResistanceC.get() * trainSpeedMs * trainSpeedMs
-            ) * massKg * 9.81d * 1e-3;
-
-            double accelerationForce = (1d + CEEConfigs.server().resistanceValues.electricTrainRotatingMassFactor.get()) * massKg * accelerationMs2;
-            double gradeForce = 0d; // Level track by default; gradient support can be added when track slope data is available.
-            double totalForce = basicResistance + accelerationForce + gradeForce;
-
-            // P = F * v, adjusted by the configured efficiency, auxiliary load, and design margin.
-            // Regen braking is not modeled here, so avoid negative/zero resistances.
-            double electricalPower = 0.1d;
-            if (totalForce > 0d) {
-                double effectiveSpeedMs = Math.max(trainSpeedMs, 1d);
-                double tractionScale = Math.max(CEEConfigs.server().resistanceValues.electricTrainDriveEfficiency.get()
-                        * CEEConfigs.server().resistanceValues.electricTrainAuxiliaryLoadFactor.get(), 1e-6d);
-                electricalPower = totalForce * effectiveSpeedMs * CEEConfigs.server().resistanceValues.electricTrainMarginFactor.get() / tractionScale;
-            }
-
+            // How much of its rating this train may draw. A stiff supply gives a
+            // full 1.0; when several trains share one catenary the terminal
+            // voltage sags and each of them gets less, so they share the power
+            // instead of melting the wire together. With no catenary contact
+            // the accumulator voltage is what limits the traction.
             double lastVoltage = Math.abs(trainData.lastVoltage) < 1 ? 3000 : trainData.lastVoltage;
+            double tractionVoltage = trainData.hasCreativeSource
+                    ? maxVoltageForTraction()
+                    : (Math.abs(trainData.lastVoltage) < 1
+                            ? Math.max(trainData.accumulatorActualVoltage, trainData.accumulatorChargeVoltage)
+                            : trainData.lastVoltage);
+            double powerScale = TrainTractionModel.powerScaleForVoltage(tractionVoltage);
+
+            // Gradient along the direction of travel, taken from the consist's
+            // own geometry: the rise between its leading and trailing anchors
+            // divided by their horizontal run.
+            double grade = trainGrade(train);
+
+            // Electrical demand for the current mechanical situation.
+            double electricalPower = TrainTractionModel.electricalDemand(
+                    trainSpeedMs, accelerationMs2, grade, carriages, powerScale);
+
+            // Guard against a non-finite demand producing a broken resistance.
+            if (!(electricalPower > 0d) || Double.isNaN(electricalPower))
+                electricalPower = TrainTractionModel.MIN_DEMAND;
             double trainResistance = lastVoltage * lastVoltage / electricalPower;
 
             builder.connect(groundNode, trainNode, ElectricalProperties.resistor(trainResistance));
@@ -366,28 +371,88 @@ public class CatenaryModule {
             }
             trainData.isPowered = active;
 
+            // Gradient and supply share for this tick. These are recomputed here
+            // rather than reused from buildCircuit because the terminal voltage
+            // is only known now, after the solve.
+            int carriages = Math.max(1, train.carriages.size());
+            double trainSpeedMs = trainSpeed * 20d;
+            double grade = trainGrade(train);
+            double tractionVoltage = trainData.hasCreativeSource
+                    ? maxVoltageForTraction()
+                    : (voltage > 0 ? voltage : trainData.accumulatorActualVoltage);
+            double powerScale = TrainTractionModel.powerScaleForVoltage(tractionVoltage);
+
+            trainData.trackGrade = grade;
+
             if (active) {
-                float minSpeed = CEEConfigs.server().trainValues.electricTrainMinSpeed.getF();
-                float maxSpeed = CEEConfigs.server().trainValues.electricTrainMaxSpeed.getF();
+                // Curve limit from the yaw rate of the leading carriage.
+                trainData.curveSpeed = (float) currentCurveLimit(train, trainData, trainSpeedMs);
 
-                int minVoltage = CEEConfigs.server().voltageValues.trainMinVoltage.get();
-                int maxVoltage = CEEConfigs.server().voltageValues.trainMaxVoltage.get();
-
-                float multiplier = (float) ((voltage == 0 ? trainData.accumulatorActualVoltage : voltage) - minVoltage) / (maxVoltage - minVoltage);
-
-                if (multiplier > 1) {
-                    multiplier = 1;
-                }
-
-                if (multiplier <= 0) {
-                    trainData.maxSpeed = 0;
-                    trainData.isPowered = false;
-                } else {
-                    trainData.maxSpeed = minSpeed + (maxSpeed - minSpeed) * multiplier;
-                }
+                // Speed the traction can sustain against resistance and gradient.
+                trainData.maxSpeed = (float) TrainTractionModel.maxSustainableSpeed(
+                        grade, carriages, powerScale);
+            } else {
+                trainData.curveSpeed = Float.MAX_VALUE;
             }
 
         }
+    }
+
+    /** Voltage the catenary is nominally at; used for creative-supply trains. */
+    private static double maxVoltageForTraction() {
+        return CEEConfigs.server().voltageValues.trainMaxVoltage.get();
+    }
+
+    /**
+     * Rise over run along the consist, from the leading and trailing anchors of
+     * its carriages. Positive means the train is climbing.
+     */
+    private double trainGrade(Train train) {
+        double rise = 0d;
+        double run = 0d;
+        for (Carriage carriage : train.carriages) {
+            Carriage.DimensionalCarriageEntity dce = carriage.getDimensionalIfPresent(level.dimension());
+            if (dce == null || dce.rotationAnchors == null)
+                continue;
+            Vec3 leading = dce.rotationAnchors.getFirst();
+            Vec3 trailing = dce.rotationAnchors.getSecond();
+            if (leading == null || trailing == null)
+                continue;
+            rise += leading.y - trailing.y;
+            double dx = leading.x - trailing.x;
+            double dz = leading.z - trailing.z;
+            run += Math.sqrt(dx * dx + dz * dz);
+        }
+        if (run < 1e-4d)
+            return 0d;
+        return rise / run;
+    }
+
+    /**
+     * Speed limit imposed by the sharpest curve the consist is currently on,
+     * derived from the yaw rate of its leading carriage.
+     */
+    private double currentCurveLimit(Train train, ElectricTrainData trainData, double speed) {
+        if (train.carriages.isEmpty())
+            return Double.MAX_VALUE;
+
+        Carriage first = train.carriages.getFirst();
+        Carriage.DimensionalCarriageEntity dce = first.getDimensionalIfPresent(level.dimension());
+        if (dce == null || dce.entity == null)
+            return Double.MAX_VALUE;
+        CarriageContraptionEntity entity = dce.entity.get();
+        if (entity == null)
+            return Double.MAX_VALUE;
+
+        float yaw = entity.yaw;
+        float previous = trainData.lastYaw;
+        trainData.lastYaw = yaw;
+        if (Float.isNaN(previous))
+            return Double.MAX_VALUE;
+
+        double yawRate = TrainTractionModel.normalizeDegrees(yaw - previous);
+        double radius = TrainTractionModel.radiusFromYawRate(yawRate, speed);
+        return TrainTractionModel.curveSpeedLimit(radius);
     }
 
     private static Vec3 pantographSparkPosition(ServerLevel level, Train train, TrainPantographEntry pantograph, double current) {
