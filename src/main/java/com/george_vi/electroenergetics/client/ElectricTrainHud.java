@@ -116,11 +116,13 @@ public class ElectricTrainHud implements LayeredDraw.Layer {
         // formatted. This renderer runs every frame, and String.format is not
         // cheap, so rebuilding only when a visible digit changes keeps the panel
         // off the frame budget.
-        int speedI = Math.round(shownSpeed);
-        int capI = Math.round(shownMaxSpeed);
-        int throttleI = Math.round(train.throttle * 100f);
-        int powerKwI = Math.round(shownPower / 1000f);
-        int deciVoltI = Math.round(sample.voltage() / 100f);   // 0.1 kV steps
+        // Math.round(float) widens to double and returns a long, so each of these
+        // is narrowed back explicitly.
+        int speedI = (int) Math.round(shownSpeed);
+        int capI = (int) Math.round(shownMaxSpeed);
+        int throttleI = (int) Math.round(train.throttle * 100f);
+        int powerKwI = (int) Math.round(shownPower / 1000f);
+        int deciVoltI = (int) Math.round(sample.voltage() / 100f);   // 0.1 kV steps
         int cars = sample.carriages() > 0 ? sample.carriages()
                 : Math.max(1, train.carriages.size());
         int motorsI = sample.motorCars();

@@ -412,7 +412,7 @@ public class CatenaryModule {
                                 new SyncTrainGaugeDataPacket(train.id, voltage, totalCurrent,
                                         trainData.maxSpeed, (float) trainData.displayPower,
                                         grade, active, carriages, motorCars,
-                                        CEEConfigs.server().trainValues
+                                        (float) CEEConfigs.server().trainValues
                                                 .electricTrainPowerPerCarriage.get())
                         );
                         trainData.lastSyncedVoltage = voltage;

@@ -1,6 +1,6 @@
-package com.george_vi.electroenergetics.config;
+﻿package com.george_vi.electroenergetics.config;
 
-import com.george_vi.electroenergetics.CreateElectroEnergetics;
+import com.mojang.logging.LogUtils;
 import net.createmod.catnip.config.ConfigBase;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.ModContainer;
@@ -9,12 +9,15 @@ import net.neoforged.fml.config.ModConfig;
 import net.neoforged.fml.event.config.ModConfigEvent;
 import net.neoforged.neoforge.common.ModConfigSpec;
 import org.apache.commons.lang3.tuple.Pair;
+import org.slf4j.Logger;
 
 import java.util.EnumMap;
 import java.util.Map;
 import java.util.function.Supplier;
 
 public class CEEConfigs {
+
+    private static final Logger LOGGER = LogUtils.getLogger();
 
     private static final Map<ModConfig.Type, ConfigBase> CONFIGS = new EnumMap<>(ModConfig.Type.class);
 
@@ -97,7 +100,8 @@ public class CEEConfigs {
         double gamma = res.electricTrainRotatingMassFactor.get();
         double aeroC = res.electricTrainBasicResistanceC.get();
 
-        LOGGER.info("Traction settings: vMax={} m/s, {} W/carriage, aMax={} m/s^2, "
+        LOGGER.info(
+                "Traction settings: vMax={} m/s, {} W/carriage, aMax={} m/s^2, "
                         + "gamma={}, aeroC={}, mass={} kg/carriage, copper={} ohm/m",
                 maxSpeed, perCarriage, accel, gamma, aeroC,
                 res.electricTrainMassPerCarriage.get(), res.copperWireResistance.get());
@@ -117,7 +121,8 @@ public class CEEConfigs {
         float scale = Math.max(Math.abs(current), 1e-6f);
         if (Math.abs(actual - current) <= scale * 1e-4f)
             return;
-        LOGGER.warn("Config key '{}' is set to {}, but this version expects {}. "
+        LOGGER.warn(
+                "Config key '{}' is set to {}, but this version expects {}. "
                         + "An older build wrote that value and NeoForge will not overwrite it; "
                         + "delete the line (or the file) to pick up the new default.",
                 key, actual, current);
