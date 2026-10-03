@@ -18,7 +18,18 @@ public class ElectricTrainData {
     public double lastVoltage = 0d;
 
     public double lastSpeed;
+
+    // Speed the traction model can currently sustain, in Blocks/Second.
+    // Already accounts for running resistance, gradient and the supply.
     public float maxSpeed;
+
+    // Gradient along the direction of travel (rise / run). Positive = uphill.
+    public double trackGrade = 0d;
+    // Curve-limited speed from the lateral acceleration limit, in Blocks/Second.
+    public float curveSpeed = Float.MAX_VALUE;
+    // Yaw of the leading carriage last tick, used to measure the yaw rate in curves.
+    public float lastYaw = Float.NaN;
+
     public AttachedNode trainNode;
     public AttachedNode groundNode;
     public WireSimulationState connectedWireState;

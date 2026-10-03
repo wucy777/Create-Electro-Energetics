@@ -99,7 +99,20 @@ public class TrainMixin implements ICEETrainExtension {
         ElectricTrainData electricTrainData = electroenergetics$electricTrainData;
 
         if (electricTrainData.isPowered) {
-            return electricTrainData.maxSpeed / 20;
+            // maxSpeed is in Blocks/Second, maxSpeed() must return Blocks/Tick.
+            return Math.min(electricTrainData.maxSpeed, electricTrainData.curveSpeed) / 20f;
+        }
+        return original.call();
+    }
+
+    @WrapMethod(method = "maxTurnSpeed")
+    public float electroEnergetics$maxTurnSpeed(Operation<Float> original) {
+        ElectricTrainData electricTrainData = electroenergetics$electricTrainData;
+
+        if (electricTrainData.isPowered) {
+            // Curves are already handled continuously through the lateral
+            // acceleration limit, so do not stack Create's flat turn penalty on top.
+            return Math.min(electricTrainData.maxSpeed, electricTrainData.curveSpeed) / 20f;
         }
         return original.call();
     }
@@ -109,7 +122,13 @@ public class TrainMixin implements ICEETrainExtension {
         ElectricTrainData electricTrainData = electroenergetics$electricTrainData;
 
         if (electricTrainData.isPowered) {
-            return CEEConfigs.server().trainValues.electricTrainAcceleration.getF() / 400;
+            // NOTE: Create uses acceleration() for TWO things: ramping speed in
+            // approachTargetSpeed(), and computing braking distance as
+            // speed^2 / (2 * acceleration()). It must therefore stay a sane
+            // constant. The constant-power taper is expressed through the
+            // sustainable speed returned by maxSpeed() instead, which keeps
+            // station braking intact.
+            return CEEConfigs.server().trainValues.electricTrainMaxAcceleration.getF() / 400f;
         }
         return original.call();
     }
