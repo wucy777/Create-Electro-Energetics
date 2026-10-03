@@ -64,14 +64,12 @@ public class WireLifetimeModule {
             }
 
             float temp = connectionData.wireData.temperature;
-            // The heater's input is the current, clamped. That clamp is the reason
-            // a wire's rating cannot be arbitrarily high: at equilibrium
-            // T = 1000*(min(I, clamp)/33.3 - 1), so a maxTemperature above
-            // 1000*(clamp/33.3 - 1) is unreachable and the wire could never burn.
-            // The default keeps every wire that shipped before this change exactly
-            // as it was; raise maxWireCurrent to let a heavy conductor reach the
-            // ampacity its cross-section really allows.
-            float newTemp = (float) Math.min(current, CEEConfigs.server().maxWireCurrent.get());
+            // The heater reacts to current only up to a fixed cap; nothing above it
+            // is distinguishable from it. At equilibrium
+            // T = 1000*(min(I, cap)/33.3 - 1), so this bounds every wire's usable
+            // rating - see WireType.HEATING_CURRENT_CAP, which also derives the trip
+            // temperature for a wire rated at exactly the cap.
+            float newTemp = (float) Math.min(current, WireType.HEATING_CURRENT_CAP);
             newTemp *= Math.min(temp < 0 ? 0 : 1 / (1 + (temp / 1000)), 1);
             newTemp = Math.max(temp - 33.3f + newTemp, 0);
             connectionData.wireData.temperature = newTemp;

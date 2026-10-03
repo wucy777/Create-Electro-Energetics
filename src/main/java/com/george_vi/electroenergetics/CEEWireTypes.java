@@ -12,25 +12,24 @@ public class CEEWireTypes {
     /**
      * Nominal ampacity of the copper conductor every copper wire shares.
      *
-     * <p>This is a real rating, not the heater's ceiling: the trip temperature is
-     * derived from it, so the wire breaks just above 1000 A and the item tooltip
-     * reads exactly that. See {@link WireType#temperatureForAmpacity} for how the
-     * two are related, and the {@code maxWireCurrent} config for the separate
-     * clamp that used to make anything at or above this unreachable.
+     * <p>This is the full {@link WireType#HEATING_CURRENT_CAP}: copper is the
+     * reference metal, and the heater cannot tell anything above 1000 A apart from
+     * it anyway. The trip temperature is derived from this figure, so the wire
+     * breaks at its rating and the item tooltip reads exactly 1000 A.
      */
-    private static final double COPPER_AMPACITY = 1000d;
+    private static final double COPPER_AMPACITY = WireType.HEATING_CURRENT_CAP;
 
     private static final double COPPER_AMPACITY_TEMPERATURE =
             WireType.temperatureForAmpacity(COPPER_AMPACITY);
 
     /**
-     * Ampacity of a thin iron strand, the same gauge as the copper wire.
+     * Ampacity of a thin iron strand of the same gauge as the copper wire.
      *
      * <p>Iron is 5.78x more resistive than copper (9.71e-8 against 1.68e-8 ohm*m),
      * and because heating goes as {@code I^2 R} while the surface shedding that
      * heat does not change, the current that reaches the same temperature falls
-     * with the square root of the resistivity ratio: the copper wire's 999 A
-     * divided by sqrt(5.78) is about 415 A.
+     * with the square root of the resistivity ratio: 1000 A over sqrt(5.78) is
+     * about 415 A.
      */
     private static final double IRON_STRAND_AMPACITY = 415d;
 
@@ -133,7 +132,10 @@ public class CEEWireTypes {
             // Twice the linear gauge of the strand, i.e. four times the
             // cross-section: a quarter of the resistance and, for the same
             // temperature rise, 4^0.75 times the current (heat scales with I^2 R
-            // but the surface that sheds it only scales with the perimeter).
+            // but the surface that sheds it only scales with the perimeter). That
+            // works out to ~1174 A, above the 1000 A ceiling, so the rating is
+            // capped there and the extra cross-section pays off as lower losses
+            // instead of a higher rating.
             .maxTemperature(() -> WireType.temperatureForAmpacity(
                     IRON_STRAND_AMPACITY * Math.pow(4d, 0.75d)))
             .maxLength(CEEConfigs.server().maxBusWireLength::get)
@@ -164,7 +166,10 @@ public class CEEWireTypes {
             .spoolItem(CEEItems.IRON_RAIL_SPOOL::get)
             // Four times the linear gauge of the strand, i.e. sixteen times the
             // cross-section - a contact rail. Sixteenth of the resistance, and
-            // 16^0.75 times the current for the same temperature rise.
+            // 16^0.75 times the current for the same temperature rise, which would
+            // be ~3320 A. That is far above the 1000 A ceiling, so like the bus it
+            // is capped there and its size shows up as lower losses rather than a
+            // higher rating.
             .maxTemperature(() -> WireType.temperatureForAmpacity(
                     IRON_STRAND_AMPACITY * Math.pow(16d, 0.75d)))
             .maxLength(CEEConfigs.server().maxBusWireLength::get)

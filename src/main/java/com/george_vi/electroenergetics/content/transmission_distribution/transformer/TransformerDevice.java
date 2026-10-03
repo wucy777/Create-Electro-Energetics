@@ -1,23 +1,26 @@
 package com.george_vi.electroenergetics.content.transmission_distribution.transformer;
 
-import com.george_vi.electroenergetics.config.CEEConfigs;
 import com.george_vi.electroenergetics.devices.device.DevicesSavedData;
 import com.george_vi.electroenergetics.devices.device.SimulatedDeviceType;
 import com.george_vi.electroenergetics.foundation.device.SimpleElectricalDevice;
-import com.george_vi.electroenergetics.foundation.device.SimpleTempHandler;
 import com.george_vi.electroenergetics.simulation.BridgeCollector;
 import com.george_vi.electroenergetics.simulation.SimulationResults;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.level.Level;
 
-public class TransformerDevice extends SimpleElectricalDevice implements SimpleTempHandler {
+/**
+ * The plain transformer. It has no power rating and cannot overheat: the winding
+ * ratio alone decides what it does, and how much power it passes is left entirely
+ * to the circuit around it. (The panel-mounted miniature transformer and the
+ * transformer core multiblock separately keep their own thermal ratings.)
+ */
+public class TransformerDevice extends SimpleElectricalDevice {
     public TransformerDevice(Level level, BlockPos pos, DevicesSavedData deviceSD, SimulatedDeviceType<?> type) {
         super(level, pos, deviceSD, type);
     }
 
     public TransformerBehaviour.TransformerBehaviourDataHolder transformerData;
-    public float temp;
     public double ratio;
     public TransformerBlockEntity be;
 
@@ -46,27 +49,18 @@ public class TransformerDevice extends SimpleElectricalDevice implements SimpleT
                 this.be.secondaryVoltage = this.transformerData.lastSecondaryVoltage;
             }
         }
-
-        temp = updateTemp(Math.abs(power), temp);
     }
 
     @Override
     public void read(CompoundTag tag) {
-        this.temp = tag.getFloat("Temp1");
         this.ratio = tag.getDouble("Ratio");
         this.transformerData = new TransformerBehaviour.TransformerBehaviourDataHolder(tag.getCompound("TransformerData"));
     }
 
     @Override
     public void write(CompoundTag tag) {
-        tag.putFloat("Temp1", this.temp);
         tag.putDouble("Ratio", this.ratio);
         tag.put("TransformerData", this.transformerData.write());
-    }
-
-    @Override
-    public double maxValue() {
-        return CEEConfigs.server().powerValues.transformerMaxPower.get();
     }
 }
 

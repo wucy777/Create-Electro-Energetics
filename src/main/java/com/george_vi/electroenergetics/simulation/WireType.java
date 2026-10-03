@@ -27,6 +27,28 @@ public class WireType {
     private static final double HEATING_HALF_POINT = 1000d;
 
     /**
+     * The largest current, in Amps, the heating model reacts to: {@code
+     * WireLifetimeModule} feeds the heater {@code min(I, this)}.
+     *
+     * <p>This is a hard ceiling on every conductor in the mod, and it is not a
+     * property of any metal - it is where the model stops looking. Nothing above it
+     * is distinguishable from it, so no wire is ever rated above it.
+     */
+    public static final double HEATING_CURRENT_CAP = 1000d;
+
+    /**
+     * Trip temperature used for a wire rated at the full {@link #HEATING_CURRENT_CAP}.
+     *
+     * <p>The equilibrium current {@code HEATING_CURRENT_CAP} corresponds to is
+     * {@code 1000*(1000/33.3 - 1)}, i.e. about 29030.03. A wire sitting exactly on
+     * that value approaches it without ever arriving, so it would never break at
+     * all. This stays a little under the asymptote, which is reached after about
+     * 4.5 minutes at the full 1000 A - and, because the input is clamped, after the
+     * same 4.5 minutes at any current above that.
+     */
+    private static final double CAP_TRIP_TEMPERATURE = 29000d;
+
+    /**
      * The temperature a wire rated for the given current settles at, in the
      * heater's abstract units.
      *
@@ -34,24 +56,28 @@ public class WireType {
      * is where the cooling term equals the self-limited input, i.e.
      * {@code 33.3 = I / (1 + T/1000)}, which rearranges to the expression below.
      * Pass the result to {@code maxTemperature} to get a wire that burns at
-     * exactly {@code amps}.
+     * {@code amps}.
      *
-     * <p>Note that the heater clamps its input current to the {@code maxWireCurrent}
-     * config. A wire whose rating exceeds that clamp can never reach the
-     * temperature this computes, so it would never burn - raise the config, or the
-     * rating is a lie.
+     * <p>Ratings are clamped to {@link #HEATING_CURRENT_CAP}: a heavy conductor
+     * whose cross-section would allow more still stops at the cap, and gets
+     * {@link #CAP_TRIP_TEMPERATURE} rather than an unreachable number. Such a
+     * conductor is not pointless - its lower resistance still means lower losses.
      */
     public static double temperatureForAmpacity(double amps) {
+        if (amps >= HEATING_CURRENT_CAP)
+            return CAP_TRIP_TEMPERATURE;
         return HEATING_HALF_POINT * (amps / HEATING_COOLING_PER_TICK - 1d);
     }
 
     /**
-     * The current at which a wire with the given {@code maxTemperature} burns, in
-     * amps. The exact inverse of {@link #temperatureForAmpacity}, and the number
-     * the item tooltips should show so they cannot drift from when a wire actually
-     * breaks.
+     * The current a wire with the given {@code maxTemperature} burns at, in amps -
+     * the number the item tooltips show. Exact inverse of
+     * {@link #temperatureForAmpacity}, saturating at {@link #HEATING_CURRENT_CAP}
+     * over the same boundary, so a tooltip and the heater cannot disagree.
      */
     public static double ampacityForTemperature(double maxTemperature) {
+        if (maxTemperature >= CAP_TRIP_TEMPERATURE)
+            return HEATING_CURRENT_CAP;
         return HEATING_COOLING_PER_TICK * (1d + maxTemperature / HEATING_HALF_POINT);
     }
 
@@ -69,7 +95,7 @@ public class WireType {
      * When a current is going through a wire, it raises temperature. It eventually settles into a temperature,
      * the temperature that it stops heating up is dependent on the current.
      * these are temperature values, that the wire settles into, and the currents needed for that.
-     * The current is capped to the {@code maxWireCurrent} config (4000A by default). Here are a few samples from the function.
+     * The current is capped to {@link #HEATING_CURRENT_CAP} (1000A). Here are a few samples from the function.
      * 14000 -> ~ 500A
      * 10000 -> ~ 366A
      * 7500  -> ~ 280A
