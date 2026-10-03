@@ -391,8 +391,13 @@ public class CatenaryModule {
                 // Speed the traction can sustain against resistance and gradient.
                 trainData.maxSpeed = (float) TrainTractionModel.maxSustainableSpeed(
                         grade, carriages, powerScale);
+
+                // Acceleration the motors can currently deliver; tapers with speed.
+                trainData.availableAcceleration = (float) TrainTractionModel.availableAcceleration(
+                        trainSpeedMs, grade, carriages, powerScale);
             } else {
                 trainData.curveSpeed = Float.MAX_VALUE;
+                trainData.availableAcceleration = 0f;
             }
 
         }

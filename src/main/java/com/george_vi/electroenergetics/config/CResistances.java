@@ -10,9 +10,9 @@ public class CResistances extends ConfigBase {
     public final ConfigDouble resistiveHeaterResistance = d(45d, 0.1d, "resistiveHeaterResistance", "[in Ohms]");
     public final ConfigDouble electricTrainDriveEfficiency = d(0.9d, 0.01d, "electricTrainDriveEfficiency", "Drive efficiency η used by the train traction model.");
     public final ConfigDouble electricTrainRotatingMassFactor = d(0.06d, 0d, "electricTrainRotatingMassFactor", "Rotating-mass factor γ; adds to the effective mass during acceleration. Typical 0.06 for a multiple unit.");
-    public final ConfigDouble electricTrainBasicResistanceA = d(1.0d, 0d, "electricTrainBasicResistanceA", "Davis running-resistance coefficient A, the constant term.");
-    public final ConfigDouble electricTrainBasicResistanceB = d(0.02d, 0d, "electricTrainBasicResistanceB", "Davis running-resistance coefficient B, linear in speed [per m/s].");
-    public final ConfigDouble electricTrainBasicResistanceC = d(0.0005d, 0d, "electricTrainBasicResistanceC", "Davis running-resistance coefficient C, quadratic in speed (aerodynamic) [per (m/s)^2].");
+    public final ConfigDouble electricTrainBasicResistanceA = d(1.0d, 0d, "electricTrainBasicResistanceA", "Davis running-resistance coefficient A, the constant (rolling) term.");
+    public final ConfigDouble electricTrainBasicResistanceB = d(0.02d, 0d, "electricTrainBasicResistanceB", "Davis running-resistance coefficient B, linear in speed (mechanical losses) [per m/s].");
+    public final ConfigDouble electricTrainBasicResistanceC = d(0.0014d, 0d, "electricTrainBasicResistanceC", "Davis running-resistance coefficient C, the aerodynamic term proportional to speed squared. 0.0014 corresponds to a drag area of about 9 m^2 for a 400 t consist. [per (m/s)^2]");
     public final ConfigDouble electricTrainAuxiliaryLoadFactor = d(1.0d, 0.01d, "electricTrainAuxiliaryLoadFactor", "Auxiliary load factor K_aux for lights, HVAC and controls; divides the useful traction force.");
     public final ConfigDouble electricTrainMarginFactor = d(1.0d, 0.01d, "electricTrainMarginFactor", "Design margin factor K_margin applied on top of the demanded power.");
     public final ConfigDouble electricTrainMassPerCarriage = d(50_000d, 1d, "electricTrainMassPerCarriage", "Train mass per carriage, loaded [in kg].");
