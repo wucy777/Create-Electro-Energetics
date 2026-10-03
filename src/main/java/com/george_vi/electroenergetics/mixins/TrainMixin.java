@@ -4,6 +4,7 @@ import com.george_vi.electroenergetics.CEEElectricTrainSoundTypes;
 import com.george_vi.electroenergetics.CEERegistries;
 import com.george_vi.electroenergetics.config.CEEConfigs;
 import com.george_vi.electroenergetics.content.railway_electrification.ElectricTrainData;
+import com.george_vi.electroenergetics.content.railway_electrification.TrainTractionModel;
 import com.george_vi.electroenergetics.content.railway_electrification.sound_effects.TrainSoundModifier;
 import com.george_vi.electroenergetics.content.railway_electrification.sound_effects.sound_types.ElectricTrainSoundType;
 import com.george_vi.electroenergetics.mixin_interfaces.ICEETrainExtension;
@@ -100,20 +101,34 @@ public class TrainMixin implements ICEETrainExtension {
         ElectricTrainData electricTrainData = electroenergetics$electricTrainData;
 
         if (electricTrainData.isPowered) {
+            // Only the traction/gradient ceiling here. Curves are handled in
+            // maxTurnSpeed(), which Create evaluates with look-ahead; folding the
+            // curve limit in here would cap the train on open track as well.
             // maxSpeed is in Blocks/Second, maxSpeed() must return Blocks/Tick.
-            return Math.min(electricTrainData.maxSpeed, electricTrainData.curveSpeed) / 20f;
+            return electricTrainData.maxSpeed / 20f;
         }
         return original.call();
     }
 
+    /**
+     * Speed allowed through a curve, as a fixed percentage of the top speed.
+     *
+     * <p>This deliberately returns the curve speed at all times, not only while
+     * a carriage is on a turn. Create's Navigation evaluates this together with
+     * the distance to the next curve and works out a braking distance from it
+     * ({@code brakingDistance - turnTopSpeed^2 / (2a)}), so returning the limit
+     * up front is what makes the train brake <i>before</i> reaching the curve.
+     * Returning MAX_VALUE on straight track would instead let the train arrive
+     * at full speed and only slow down once already inside the turn.
+     */
     @WrapMethod(method = "maxTurnSpeed")
     public float electroEnergetics$maxTurnSpeed(Operation<Float> original) {
         ElectricTrainData electricTrainData = electroenergetics$electricTrainData;
 
         if (electricTrainData.isPowered) {
-            // Curves are already handled continuously through the lateral
-            // acceleration limit, so do not stack Create's flat turn penalty on top.
-            return Math.min(electricTrainData.maxSpeed, electricTrainData.curveSpeed) / 20f;
+            double limit = Math.min(electricTrainData.maxSpeed,
+                    TrainTractionModel.curveSpeedLimit());
+            return (float) (limit / 20d);
         }
         return original.call();
     }

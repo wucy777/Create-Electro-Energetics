@@ -18,6 +18,7 @@ import com.simibubi.create.Create;
 import com.simibubi.create.content.trains.entity.Carriage;
 import com.simibubi.create.content.trains.entity.CarriageContraptionEntity;
 import com.simibubi.create.content.trains.entity.Train;
+import com.simibubi.create.content.trains.entity.TravellingPoint;
 import net.createmod.catnip.math.VecHelper;
 import net.createmod.catnip.platform.CatnipServices;
 import net.minecraft.core.BlockPos;
@@ -214,6 +215,10 @@ public class CatenaryModule {
                             : trainData.lastVoltage);
             double powerScale = TrainTractionModel.powerScaleForVoltage(tractionVoltage);
 
+            // Ease off while in a curve, so the electrical demand drops there too.
+            if (isInCurve(train))
+                powerScale *= TrainTractionModel.curvePowerScale();
+
             // Gradient along the direction of travel, taken from the consist's
             // own geometry: the rise between its leading and trailing anchors
             // divided by their horizontal run.
@@ -384,10 +389,16 @@ public class CatenaryModule {
 
             trainData.trackGrade = grade;
 
-            if (active) {
-                // Curve limit from the yaw rate of the leading carriage.
-                trainData.curveSpeed = (float) currentCurveLimit(train, trainData, trainSpeedMs);
+            // While any carriage is on a turn, ease off a fixed percentage of the
+            // traction. The speed side of the curve penalty is applied in
+            // maxTurnSpeed(), which Create evaluates with look-ahead so the train
+            // brakes before the curve rather than inside it.
+            boolean inCurve = active && isInCurve(train);
+            trainData.inCurve = inCurve;
+            if (inCurve)
+                powerScale *= TrainTractionModel.curvePowerScale();
 
+            if (active) {
                 // Speed the traction can sustain against resistance and gradient.
                 trainData.maxSpeed = (float) TrainTractionModel.maxSustainableSpeed(
                         grade, carriages, powerScale);
@@ -396,7 +407,6 @@ public class CatenaryModule {
                 trainData.availableAcceleration = (float) TrainTractionModel.availableAcceleration(
                         trainSpeedMs, grade, carriages, powerScale);
             } else {
-                trainData.curveSpeed = Float.MAX_VALUE;
                 trainData.availableAcceleration = 0f;
             }
 
@@ -406,6 +416,28 @@ public class CatenaryModule {
     /** Voltage the catenary is nominally at; used for creative-supply trains. */
     private static double maxVoltageForTraction() {
         return CEEConfigs.server().voltageValues.trainMaxVoltage.get();
+    }
+
+    /**
+     * Whether any carriage of the consist is currently on a turn.
+     *
+     * <p>Uses Create's own curve flag on the leading and trailing travelling
+     * points, which is the same test Create applies when driving a train
+     * manually, so a train slows for exactly the curves the game considers
+     * curves.
+     */
+    private static boolean isInCurve(Train train) {
+        if (!CEEConfigs.server().trainValues.electricTrainCurveSpeedLimit.get())
+            return false;
+        for (Carriage carriage : train.carriages) {
+            TravellingPoint leading = carriage.getLeadingPoint();
+            if (leading != null && leading.edge != null && leading.edge.isTurn())
+                return true;
+            TravellingPoint trailing = carriage.getTrailingPoint();
+            if (trailing != null && trailing.edge != null && trailing.edge.isTurn())
+                return true;
+        }
+        return false;
     }
 
     /**
@@ -431,33 +463,6 @@ public class CatenaryModule {
         if (run < 1e-4d)
             return 0d;
         return rise / run;
-    }
-
-    /**
-     * Speed limit imposed by the sharpest curve the consist is currently on,
-     * derived from the yaw rate of its leading carriage.
-     */
-    private double currentCurveLimit(Train train, ElectricTrainData trainData, double speed) {
-        if (train.carriages.isEmpty())
-            return Double.MAX_VALUE;
-
-        Carriage first = train.carriages.getFirst();
-        Carriage.DimensionalCarriageEntity dce = first.getDimensionalIfPresent(level.dimension());
-        if (dce == null || dce.entity == null)
-            return Double.MAX_VALUE;
-        CarriageContraptionEntity entity = dce.entity.get();
-        if (entity == null)
-            return Double.MAX_VALUE;
-
-        float yaw = entity.yaw;
-        float previous = trainData.lastYaw;
-        trainData.lastYaw = yaw;
-        if (Float.isNaN(previous))
-            return Double.MAX_VALUE;
-
-        double yawRate = TrainTractionModel.normalizeDegrees(yaw - previous);
-        double radius = TrainTractionModel.radiusFromYawRate(yawRate, speed);
-        return TrainTractionModel.curveSpeedLimit(radius);
     }
 
     private static Vec3 pantographSparkPosition(ServerLevel level, Train train, TrainPantographEntry pantograph, double current) {
