@@ -120,10 +120,13 @@ public class ModEvents {
         ItemBlockRenderTypes.setRenderLayer(CEEFluids.TRANSFORMER_OIL.getSource(), RenderType.translucent());
         ItemBlockRenderTypes.setRenderLayer(CEEFluids.PLANT_OIL.get(), RenderType.translucent());
         ItemBlockRenderTypes.setRenderLayer(CEEFluids.PLANT_OIL.getSource(), RenderType.translucent());
-        // Belt and braces: the block model already declares the translucent render
-        // type, but this block is pale enough that falling back to the solid pass
-        // would make it an opaque grey cube, so it is stated outright as well.
-        ItemBlockRenderTypes.setRenderLayer(CEEBlocks.CLEAR_GLASS.get(), RenderType.translucent());
+        // Belt and braces: the block model already declares the cutout render
+        // type (matching vanilla glass), but this block is almost entirely
+        // transparent, so falling back to the solid pass would turn it into an
+        // opaque cube. Cutout, not translucent: the texture is fully opaque or
+        // fully clear with nothing in between, so there is nothing to blend and
+        // no depth sorting to get wrong.
+        ItemBlockRenderTypes.setRenderLayer(CEEBlocks.CLEAR_GLASS.get(), RenderType.cutout());
         RadialWrenchMenu.registerRotationProperty(DoubleConnectorBlock.ROLL, "Roll");
         RadialWrenchMenu.registerRotationProperty(DoubleConnectorBlock.STYLE, "Style");
         RadialWrenchMenu.registerRotationProperty(ConnectorBlock.STYLE, "Style");

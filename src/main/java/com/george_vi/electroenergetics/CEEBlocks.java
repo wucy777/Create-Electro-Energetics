@@ -637,7 +637,8 @@ public class CEEBlocks {
             .register();
 
     /**
-     * Frameless glass, the transparent building block.
+     * Frameless glass: fully transparent, with only vanilla's interior sparkle
+     * marks kept so it can be told apart from plain air.
      *
      * <p>Properties are copied from vanilla glass rather than from a stone preset,
      * because almost everything that makes glass behave like glass lives in them:
@@ -647,12 +648,13 @@ public class CEEBlocks {
      * becomes {@link MapColor#NONE} so it does not tint the map, and the
      * destruction tool becomes a pickaxe to match the rest of this mod.
      *
-     * <p>The faint tint is in the texture, and the block is so pale that the
-     * cutout pass would discard it entirely, so the model declares the translucent
-     * render type. Both halves of that live in the generated model file, which is
-     * why the blockstate generator here sets the render type explicitly rather
-     * than using the plain cube-all helper - otherwise re-running datagen would
-     * quietly drop it and the block would vanish.
+     * <p>The texture is vanilla glass with the border frame deleted, so the pane
+     * itself is invisible and only the sparkles remain. Nothing in it is
+     * semi-transparent, which is why this uses the cutout render type (as vanilla
+     * glass does) rather than translucent: there is no blending to do and no
+     * depth-sorting to get wrong. The render type is set here as well as in the
+     * model, so re-running datagen cannot quietly drop it and turn the block into
+     * an opaque cube.
      */
     public static final BlockEntry<ClearGlassBlock> CLEAR_GLASS = REGISTRATE.block("clear_glass", ClearGlassBlock::new)
             .initialProperties(() -> Blocks.GLASS)
@@ -664,10 +666,19 @@ public class CEEBlocks {
                     .isViewBlocking((state, level, pos) -> false))
             .blockstate((c, p) -> p.simpleBlock(c.get(), p.models()
                     .cubeAll(c.getName(), p.modLoc("block/clear_glass"))
-                    .renderType("minecraft:translucent")))
+                    .renderType("minecraft:cutout")
+                    // The block surface is fully transparent, so the model's
+                    // particle texture is what supplies the break dust. Without
+                    // its own faint texture, mining this would give no visual
+                    // feedback whatsoever.
+                    .texture("particle", p.modLoc("block/clear_glass_particle"))))
             .transform(pickaxeOnly())
             .item()
-            .model((c, p) -> p.blockItem(c::getEntry))
+            // A separate icon, not the block model. The block is deliberately
+            // invisible, so reusing its model would give the item an empty
+            // inventory slot and make it almost impossible to pick out.
+            .model((c, p) -> p.withExistingParent(c.getName(), p.mcLoc("item/generated"))
+                    .texture("layer0", p.modLoc("item/clear_glass")))
             .build()
             .register();
 

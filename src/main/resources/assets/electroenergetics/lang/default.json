@@ -183,6 +183,7 @@
   "block.electroenergetics.buzzer.tooltip.summary": "Creates a buzzing sound.",
   "block.electroenergetics.buzzer.tooltip.condition1": "When Supplied with Electric Current",
   "block.electroenergetics.buzzer.tooltip.behaviour1": "Starts buzzing.",
+  "block.electroenergetics.clear_glass.tooltip.summary": "Completely _invisible_. You will walk into it, and sprinting into it _stops your sprint_ - like any other wall you cannot see. Remember where you put it.",
   "block.electroenergetics.concrete_pole.tooltip.summary": "Contains _Electrical Connectors_ on the top and bottom block of the _Pole_.",
   "item.electroenergetics.clamp_meter.tooltip.summary": "Measured the _Amperage_ of the _Current_ flowing through a _Wire_.",
   "item.electroenergetics.clamp_meter.tooltip.condition1": "When R-Clicked while Hovering over a Wire",

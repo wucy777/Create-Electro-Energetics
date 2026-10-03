@@ -20,6 +20,41 @@ import java.util.function.Supplier;
 
 public class WireType {
 
+    /** Heat lost per tick, in temperature units, at zero current. */
+    private static final double HEATING_COOLING_PER_TICK = 33.3d;
+
+    /** Temperature scale at which the heater's self-limiting term halves the input. */
+    private static final double HEATING_HALF_POINT = 1000d;
+
+    /**
+     * The temperature a wire rated for the given current settles at, in the
+     * heater's abstract units.
+     *
+     * <p>Inverts the settling condition of {@code WireLifetimeModule}: equilibrium
+     * is where the cooling term equals the self-limited input, i.e.
+     * {@code 33.3 = I / (1 + T/1000)}, which rearranges to the expression below.
+     * Pass the result to {@code maxTemperature} to get a wire that burns at
+     * exactly {@code amps}.
+     *
+     * <p>Note that the heater clamps its input current to the {@code maxWireCurrent}
+     * config. A wire whose rating exceeds that clamp can never reach the
+     * temperature this computes, so it would never burn - raise the config, or the
+     * rating is a lie.
+     */
+    public static double temperatureForAmpacity(double amps) {
+        return HEATING_HALF_POINT * (amps / HEATING_COOLING_PER_TICK - 1d);
+    }
+
+    /**
+     * The current at which a wire with the given {@code maxTemperature} burns, in
+     * amps. The exact inverse of {@link #temperatureForAmpacity}, and the number
+     * the item tooltips should show so they cannot drift from when a wire actually
+     * breaks.
+     */
+    public static double ampacityForTemperature(double maxTemperature) {
+        return HEATING_COOLING_PER_TICK * (1d + maxTemperature / HEATING_HALF_POINT);
+    }
+
     final DoubleSupplier resistance;
     final PartialModel model;
     final Supplier<Item> droppedItem;
@@ -34,7 +69,7 @@ public class WireType {
      * When a current is going through a wire, it raises temperature. It eventually settles into a temperature,
      * the temperature that it stops heating up is dependent on the current.
      * these are temperature values, that the wire settles into, and the currents needed for that.
-     * The current is capped to 1000A. Here are a few samples from the function.
+     * The current is capped to the {@code maxWireCurrent} config (4000A by default). Here are a few samples from the function.
      * 14000 -> ~ 500A
      * 10000 -> ~ 366A
      * 7500  -> ~ 280A
@@ -43,6 +78,11 @@ public class WireType {
      * 1000  -> ~ 66.6A
      * 500   -> ~ 50A
      * 0     -> I <= 33.3A
+     *
+     * <p>Use {@link #temperatureForAmpacity} and {@link #ampacityForTemperature}
+     * rather than repeating the algebra: the relationship is used by the heating
+     * model, by the wire definitions and by the item tooltips, and those drifting
+     * apart is what makes a tooltip disagree with when a wire actually burns.
      */
     final DoubleSupplier maxTemperature;
     final float sag;

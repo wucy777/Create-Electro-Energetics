@@ -18,10 +18,14 @@ public class CResistances extends ConfigBase {
     public final ConfigDouble electricTrainMassPerCarriage = d(50_000d, 1d, "electricTrainMassPerCarriage", "Train mass per carriage, loaded [in kg].");
     public final ConfigDouble wireResistance = d(0.005d, 0.0001d, "wireResistance", "[in Ohms / Meter]");
     public final ConfigDouble copperWireResistance = d(0.0002d, 0.0001d, "copperWireResistance",
-            "Resistance of the heavy 95%-copper conductor used by the copper wire and by the catenary. 0.0002 ohm/m is about an 88 mm^2 alloy conductor. [in Ohms / Meter]");
+            "Resistance of the heavy 95%-copper conductor used by the copper wire, by the insulated wires and by the catenary. 0.0002 ohm/m is about an 88 mm^2 alloy conductor. [in Ohms / Meter]");
     public final ConfigDouble electrumWireResistance = d(0.005d, 0.0001d, "electrumWireResistance", "[in Ohms / Meter]");
-    public final ConfigDouble ironWireResistance = d(0.01d, 0.0001d, "ironWireResistance", "[in Ohms / Meter]");
-    public final ConfigDouble ironRailResistance = d(0.003d, 0.0001d, "ironRailResistance", "[in Ohms / Meter]");
+    public final ConfigDouble ironWireResistance = d(0.00116d, 0.0001d, "ironWireResistance",
+            "Iron is 5.78x more resistive than copper (9.71e-8 against 1.68e-8 ohm*m), so a thin iron strand of the same gauge as the copper wire lands at 0.00116 ohm/m. [in Ohms / Meter]");
+    public final ConfigDouble ironBusWireResistance = d(0.00029d, 0.00001d, "ironBusWireResistance",
+            "The thick iron bus is twice the linear gauge of the iron strand, i.e. four times the cross-section, so a quarter of its resistance. [in Ohms / Meter]");
+    public final ConfigDouble ironRailResistance = d(0.0000723d, 0.00001d, "ironRailResistance",
+            "The iron rail is four times the linear gauge of the iron strand, i.e. sixteen times the cross-section. [in Ohms / Meter]");
     public final ConfigDouble indicatorBulbResistance = d(1000, 0.0001d, "indicatorBulbResistance", "[in Ohms]");
     public final ConfigDouble electricFanResistance = d(200, 0.0001d, "electricFanResistance", "[in Ohms]");
     public final ConfigDouble converterMinResistance = d(20, 0.0001d, "converterMinResistance", "[in Ohms]");

@@ -18,6 +18,8 @@ public class CServer extends ConfigBase {
     public final ConfigInt wireViewDistance = i(16, 1, 32, "wireViewDistance");
     public final ConfigInt maxFuseAmperage = i(500, 100, "maxFuseAmperage");
     public final ConfigBool wiresBreak = b(true, "wiresBreak", "Wires break when overloaded");
+    public final ConfigDouble maxWireCurrent = d(4000, 1, "maxWireCurrent",
+            "The largest current, in Amps, that the wire heating model reacts to. This is a clamp on the heater's input, not a property of any conductor: a wire still burns at whatever its own rating says, and this only decides whether very high ratings can ever be reached at all. A wire whose rating exceeds this value simply never burns, because its trip temperature becomes unreachable. The default of 4000 keeps the copper, insulated and electromagnet wires behaving exactly as they did before (they break just above 1000 A) while letting the thick iron bus and the iron rail reach the ampacity their cross-sections allow. [in Amps]");
     public final ConfigBool enableElectrocution = b(true, "enableElectrocution", "Wires can cause damage to players and entities");
     public final ConfigBool enableCrossContact = b(false, "enableCrossContact", "Uninsulated wires can connect");
     public final ConfigBool componentDamage = b(true, "componentDamage", "Components get damaged when overloaded");

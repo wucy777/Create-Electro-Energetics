@@ -127,7 +127,11 @@ public class CEEItems {
                 .tag(CEETags.WIRE_SPOOLS)
                 .onRegister(i -> ElectricStatsTooltipModifier.ALL_ENTRIES.register(i, new ElectricStatsTooltipModifier.ElectricStatSet()
                         .addResistancePerMeter(() -> wireType.get().getResistance())
-                        .addMaxCurrent(() -> wireType.get().getMaxTemperature() / 30 + 33.33)))
+                        // Exact ampacity, derived from the same relationship the
+                        // heater uses. This used to be a maxT/30 + 33.33
+                        // approximation, which drifted from when the wire really
+                        // burns.
+                        .addMaxCurrent(() -> WireType.ampacityForTemperature(wireType.get().getMaxTemperature()))))
                 .register();
     }
 
@@ -143,8 +147,12 @@ public class CEEItems {
                 .tag(CEETags.WIRE_SPOOLS)
                 .onRegister(i -> ElectricStatsTooltipModifier.ALL_ENTRIES.register(i, new ElectricStatsTooltipModifier.ElectricStatSet()
                         .addResistancePerMeter(() -> wireType.get().getResistance())
+                        // Shown because the sleeve has a real breakdown voltage:
+                        // exceed it and the wire is flagged overvolted and starts
+                        // electrocuting anything nearby. A bare conductor has no
+                        // such limit and so shows no such line.
                         .addMaxVoltage(insulationVoltage)
-                        .addMaxCurrent(() -> wireType.get().getMaxTemperature() / 30 + 33.33)))
+                        .addMaxCurrent(() -> WireType.ampacityForTemperature(wireType.get().getMaxTemperature()))))
                 .register();
     }
 

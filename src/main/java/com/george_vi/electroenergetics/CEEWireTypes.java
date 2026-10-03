@@ -10,19 +10,33 @@ import net.neoforged.neoforge.registries.DeferredRegister;
 public class CEEWireTypes {
 
     /**
-     * Ampacity of a copper conductor, expressed as the heater's trip
-     * temperature.
+     * Nominal ampacity of the copper conductor every copper wire shares.
      *
-     * <p>The heating model caps current at 1000 A and settles at
-     * {@code 30.03003 * I - 1000}, so 29000 makes the conductor carry right up to
-     * about 999 A and fail at its 1000 A rating. Every copper conductor in the
-     * mod - bare, insulated or heavily insulated - shares this figure, because
-     * the metal is what carries the current; the sleeve only changes the
-     * insulation, never the ampacity. Going any higher on this scale would be
-     * pointless, since the 1000 A clamp means an even larger number could never
-     * be reached.
+     * <p>This is a real rating, not the heater's ceiling: the trip temperature is
+     * derived from it, so the wire breaks just above 1000 A and the item tooltip
+     * reads exactly that. See {@link WireType#temperatureForAmpacity} for how the
+     * two are related, and the {@code maxWireCurrent} config for the separate
+     * clamp that used to make anything at or above this unreachable.
      */
-    private static final double COPPER_AMPACITY_TEMPERATURE = 29000;
+    private static final double COPPER_AMPACITY = 1000d;
+
+    private static final double COPPER_AMPACITY_TEMPERATURE =
+            WireType.temperatureForAmpacity(COPPER_AMPACITY);
+
+    /**
+     * Ampacity of a thin iron strand, the same gauge as the copper wire.
+     *
+     * <p>Iron is 5.78x more resistive than copper (9.71e-8 against 1.68e-8 ohm*m),
+     * and because heating goes as {@code I^2 R} while the surface shedding that
+     * heat does not change, the current that reaches the same temperature falls
+     * with the square root of the resistivity ratio: the copper wire's 999 A
+     * divided by sqrt(5.78) is about 415 A.
+     */
+    private static final double IRON_STRAND_AMPACITY = 415d;
+
+    /** Trip temperature for {@link #IRON_STRAND_AMPACITY}, i.e. what IRON uses. */
+    private static final double IRON_STRAND_TRIP_TEMPERATURE =
+            WireType.temperatureForAmpacity(IRON_STRAND_AMPACITY);
 
     private static final DeferredRegister<WireType> WIRE_TYPES =
             DeferredRegister.create(CEERegistries.WIRE_TYPE, CreateElectroEnergetics.ID);
@@ -103,15 +117,25 @@ public class CEEWireTypes {
             .resistance(CEEConfigs.server().resistanceValues.ironWireResistance::get)
             .droppedItem(CEEItems.IRON_WIRE_STRAND)
             .spoolItem(CEEItems.IRON_WIRE_SPOOL::get)
-            .maxTemperature(() -> 6000)
+            // Same gauge as the copper wire, so the only difference is the metal:
+            // 5.78x the resistivity, and a rating scaled by 1/sqrt(5.78) because
+            // P = I^2 R means the current that reaches the same temperature falls
+            // with the square root of the resistance. See IRON_BUS / IRON_RAIL for
+            // the thicker conductors, which trade resistance for ampacity.
+            .maxTemperature(() -> IRON_STRAND_TRIP_TEMPERATURE)
             .maxLength(CEEConfigs.server().maxWireLength::get)
             .build());
 
     public static final DeferredHolder<WireType, WireType> IRON_BUS = WIRE_TYPES.register("iron_bus", () -> new WireType.Builder(CEEPartialModels.IRON_BUS_SEGMENT)
-            .resistance(CEEConfigs.server().resistanceValues.ironWireResistance::get)
+            .resistance(CEEConfigs.server().resistanceValues.ironBusWireResistance::get)
             .droppedTag(CEETags.IRON_BUS_COMPONENT)
             .spoolItem(CEEItems.IRON_BUS_SPOOL::get)
-            .maxTemperature(() -> 10000)
+            // Twice the linear gauge of the strand, i.e. four times the
+            // cross-section: a quarter of the resistance and, for the same
+            // temperature rise, 4^0.75 times the current (heat scales with I^2 R
+            // but the surface that sheds it only scales with the perimeter).
+            .maxTemperature(() -> WireType.temperatureForAmpacity(
+                    IRON_STRAND_AMPACITY * Math.pow(4d, 0.75d)))
             .maxLength(CEEConfigs.server().maxBusWireLength::get)
             .sag(0f)
             .thickness(2/16f)
@@ -138,7 +162,11 @@ public class CEEWireTypes {
             .resistance(CEEConfigs.server().resistanceValues.ironRailResistance::get)
             .droppedTag(CEETags.IRON_RAIL_COMPONENT)
             .spoolItem(CEEItems.IRON_RAIL_SPOOL::get)
-            .maxTemperature(() -> 15000)
+            // Four times the linear gauge of the strand, i.e. sixteen times the
+            // cross-section - a contact rail. Sixteenth of the resistance, and
+            // 16^0.75 times the current for the same temperature rise.
+            .maxTemperature(() -> WireType.temperatureForAmpacity(
+                    IRON_STRAND_AMPACITY * Math.pow(16d, 0.75d)))
             .maxLength(CEEConfigs.server().maxBusWireLength::get)
             .sag(0f)
             .thickness(4/16f)

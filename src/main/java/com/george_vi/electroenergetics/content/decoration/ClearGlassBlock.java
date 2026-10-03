@@ -5,18 +5,18 @@ import net.minecraft.world.level.block.TransparentBlock;
 import net.minecraft.world.level.block.state.BlockBehaviour;
 
 /**
- * Glass with the frame removed and the tint turned right down.
+ * Glass with the frame removed, leaving only the sparkle marks.
  *
- * <p>Extending {@link TransparentBlock} (Creative's glass behaviour, in 1.21
- * vanilla's own class) inherits the two things that matter: shared faces between
- * two of the same block are not drawn, so a wall of this has no internal seams,
- * and light propagates down through it.
+ * <p>Extending {@link TransparentBlock} (vanilla glass' own behaviour class)
+ * inherits the two things that matter: shared faces between two of the same block
+ * are not drawn, so a wall of this has no internal seams, and light propagates
+ * down through it.
  *
- * <p>The visible frame on vanilla glass is painted into its texture, so the frame
- * being gone is a texture property, not a code one. See
- * {@code models/block/clear_glass.json}, which also declares the translucent
- * render type - without that a texture this faint would be dropped by the cutout
- * pass and the block would render as nothing at all.
+ * <p>The frame is painted into vanilla glass' texture, so removing it is a
+ * texture property rather than a code one - this class simply ships a texture
+ * that is transparent everywhere except the interior sparkles. The model declares
+ * the cutout render type, matching vanilla glass; see
+ * {@code models/block/clear_glass.json}.
  */
 public class ClearGlassBlock extends TransparentBlock {
 
