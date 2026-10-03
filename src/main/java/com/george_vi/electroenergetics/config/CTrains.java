@@ -28,14 +28,17 @@ public class CTrains extends ConfigBase {
     public final ConfigFloat electricTrainBrakeDeceleration = f(0.8f, 0.05f, "electricTrainBrakeDeceleration",
             "Service braking deceleration, used for stopping and braking distances only. Kept separate from traction so that Create's braking distance stays realistic, and so that a power-limited climb does not make the train think it needs forever to stop. [in Blocks / Second²]");
 
-    public final ConfigFloat electricTrainLateralAccelLimit = f(0.65f, 0.05f, "electricTrainLateralAccelLimit",
-            "Maximum comfortable lateral acceleration in curves. Limits curve speed to sqrt(a * radius). [in Blocks / Second²]");
-
     public final ConfigBool electricTrainGradeResistance = b(true, "electricTrainGradeResistance",
             "Apply gradient resistance. Uphill raises the force needed and lowers the sustainable speed; downhill lets gravity assist so less power is drawn.");
 
+    public final ConfigFloat electricTrainCurveSpeedPercent = f(60f, 1f, "electricTrainCurveSpeedPercent",
+            "Speed allowed in a curve, as a percentage of electricTrainMaxSpeed. While any carriage is on a curve the train is held to this and only speeds up again on leaving it. [in %]");
+
+    public final ConfigFloat electricTrainCurvePowerPercent = f(50f, 1f, "electricTrainCurvePowerPercent",
+            "Traction power allowed in a curve, as a percentage of the consist's rating. Easing off through the curve lowers the electrical demand as well as the speed. [in %]");
+
     public final ConfigBool electricTrainCurveSpeedLimit = b(true, "electricTrainCurveSpeedLimit",
-            "Limit speed in curves by the lateral acceleration limit. Speed is only reduced while actually on a curve.");
+            "Limit speed and power in curves. Off means the train runs at full speed and power through curves.");
 
     // ------------------------------------------------------------------
     // Accumulator and pantograph settings

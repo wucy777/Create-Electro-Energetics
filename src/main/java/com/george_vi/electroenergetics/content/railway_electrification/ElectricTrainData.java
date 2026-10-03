@@ -29,10 +29,8 @@ public class ElectricTrainData {
 
     // Gradient along the direction of travel (rise / run). Positive = uphill.
     public double trackGrade = 0d;
-    // Curve-limited speed from the lateral acceleration limit, in Blocks/Second.
-    public float curveSpeed = Float.MAX_VALUE;
-    // Yaw of the leading carriage last tick, used to measure the yaw rate in curves.
-    public float lastYaw = Float.NaN;
+    // Whether the consist is currently on a curve, used to ease off traction.
+    public boolean inCurve = false;
 
     public AttachedNode trainNode;
     public AttachedNode groundNode;
