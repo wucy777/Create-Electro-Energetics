@@ -17,6 +17,8 @@ public class CResistances extends ConfigBase {
     public final ConfigDouble electricTrainMarginFactor = d(1.0d, 0.01d, "electricTrainMarginFactor", "Design margin factor K_margin applied on top of the demanded power.");
     public final ConfigDouble electricTrainMassPerCarriage = d(50_000d, 1d, "electricTrainMassPerCarriage", "Train mass per carriage, loaded [in kg].");
     public final ConfigDouble wireResistance = d(0.005d, 0.0001d, "wireResistance", "[in Ohms / Meter]");
+    public final ConfigDouble copperWireResistance = d(0.0002d, 0.0001d, "copperWireResistance",
+            "Resistance of the heavy 95%-copper conductor used by the copper wire and by the catenary. 0.0002 ohm/m is about an 88 mm^2 alloy conductor. [in Ohms / Meter]");
     public final ConfigDouble electrumWireResistance = d(0.005d, 0.0001d, "electrumWireResistance", "[in Ohms / Meter]");
     public final ConfigDouble ironWireResistance = d(0.01d, 0.0001d, "ironWireResistance", "[in Ohms / Meter]");
     public final ConfigDouble ironRailResistance = d(0.003d, 0.0001d, "ironRailResistance", "[in Ohms / Meter]");

@@ -13,10 +13,15 @@ public class CEEWireTypes {
             DeferredRegister.create(CEERegistries.WIRE_TYPE, CreateElectroEnergetics.ID);
 
     public static final DeferredHolder<WireType, WireType> COPPER = WIRE_TYPES.register("copper", () -> new WireType.Builder(CEEPartialModels.COPPER_WIRE_SEGMENT)
-            .resistance(CEEConfigs.server().resistanceValues.wireResistance::get)
+            .resistance(CEEConfigs.server().resistanceValues.copperWireResistance::get)
             .droppedTag(CEETags.COPPER_WIRE)
             .spoolItem(CEEItems.COPPER_WIRE_SPOOL::get)
-            .maxTemperature(() -> 5000)
+            // Rated for 1000 A. The heating model caps current at 1000 A and
+            // settles at (30.03 * I - 1000), so maxTemperature 29000 lets the
+            // conductor carry right up to ~999 A and fail at the 1000 A rating.
+            // The catenary inherits this, since CatenaryConnectionData uses the
+            // copper wire type.
+            .maxTemperature(() -> 29000)
             .maxLength(CEEConfigs.server().maxWireLength::get)
             .build());
 
