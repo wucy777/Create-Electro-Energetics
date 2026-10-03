@@ -1,4 +1,4 @@
-﻿package com.george_vi.electroenergetics.config;
+package com.george_vi.electroenergetics.config;
 
 import com.mojang.logging.LogUtils;
 import net.createmod.catnip.config.ConfigBase;
