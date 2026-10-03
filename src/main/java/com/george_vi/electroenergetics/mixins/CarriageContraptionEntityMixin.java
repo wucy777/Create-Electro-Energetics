@@ -30,6 +30,6 @@ public class CarriageContraptionEntityMixin {
             remap = false)
     private float electroEnergetics$electricTrainManualTopSpeed(float original) {
         Carriage carriage = ((CarriageContraptionEntity) (Object) this).getCarriage();
-        return ElectricManualSpeed.modifierFor(carriage == null ? null : carriage.train, original);
+        return ElectricManualSpeed.topSpeedFactor(carriage == null ? null : carriage.train, original);
     }
 }

@@ -1,5 +1,6 @@
 package com.george_vi.electroenergetics.events;
 
+import com.george_vi.electroenergetics.CEEBlocks;
 import com.george_vi.electroenergetics.CEEFluids;
 import com.george_vi.electroenergetics.CEEItems;
 import com.george_vi.electroenergetics.CEERegistries;
@@ -119,6 +120,10 @@ public class ModEvents {
         ItemBlockRenderTypes.setRenderLayer(CEEFluids.TRANSFORMER_OIL.getSource(), RenderType.translucent());
         ItemBlockRenderTypes.setRenderLayer(CEEFluids.PLANT_OIL.get(), RenderType.translucent());
         ItemBlockRenderTypes.setRenderLayer(CEEFluids.PLANT_OIL.getSource(), RenderType.translucent());
+        // Belt and braces: the block model already declares the translucent render
+        // type, but this block is pale enough that falling back to the solid pass
+        // would make it an opaque grey cube, so it is stated outright as well.
+        ItemBlockRenderTypes.setRenderLayer(CEEBlocks.CLEAR_GLASS.get(), RenderType.translucent());
         RadialWrenchMenu.registerRotationProperty(DoubleConnectorBlock.ROLL, "Roll");
         RadialWrenchMenu.registerRotationProperty(DoubleConnectorBlock.STYLE, "Style");
         RadialWrenchMenu.registerRotationProperty(ConnectorBlock.STYLE, "Style");

@@ -26,15 +26,18 @@ import net.neoforged.api.distmarker.OnlyIn;
  * speed. Drawn just above the hotbar so it does not fight Create's own train
  * HUD, which sits on the experience bar.
  *
- * <p>The speed row deliberately uses Create's manual-driving cap
- * ({@code maxSpeed() * manualTrainSpeedModifier}) as its denominator, the same
- * figure Create's experience-bar speed display uses. Using the raw modelled
- * ceiling instead made the two disagree: the bar would sit full while this
- * panel still read two thirds.
+ * <p>The speed row deliberately uses the same ceiling the train is actually
+ * obeying - {@code maxSpeed() * manualTrainSpeedModifier * throttle}, with
+ * Create's handicap resolved by {@code ElectricManualSpeed} - which is also what
+ * Create's experience-bar speed display is sized from. Using the raw modelled
+ * ceiling instead made the two disagree: the bar would sit full while this panel
+ * still read two thirds.
  *
  * <p>Deliberately read-only: everything shown comes from the server through
  * {@link TrainHudData}, so the numbers agree with what the simulation is
- * actually doing rather than with a client-side guess.
+ * actually doing rather than with a client-side guess. The throttle is the one
+ * exception, because a client-side scroll has not reached the server yet when the
+ * row is drawn; it is read from the train directly.
  */
 @OnlyIn(Dist.CLIENT)
 public class ElectricTrainHud implements LayeredDraw.Layer {
@@ -95,13 +98,14 @@ public class ElectricTrainHud implements LayeredDraw.Layer {
         int rows = 6;
 
         // What the driver can actually reach right now. Create caps manual
-        // driving at maxSpeed() * manualTrainSpeedModifier (see
+        // driving at maxSpeed() * manualTrainSpeedModifier * throttle (see
         // CarriageContraptionEntity.control), and it sizes the experience-bar
-        // speed bar from that same product. For an electric train that factor is
-        // overridden on both sides (ElectricManualSpeed), so this resolves the
-        // same value here rather than assuming Create's raw setting, otherwise
-        // the panel would read two thirds while the train is at its ceiling.
-        float manualCap = sample.maxSpeed() * ElectricManualSpeed.modifierFor(train, manualSpeedModifier());
+        // speed bar from that same product. ElectricManualSpeed resolves both
+        // halves on both sides, so this panel, Create's bar and the train itself
+        // all agree - including the throttle, which is what makes the number move
+        // as the wheel is scrolled.
+        float manualCap = sample.maxSpeed()
+                * ElectricManualSpeed.speedBarFactor(train, manualSpeedModifier());
 
         float partialTicks = deltaTracker.getGameTimeDeltaPartialTick(false);
         float speed = (float) Math.abs(train.speed) * 20f;

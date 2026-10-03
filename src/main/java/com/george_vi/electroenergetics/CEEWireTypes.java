@@ -9,6 +9,21 @@ import net.neoforged.neoforge.registries.DeferredRegister;
 
 public class CEEWireTypes {
 
+    /**
+     * Ampacity of a copper conductor, expressed as the heater's trip
+     * temperature.
+     *
+     * <p>The heating model caps current at 1000 A and settles at
+     * {@code 30.03003 * I - 1000}, so 29000 makes the conductor carry right up to
+     * about 999 A and fail at its 1000 A rating. Every copper conductor in the
+     * mod - bare, insulated or heavily insulated - shares this figure, because
+     * the metal is what carries the current; the sleeve only changes the
+     * insulation, never the ampacity. Going any higher on this scale would be
+     * pointless, since the 1000 A clamp means an even larger number could never
+     * be reached.
+     */
+    private static final double COPPER_AMPACITY_TEMPERATURE = 29000;
+
     private static final DeferredRegister<WireType> WIRE_TYPES =
             DeferredRegister.create(CEERegistries.WIRE_TYPE, CreateElectroEnergetics.ID);
 
@@ -16,12 +31,7 @@ public class CEEWireTypes {
             .resistance(CEEConfigs.server().resistanceValues.copperWireResistance::get)
             .droppedTag(CEETags.COPPER_WIRE)
             .spoolItem(CEEItems.COPPER_WIRE_SPOOL::get)
-            // Rated for 1000 A. The heating model caps current at 1000 A and
-            // settles at (30.03 * I - 1000), so maxTemperature 29000 lets the
-            // conductor carry right up to ~999 A and fail at the 1000 A rating.
-            // The catenary inherits this, since CatenaryConnectionData uses the
-            // copper wire type.
-            .maxTemperature(() -> 29000)
+            .maxTemperature(() -> COPPER_AMPACITY_TEMPERATURE)
             .maxLength(CEEConfigs.server().maxWireLength::get)
             .build());
 
@@ -29,11 +39,15 @@ public class CEEWireTypes {
     public static final DeferredHolder<WireType, WireType>[] COLORED_WIRES = new DeferredHolder[DyeColor.values().length];
 
     public static final DeferredHolder<WireType, WireType> STANDARD = WIRE_TYPES.register("standard", () -> new WireType.Builder(CEEPartialModels.WIRE_SEGMENT)
-            .resistance(CEEConfigs.server().resistanceValues.wireResistance::get)
+            .resistance(CEEConfigs.server().resistanceValues.copperWireResistance::get)
             .droppedItem(CEEItems.INSULATED_WIRE)
             .spoolItem(CEEItems.WIRE_SPOOL::get)
             .maxInsulationVoltage(CEEConfigs.server().voltageValues.wireMaxVoltage::get)
-            .maxTemperature(() -> 3540)
+            // Copper conductor inside an insulation sleeve, so the electrical
+            // figures are copper's (see COPPER) and only the insulation is
+            // different: this is the 1500 V sleeve, with half the leakage
+            // resistance of the heavily insulated one.
+            .maxTemperature(() -> COPPER_AMPACITY_TEMPERATURE)
             .replaceOnOverheated(COPPER)
             .insulationResistance(330_000)
             .maxLength(CEEConfigs.server().maxWireLength::get)
@@ -60,11 +74,14 @@ public class CEEWireTypes {
     public static final DeferredHolder<WireType, WireType>[] COLORED_HEAVILY_INSULATED_WIRES = new DeferredHolder[DyeColor.values().length];
 
     public static final DeferredHolder<WireType, WireType> HEAVILY_INSULATED = WIRE_TYPES.register("heavily_insulated", () -> new WireType.Builder(CEEPartialModels.HEAVILY_INSULATED_WIRE_SEGMENT)
-            .resistance(CEEConfigs.server().resistanceValues.wireResistance::get)
+            .resistance(CEEConfigs.server().resistanceValues.copperWireResistance::get)
             .droppedItem(CEEItems.HEAVILY_INSULATED_WIRE)
             .spoolItem(CEEItems.HEAVILY_INSULATED_WIRE_SPOOL::get)
             .maxInsulationVoltage(CEEConfigs.server().voltageValues.heavilyInsulatedWireMaxVoltage::get)
-            .maxTemperature(() -> 5000)
+            // Same copper conductor as STANDARD, in a thicker sleeve: identical
+            // resistance and ampacity, but it holds off 20 kV instead of 1500 V
+            // and leaks half as much along the shock path.
+            .maxTemperature(() -> COPPER_AMPACITY_TEMPERATURE)
             .replaceOnOverheated(COPPER)
             .insulationResistance(660_000)
             .maxLength(CEEConfigs.server().maxHeavilyInsulatedWireLength::get)
@@ -141,11 +158,11 @@ public class CEEWireTypes {
             COLORED_WIRES[color.ordinal()] =
                     WIRE_TYPES.register("colored_" + color.getSerializedName(),
                     () -> new WireType.Builder(CEEPartialModels.COLORED_WIRE_SEGMENTS[color.ordinal()])
-                    .resistance(CEEConfigs.server().resistanceValues.wireResistance::get)
+                    .resistance(CEEConfigs.server().resistanceValues.copperWireResistance::get)
                     .droppedItem(CEEItems.INSULATED_WIRE)
                     .spoolItem(CEEItems.WIRE_SPOOL::get)
                     .maxInsulationVoltage(CEEConfigs.server().voltageValues.wireMaxVoltage::get)
-                    .maxTemperature(() -> 3540)
+                    .maxTemperature(() -> COPPER_AMPACITY_TEMPERATURE)
                     .replaceOnOverheated(COPPER)
                     .insulationResistance(330_000)
                     .maxLength(CEEConfigs.server().maxWireLength::get)
@@ -155,11 +172,11 @@ public class CEEWireTypes {
             COLORED_HEAVILY_INSULATED_WIRES[color.ordinal()] =
                     WIRE_TYPES.register(color.getSerializedName() + "_heavily_insulated",
                     () -> new WireType.Builder(CEEPartialModels.COLORED_HEAVILY_INSULATED_WIRE_SEGMENTS[color.ordinal()])
-                    .resistance(CEEConfigs.server().resistanceValues.wireResistance::get)
+                    .resistance(CEEConfigs.server().resistanceValues.copperWireResistance::get)
                     .droppedItem(CEEItems.HEAVILY_INSULATED_WIRE)
                     .spoolItem(CEEItems.HEAVILY_INSULATED_WIRE_SPOOL::get)
                     .maxInsulationVoltage(CEEConfigs.server().voltageValues.heavilyInsulatedWireMaxVoltage::get)
-                    .maxTemperature(() -> 5000)
+                    .maxTemperature(() -> COPPER_AMPACITY_TEMPERATURE)
                     .replaceOnOverheated(COPPER)
                     .insulationResistance(660_000)
                     .maxLength(CEEConfigs.server().maxHeavilyInsulatedWireLength::get)

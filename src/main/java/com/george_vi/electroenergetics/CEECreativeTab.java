@@ -94,6 +94,7 @@ public class CEECreativeTab {
                         output.accept(CEEBlocks.ALTERNATOR_ROTOR.asStack());
                         output.accept(CEEBlocks.ALTERNATOR_BRUSHES.asStack());
                         output.accept(CEEBlocks.MAGNET_BLOCK.asStack());
+                        output.accept(CEEBlocks.CLEAR_GLASS.asStack());
                         output.accept(CEEBlocks.ACCUMULATOR.asStack());
                         output.accept(CEEBlocks.HV_CAPACITOR.asStack());
                         output.accept(CEEBlocks.CONVERTER.asStack());

@@ -15,6 +15,7 @@ import com.george_vi.electroenergetics.content.creative_battery.CreativeBatteryB
 import com.george_vi.electroenergetics.content.cut_off_switch.CutOffSwitchBlock;
 import com.george_vi.electroenergetics.content.cut_off_switch.EmergencyStopBlock;
 import com.george_vi.electroenergetics.content.cut_off_switch.MomentarySwitchBlock;
+import com.george_vi.electroenergetics.content.decoration.ClearGlassBlock;
 import com.george_vi.electroenergetics.content.electric_fan.ElectricFanBlock;
 import com.george_vi.electroenergetics.content.electric_motor.ElectricMotorBlock;
 import com.george_vi.electroenergetics.content.electric_pump.ElectricPumpBlock;
@@ -81,6 +82,7 @@ import net.minecraft.world.item.CreativeModeTab;
 import net.minecraft.world.item.DyeColor;
 import net.minecraft.world.item.Rarity;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockBehaviour;
 import net.minecraft.world.level.material.MapColor;
 import net.minecraft.world.level.storage.loot.LootPool;
@@ -628,6 +630,41 @@ public class CEEBlocks {
             .initialProperties(SharedProperties::stone)
             .properties(p -> p.mapColor(MapColor.COLOR_GRAY))
             .blockstate(BlockStateGen.simpleCubeAll("magnet"))
+            .transform(pickaxeOnly())
+            .item()
+            .model((c, p) -> p.blockItem(c::getEntry))
+            .build()
+            .register();
+
+    /**
+     * Frameless glass, the transparent building block.
+     *
+     * <p>Properties are copied from vanilla glass rather than from a stone preset,
+     * because almost everything that makes glass behave like glass lives in them:
+     * the light level, the sound, and the {@code noOcclusion} plus the
+     * suffocation/view-blocking/spawn predicates that together stop it from
+     * blocking light or mobs. Only two things are changed: the material colour
+     * becomes {@link MapColor#NONE} so it does not tint the map, and the
+     * destruction tool becomes a pickaxe to match the rest of this mod.
+     *
+     * <p>The faint tint is in the texture, and the block is so pale that the
+     * cutout pass would discard it entirely, so the model declares the translucent
+     * render type. Both halves of that live in the generated model file, which is
+     * why the blockstate generator here sets the render type explicitly rather
+     * than using the plain cube-all helper - otherwise re-running datagen would
+     * quietly drop it and the block would vanish.
+     */
+    public static final BlockEntry<ClearGlassBlock> CLEAR_GLASS = REGISTRATE.block("clear_glass", ClearGlassBlock::new)
+            .initialProperties(() -> Blocks.GLASS)
+            .properties(p -> p.mapColor(MapColor.NONE)
+                    .noOcclusion()
+                    .isValidSpawn((state, level, pos, type) -> false)
+                    .isRedstoneConductor((state, level, pos) -> false)
+                    .isSuffocating((state, level, pos) -> false)
+                    .isViewBlocking((state, level, pos) -> false))
+            .blockstate((c, p) -> p.simpleBlock(c.get(), p.models()
+                    .cubeAll(c.getName(), p.modLoc("block/clear_glass"))
+                    .renderType("minecraft:translucent")))
             .transform(pickaxeOnly())
             .item()
             .model((c, p) -> p.blockItem(c::getEntry))

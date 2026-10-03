@@ -36,6 +36,7 @@
   "block.electroenergetics.buzzer.tooltip.summary": "Creates a buzzing sound.",
   "block.electroenergetics.capacitor": "Capacitor",
   "block.electroenergetics.catenary_holder": "Catenary Holder",
+  "block.electroenergetics.clear_glass": "Clear Glass",
   "block.electroenergetics.concrete_pole": "Concrete Pole",
   "block.electroenergetics.concrete_pole.tooltip.summary": "Contains _Electrical Connectors_ on the top and bottom block of the _Pole_.",
   "block.electroenergetics.concrete_pole_strut": "Concrete Pole Strut",

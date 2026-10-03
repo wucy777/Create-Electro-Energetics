@@ -34,6 +34,16 @@ public class CEERecipeGen extends RecipeProvider {
     @Override
     protected void buildRecipes(RecipeOutput recipeOutput) {
 
+        // Frameless glass: melt the frame out of ordinary glass in a furnace.
+        // Ratio is 1:1 and the cooking time matches vanilla's own glass recipe, so
+        // this is a re-melt rather than a lossy conversion - it is meant as a
+        // decorative upgrade, not a cost.
+        SimpleCookingRecipeBuilder
+                .smelting(Ingredient.of(Items.GLASS), RecipeCategory.BUILDING_BLOCKS,
+                        CEEBlocks.CLEAR_GLASS.get(), 0.1f, 200)
+                .unlockedBy("has_glass", has(Items.GLASS))
+                .save(recipeOutput, CreateElectroEnergetics.rl("smelting/clear_glass"));
+
         ShapedRecipeBuilder.shaped(RecipeCategory.MISC, CEEItems.EMPTY_SPOOL, 8)
                 .pattern("S")
                 .pattern("s")

@@ -36,6 +36,7 @@
   "block.electroenergetics.buzzer.tooltip.summary": "可以发出蜂鸣声。",
   "block.electroenergetics.capacitor": "电容",
   "block.electroenergetics.catenary_holder": "接触网支架",
+  "block.electroenergetics.clear_glass": "通透玻璃",
   "block.electroenergetics.concrete_pole": "混凝土杆",
   "block.electroenergetics.concrete_pole.tooltip.summary": "在_杆_的顶部和底部有互相联通的_接线端子_。",
   "block.electroenergetics.connector": "接线端子",

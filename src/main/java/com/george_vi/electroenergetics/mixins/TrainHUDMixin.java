@@ -34,7 +34,7 @@ public class TrainHUDMixin {
                     target = "Lnet/createmod/catnip/config/ConfigBase$ConfigFloat;getF()F"),
             remap = false)
     private static float electroEnergetics$electricTrainSpeedBarScale(float original) {
-        return ElectricManualSpeed.modifierFor(drivenTrain(), original);
+        return ElectricManualSpeed.speedBarFactor(drivenTrain(), original);
     }
 
     /** The train whose controls the local player holds, or {@code null}. */
