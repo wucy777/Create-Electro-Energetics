@@ -74,15 +74,21 @@ public class ElectricTrainHud implements LayeredDraw.Layer {
         int label = 0x9AA0A6;
         int value = 0xFFFFFF;
 
-        drawRow(graphics, font, x, y, 0, label, "Speed", value,
-                String.format("%.0f / %.0f m/s", shownSpeed, shownMaxSpeed));
+        // With no supply the traction can sustain nothing, so the ceiling is
+        // reported as zero. Showing "0 / 0" there would read as a broken readout,
+        // so the ceiling is left blank and the catenary row explains why.
+        String speedText = sample.powered()
+                ? String.format("%.0f / %.0f m/s", shownSpeed, shownMaxSpeed)
+                : String.format("%.0f m/s", shownSpeed);
+        drawRow(graphics, font, x, y, 0, label, "Speed", value, speedText);
         drawRow(graphics, font, x, y, 1, label, "Throttle", value,
                 String.format("%.0f%%", train.throttle * 100f));
 
         String gradeText = describeGrade(sample.grade());
         drawRow(graphics, font, x, y, 2, label, "Gradient", gradeColor(sample.grade()), gradeText);
 
-        drawRow(graphics, font, x, y, 3, label, "Power", value, formatPower(shownPower));
+        drawRow(graphics, font, x, y, 3, label, "Power", value,
+                sample.powered() ? formatPower(shownPower) : "--");
         drawRow(graphics, font, x, y, 4, label, "Catenary", value,
                 String.format("%.2f kV %s", sample.voltage() / 1000f,
                         sample.powered() ? "" : "(unpowered)"));

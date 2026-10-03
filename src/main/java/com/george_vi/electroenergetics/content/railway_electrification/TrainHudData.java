@@ -36,13 +36,22 @@ public final class TrainHudData {
     }
 
     /**
-     * Modelled speed ceiling in Blocks/Second, or {@code 0} when unknown.
-     * Used as the denominator for Create's experience-bar speed readout so the
-     * bar reflects this mod's train instead of Create's own top speed.
+     * Modelled speed ceiling in Blocks/Second, or {@code 0} when it should not
+     * be used as an authoritative figure.
+     *
+     * <p>Returns the synced ceiling only for a sample the server reported as
+     * <i>powered</i>. That guard matters because this static map is shared
+     * between the client and an integrated server in single-player: without it,
+     * a train that genuinely has no supply would fall through the
+     * {@code isPowered} check in {@code TrainMixin} and pick up the client's
+     * ceiling, letting a dead train target a speed it cannot reach.
+     *
+     * <p>Used as the denominator for Create's experience-bar speed readout so
+     * that bar reflects this mod's train instead of Create's own top speed.
      */
     public static float maxSpeed(UUID trainId) {
         Sample s = SAMPLES.get(trainId);
-        return s == null ? 0f : s.maxSpeed();
+        return s == null || !s.powered() ? 0f : s.maxSpeed();
     }
 
     /** Drop samples for trains that no longer exist, so the map cannot grow forever. */

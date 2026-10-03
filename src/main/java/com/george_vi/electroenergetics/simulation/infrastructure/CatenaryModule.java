@@ -373,10 +373,13 @@ public class CatenaryModule {
                 trainData.availableAcceleration = (float) TrainTractionModel.availableAcceleration(
                         trainSpeedMs, grade, carriages, powerScale);
             } else {
-                // No traction with no supply. The ceiling still has to be a sane
-                // non-zero number though: the client divides speed by it to size
-                // the speed bar, so leaving 0 here would make that readout vanish.
-                trainData.maxSpeed = (float) TrainTractionModel.designMaxSpeed();
+                // No traction with no supply, so there is no speed it can
+                // sustain. Zero rather than the design ceiling on purpose: the
+                // design figure would be picked up by both the HUD and
+                // maxSpeed() and would let a train with no power at all run at
+                // full speed. TrainHudData.maxSpeed() ignores a sample the
+                // server marked unpowered, so a zero here cannot divide by it.
+                trainData.maxSpeed = 0f;
                 trainData.availableAcceleration = 0f;
             }
 
