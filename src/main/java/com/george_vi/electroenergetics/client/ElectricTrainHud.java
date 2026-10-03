@@ -5,6 +5,7 @@ import com.simibubi.create.content.contraptions.actors.trainControls.ControlsHan
 import com.simibubi.create.content.trains.entity.Carriage;
 import com.simibubi.create.content.trains.entity.CarriageContraptionEntity;
 import com.simibubi.create.content.trains.entity.Train;
+import com.simibubi.create.infrastructure.config.AllConfigs;
 import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
@@ -23,6 +24,12 @@ import net.neoforged.api.distmarker.OnlyIn;
  * electrical power being drawn and the catenary voltage, plus the current
  * speed. Drawn just above the hotbar so it does not fight Create's own train
  * HUD, which sits on the experience bar.
+ *
+ * <p>The speed row deliberately uses Create's manual-driving cap
+ * ({@code maxSpeed() * manualTrainSpeedModifier}) as its denominator, the same
+ * figure Create's experience-bar speed display uses. Using the raw modelled
+ * ceiling instead made the two disagree: the bar would sit full while this
+ * panel still read two thirds.
  *
  * <p>Deliberately read-only: everything shown comes from the server through
  * {@link TrainHudData}, so the numbers agree with what the simulation is
@@ -63,13 +70,25 @@ public class ElectricTrainHud implements LayeredDraw.Layer {
         if (sample == null)
             return;
 
+        // The row count is fixed so the panel does not jump around as trains
+        // gain or lose carriages.
+        int rows = 6;
+
+        // What the driver can actually reach right now. Create caps manual
+        // driving at maxSpeed() * manualTrainSpeedModifier (see
+        // CarriageContraptionEntity.control), and it sizes the experience-bar
+        // speed bar from that same product. Showing the un-modified modelled
+        // ceiling instead is what made the bar look full while this panel still
+        // read two-thirds; the two now share one denominator and always agree.
+        float manualCap = sample.maxSpeed() * manualSpeedModifier();
+
         float partialTicks = deltaTracker.getGameTimeDeltaPartialTick(false);
         float speed = (float) Math.abs(train.speed) * 20f;
-        lerp(speed, sample.maxSpeed(), sample.power(), partialTicks);
+        lerp(speed, manualCap, sample.power(), partialTicks);
 
         var font = mc.font;
         int x = MARGIN;
-        int y = graphics.guiHeight() - MARGIN - LINE_HEIGHT * 5 - 40;
+        int y = graphics.guiHeight() - MARGIN - LINE_HEIGHT * rows - 40;
 
         int label = 0x9AA0A6;
         int value = 0xFFFFFF;
@@ -87,11 +106,32 @@ public class ElectricTrainHud implements LayeredDraw.Layer {
         String gradeText = describeGrade(sample.grade());
         drawRow(graphics, font, x, y, 2, label, "Gradient", gradeColor(sample.grade()), gradeText);
 
-        drawRow(graphics, font, x, y, 3, label, "Power", value,
-                sample.powered() ? formatPower(shownPower) : "--");
+        // Rating is per carriage, so show the consist's rating against what it is
+        // actually drawing; that is the comparison that shows whether the set is
+        // near its limit or cruising well below it.
+        int cars = sample.carriages() > 0 ? sample.carriages()
+                : Math.max(1, train.carriages.size());
+        String powerText = sample.powered()
+                ? String.format("%s / %.2f MW", formatPower(shownPower),
+                        cars * sample.powerPerCarriage() / 1e6)
+                : "--";
+        drawRow(graphics, font, x, y, 3, label, "Power", value, powerText);
+
         drawRow(graphics, font, x, y, 4, label, "Catenary", value,
                 String.format("%.2f kV %s", sample.voltage() / 1000f,
                         sample.powered() ? "" : "(unpowered)"));
+        // Carriage count and how many of them actually pull, so the rating above
+        // can be sanity-checked at a glance.
+        drawRow(graphics, font, x, y, 5, label, "Cars", value,
+                String.format("%d  (%d motorised)", cars, sample.motorCars()));
+    }
+
+    /**
+     * Create's manual-driving speed factor. Read live rather than hard-coded so
+     * the panel follows the player's create-server.toml.
+     */
+    private static float manualSpeedModifier() {
+        return AllConfigs.server().trains.manualTrainSpeedModifier.getF();
     }
 
     private void drawRow(GuiGraphics graphics, Font font,

@@ -18,16 +18,32 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public final class TrainHudData {
 
-    /** One tick's worth of traction state for a train. */
-    public record Sample(float maxSpeed, float power, float voltage, double grade, boolean powered) {}
+    /**
+     * One update's worth of traction state for a train.
+     *
+     * @param maxSpeed         modelled ceiling against resistance and gradient,
+     *                         before Create's manual-driving factor [Blocks/Second]
+     * @param power            electrical power being drawn [W]
+     * @param voltage          catenary voltage at the train [V]
+     * @param grade            gradient along travel, positive uphill
+     * @param powered          whether the traction is energised
+     * @param carriages        carriage count of the consist
+     * @param motorCars        how many of those carry a traction motor
+     * @param powerPerCarriage rated traction power of one carriage [W]
+     */
+    public record Sample(float maxSpeed, float power, float voltage, double grade,
+                         boolean powered, int carriages, int motorCars,
+                         float powerPerCarriage) {}
 
     private static final Map<UUID, Sample> SAMPLES = new ConcurrentHashMap<>();
 
     private TrainHudData() {}
 
     public static void update(UUID trainId, float maxSpeed, float power, float voltage,
-                              double grade, boolean powered) {
-        SAMPLES.put(trainId, new Sample(maxSpeed, power, voltage, grade, powered));
+                              double grade, boolean powered, int carriages, int motorCars,
+                              float powerPerCarriage) {
+        SAMPLES.put(trainId, new Sample(maxSpeed, power, voltage, grade, powered,
+                carriages, motorCars, powerPerCarriage));
     }
 
     /** Latest sample, or {@code null} when the server has not sent one. */

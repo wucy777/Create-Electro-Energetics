@@ -21,17 +21,22 @@ import java.util.UUID;
  * <p>The codec is written out by hand rather than composed, because this
  * carries more fields than {@code StreamCodec.composite} has an overload for.
  *
- * @param trainId  the train's UUID
- * @param voltage  catenary voltage at the train [V]
- * @param current  total current draw [A]
- * @param maxSpeed modelled speed ceiling [Blocks/Second]
- * @param power    electrical power being drawn [W]
- * @param grade    track gradient along travel, positive uphill
- * @param powered  whether the traction is energised
+ * @param trainId          the train's UUID
+ * @param voltage          catenary voltage at the train [V]
+ * @param current          total current draw [A]
+ * @param maxSpeed         modelled speed ceiling [Blocks/Second]
+ * @param power            electrical power being drawn [W]
+ * @param grade            track gradient along travel, positive uphill
+ * @param powered          whether the traction is energised
+ * @param carriages        carriage count of the consist
+ * @param motorCars        how many carriages carry a traction motor
+ * @param powerPerCarriage rated traction power of one carriage [W]
  */
 public record SyncTrainGaugeDataPacket(UUID trainId, double voltage, double current,
                                        float maxSpeed, float power, double grade,
-                                       boolean powered) implements ClientboundPacketPayload {
+                                       boolean powered, int carriages, int motorCars,
+                                       float powerPerCarriage)
+        implements ClientboundPacketPayload {
 
     public static final StreamCodec<ByteBuf, SyncTrainGaugeDataPacket> STREAM_CODEC = new StreamCodec<>() {
         @Override
@@ -43,8 +48,11 @@ public record SyncTrainGaugeDataPacket(UUID trainId, double voltage, double curr
             float power = buffer.readFloat();
             double grade = buffer.readDouble();
             boolean powered = buffer.readBoolean();
-            return new SyncTrainGaugeDataPacket(trainId, voltage, current,
-                    maxSpeed, power, grade, powered);
+            int carriages = buffer.readInt();
+            int motorCars = buffer.readInt();
+            float powerPerCarriage = buffer.readFloat();
+            return new SyncTrainGaugeDataPacket(trainId, voltage, current, maxSpeed, power,
+                    grade, powered, carriages, motorCars, powerPerCarriage);
         }
 
         @Override
@@ -56,6 +64,9 @@ public record SyncTrainGaugeDataPacket(UUID trainId, double voltage, double curr
             buffer.writeFloat(p.power);
             buffer.writeDouble(p.grade);
             buffer.writeBoolean(p.powered);
+            buffer.writeInt(p.carriages);
+            buffer.writeInt(p.motorCars);
+            buffer.writeFloat(p.powerPerCarriage);
         }
     };
 
@@ -63,7 +74,8 @@ public record SyncTrainGaugeDataPacket(UUID trainId, double voltage, double curr
     @OnlyIn(Dist.CLIENT)
     public void handle(LocalPlayer player) {
         ClientTrainGaugeData.update(trainId, voltage, current);
-        TrainHudData.update(trainId, maxSpeed, power, (float) voltage, grade, powered);
+        TrainHudData.update(trainId, maxSpeed, power, (float) voltage, grade, powered,
+                carriages, motorCars, powerPerCarriage);
     }
 
     @Override

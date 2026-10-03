@@ -323,8 +323,13 @@ public class CatenaryModule {
             }
 
             Map<Integer, Vec3> positions = new HashMap<>();
+            int motorCars = 0;
             for (Carriage carriage : train.carriages) {
                 if (((IPantographList)carriage).electroEnergetics$hasElectricMotor()) {
+                    // Counted here rather than from positions.size(), which holds
+                    // two entries per two-bogey carriage and skips ones whose
+                    // dimensional entity is not loaded.
+                    motorCars++;
                     Carriage.DimensionalCarriageEntity dce = carriage.getDimensionalIfPresent(level.dimension());
                     if (dce == null)
                         continue;
@@ -406,7 +411,9 @@ public class CatenaryModule {
                                 100,
                                 new SyncTrainGaugeDataPacket(train.id, voltage, totalCurrent,
                                         trainData.maxSpeed, (float) trainData.displayPower,
-                                        grade, active)
+                                        grade, active, carriages, motorCars,
+                                        CEEConfigs.server().trainValues
+                                                .electricTrainPowerPerCarriage.get())
                         );
                         trainData.lastSyncedVoltage = voltage;
                         trainData.lastSyncedCurrent = totalCurrent;
