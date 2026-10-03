@@ -12,7 +12,7 @@ import com.george_vi.electroenergetics.config.CEEConfigs;
  *   <li>constant tractive <b>power</b> above it,</li>
  *   <li>gradient resistance added to (uphill) or subtracted from (downhill) the
  *       force the traction has to produce,</li>
- *   <li>curves limited by a comfortable lateral acceleration.</li>
+ *   <li>curves imposing no limit at all.</li>
  * </ul>
  *
  * <p>All quantities are computed from the same numbers the electrical simulation

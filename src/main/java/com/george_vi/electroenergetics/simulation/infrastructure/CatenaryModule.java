@@ -413,7 +413,9 @@ public class CatenaryModule {
                                         trainData.maxSpeed, (float) trainData.displayPower,
                                         grade, active, carriages, motorCars,
                                         CEEConfigs.server().trainValues
-                                                .electricTrainPowerPerCarriage.getF())
+                                                .electricTrainPowerPerCarriage.getF(),
+                                        CEEConfigs.server().trainValues
+                                                .electricTrainManualFullSpeed.get())
                         );
                         trainData.lastSyncedVoltage = voltage;
                         trainData.lastSyncedCurrent = totalCurrent;
@@ -431,8 +433,15 @@ public class CatenaryModule {
     }
 
     /**
-     * Rise over run along the consist, from the leading and trailing anchors of
-     * its carriages. Positive means the train is climbing.
+     * Rise over run along the consist, in the direction the train is travelling.
+     * Positive means the train is climbing, whichever way it is facing.
+     *
+     * <p>The anchors are fixed to the consist, not to the direction of travel:
+     * {@code rotationAnchors.getFirst()} is the carriage's leading end, which is
+     * the front only while {@code speed > 0}. Running in reverse, that end is
+     * behind, so the raw rise/run comes out negated - the train would read a
+     * climb as a descent, gaining speed and shedding power on the way up. The
+     * sign of travel reverses it back.
      */
     private double trainGrade(Train train) {
         double rise = 0d;
@@ -452,7 +461,9 @@ public class CatenaryModule {
         }
         if (run < 1e-4d)
             return 0d;
-        return rise / run;
+        // Reversing makes the consist's "leading" end the trailing one.
+        double direction = train.speed < 0 ? -1d : 1d;
+        return direction * rise / run;
     }
 
     private static Vec3 pantographSparkPosition(ServerLevel level, Train train, TrainPantographEntry pantograph, double current) {

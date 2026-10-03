@@ -22,8 +22,11 @@ public class CTrains extends ConfigBase {
     public final ConfigFloat electricTrainPowerPerCarriage = f(1_375_000f, 1_000f, "electricTrainPowerPerCarriage",
             "Rated traction power per carriage; a consist's rating is this times its carriage count. 1375 kW per carriage is a high-speed EMU figure. Lower it if several trains share one catenary. [in Watts]");
 
-    public final ConfigFloat electricTrainMaxAcceleration = f(0.8f, 0.05f, "electricTrainMaxAcceleration",
-            "Tractive acceleration in the constant-effort region. Raise it for a punchier start; the power rating already caps acceleration above the base speed, so this mainly affects the low-speed range. [in Blocks / Second²]");
+    public final ConfigFloat electricTrainMaxAcceleration = f(2.0f, 0.05f, "electricTrainMaxAcceleration",
+            "Tractive acceleration while the motors are torque-limited, i.e. below the base speed. Above it the power rating caps the effort instead, so this value decides how soon the consist pulls its full rating. The base speed is (powerPerCarriage * driveEfficiency) / (massPerCarriage * (1+rotatingMassFactor) * this), which cancels the carriage count: at the defaults that is about 11.7 Blocks/Second (42 km/h), so the set is at full power from 42 km/h upward. Lower this for a gentler, longer start. [in Blocks / Second²]");
+
+    public final ConfigBool electricTrainManualFullSpeed = b(true, "electricTrainManualFullSpeed",
+            "Let a manually driven electric train reach the speed its own traction model allows. Create drives manual trains to maxSpeed() * manualTrainSpeedModifier (0.75 by default), a handicap meant for fuel trains; with this on, an electric train ignores that factor so the configured electricTrainMaxSpeed is actually reachable. Scheduled trains are unaffected.");
 
     public final ConfigFloat electricTrainBrakeDeceleration = f(0.8f, 0.05f, "electricTrainBrakeDeceleration",
             "Service braking deceleration, used for stopping and braking distances only. Kept separate from traction so that Create's braking distance stays realistic, and so that a power-limited climb does not make the train think it needs forever to stop. [in Blocks / Second²]");

@@ -1,5 +1,6 @@
 package com.george_vi.electroenergetics.client;
 
+import com.george_vi.electroenergetics.content.railway_electrification.ElectricManualSpeed;
 import com.george_vi.electroenergetics.content.railway_electrification.TrainHudData;
 import com.simibubi.create.content.contraptions.actors.trainControls.ControlsHandler;
 import com.simibubi.create.content.trains.entity.Carriage;
@@ -96,10 +97,11 @@ public class ElectricTrainHud implements LayeredDraw.Layer {
         // What the driver can actually reach right now. Create caps manual
         // driving at maxSpeed() * manualTrainSpeedModifier (see
         // CarriageContraptionEntity.control), and it sizes the experience-bar
-        // speed bar from that same product. Showing the un-modified modelled
-        // ceiling instead is what made the bar look full while this panel still
-        // read two-thirds; the two now share one denominator and always agree.
-        float manualCap = sample.maxSpeed() * manualSpeedModifier();
+        // speed bar from that same product. For an electric train that factor is
+        // overridden on both sides (ElectricManualSpeed), so this resolves the
+        // same value here rather than assuming Create's raw setting, otherwise
+        // the panel would read two thirds while the train is at its ceiling.
+        float manualCap = sample.maxSpeed() * ElectricManualSpeed.modifierFor(train, manualSpeedModifier());
 
         float partialTicks = deltaTracker.getGameTimeDeltaPartialTick(false);
         float speed = (float) Math.abs(train.speed) * 20f;

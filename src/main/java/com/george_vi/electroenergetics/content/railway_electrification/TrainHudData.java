@@ -30,10 +30,15 @@ public final class TrainHudData {
      * @param carriages        carriage count of the consist
      * @param motorCars        how many of those carry a traction motor
      * @param powerPerCarriage rated traction power of one carriage [W]
+     * @param manualFullSpeed  whether the server has waived Create's manual-driving
+     *                         speed handicap for this train. Carried explicitly
+     *                         because it comes from a server-side config the
+     *                         client cannot read, and the speed bar has to use
+     *                         the same factor the train is actually driven with.
      */
     public record Sample(float maxSpeed, float power, float voltage, double grade,
                          boolean powered, int carriages, int motorCars,
-                         float powerPerCarriage) {}
+                         float powerPerCarriage, boolean manualFullSpeed) {}
 
     private static final Map<UUID, Sample> SAMPLES = new ConcurrentHashMap<>();
 
@@ -41,9 +46,9 @@ public final class TrainHudData {
 
     public static void update(UUID trainId, float maxSpeed, float power, float voltage,
                               double grade, boolean powered, int carriages, int motorCars,
-                              float powerPerCarriage) {
+                              float powerPerCarriage, boolean manualFullSpeed) {
         SAMPLES.put(trainId, new Sample(maxSpeed, power, voltage, grade, powered,
-                carriages, motorCars, powerPerCarriage));
+                carriages, motorCars, powerPerCarriage, manualFullSpeed));
     }
 
     /** Latest sample, or {@code null} when the server has not sent one. */

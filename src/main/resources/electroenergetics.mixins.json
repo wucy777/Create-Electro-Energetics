@@ -13,13 +13,15 @@
     "LevelRendererAccessor",
     "MouseHandlerMixin",
     "MultiPlayerGameModeMixin",
-    "SchematicRendererMixin"
+    "SchematicRendererMixin",
+    "TrainHUDMixin"
   ],
   "injectors": {
     "defaultRequire": 1
   },
   "mixins": [
     "BlockStateBaseMixin",
+    "CarriageContraptionEntityMixin",
     "CarriageContraptionMixin",
     "CarriageMixin",
     "ComparatorBlockMixin",

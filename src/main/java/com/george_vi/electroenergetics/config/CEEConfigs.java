@@ -106,13 +106,38 @@ public class CEEConfigs {
                 maxSpeed, perCarriage, accel, gamma, aeroC,
                 res.electricTrainMassPerCarriage.get(), res.copperWireResistance.get());
 
+        logBaseSpeed(accel, gamma, res.electricTrainMassPerCarriage.get());
+
         // Values a build used to ship, now superseded. Left here so an old config
         // announces itself instead of behaving inexplicably.
         warnIfStale("electricTrainMaxSpeed", maxSpeed, 100f);
         warnIfStale("electricTrainPowerPerCarriage", perCarriage, 1_375_000f);
-        warnIfStale("electricTrainMaxAcceleration", accel, 0.8f);
+        warnIfStale("electricTrainMaxAcceleration", accel, 2.0f);
         warnIfStale("electricTrainRotatingMassFactor", (float) gamma, 0.06f);
         warnIfStale("electricTrainBasicResistanceC", (float) aeroC, 0.0014f);
+    }
+
+    /**
+     * Report where the consist leaves the torque-limited region and starts
+     * running at full power, for a single carriage.
+     *
+     * <p>That break point is {@code rating / (mass * (1 + gamma) * aMax)}, and it
+     * is the number that decides whether the train feels like it pulls at full
+     * power from a standstill or only after a long ramp. It is not obvious from
+     * the raw config values, so it is worth stating outright.
+     */
+    private static void logBaseSpeed(float accel, double gamma, double massPerCarriage) {
+        if (!(accel > 0f) || !(massPerCarriage > 0d))
+            return;
+        float perCarriage = server.trainValues.electricTrainPowerPerCarriage.getF();
+        double efficiency = server.resistanceValues.electricTrainDriveEfficiency.get();
+        double effort = massPerCarriage * (1d + gamma) * accel;
+        if (!(effort > 0d))
+            return;
+        double baseSpeed = perCarriage * efficiency / effort;
+        LOGGER.info("Constant-power region begins at {} Blocks/Second ({} km/h) "
+                        + "for a single carriage; below that the motors are torque-limited.",
+                String.format("%.1f", baseSpeed), String.format("%.0f", baseSpeed * 3.6));
     }
 
     private static void warnIfStale(String key, float actual, float current) {

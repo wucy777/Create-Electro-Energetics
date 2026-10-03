@@ -31,11 +31,17 @@ import java.util.UUID;
  * @param carriages        carriage count of the consist
  * @param motorCars        how many carriages carry a traction motor
  * @param powerPerCarriage rated traction power of one carriage [W]
+ * @param manualFullSpeed  whether the server waives Create's manual-driving speed
+ *                         handicap for this train. Sent because it comes from a
+ *                         server-side config the client cannot read, and the
+ *                         experience-bar speed readout has to divide by the same
+ *                         factor the train is driven with (see
+ *                         {@code ElectricManualSpeed}).
  */
 public record SyncTrainGaugeDataPacket(UUID trainId, double voltage, double current,
                                        float maxSpeed, float power, double grade,
                                        boolean powered, int carriages, int motorCars,
-                                       float powerPerCarriage)
+                                       float powerPerCarriage, boolean manualFullSpeed)
         implements ClientboundPacketPayload {
 
     public static final StreamCodec<ByteBuf, SyncTrainGaugeDataPacket> STREAM_CODEC = new StreamCodec<>() {
@@ -51,8 +57,9 @@ public record SyncTrainGaugeDataPacket(UUID trainId, double voltage, double curr
             int carriages = buffer.readInt();
             int motorCars = buffer.readInt();
             float powerPerCarriage = buffer.readFloat();
+            boolean manualFullSpeed = buffer.readBoolean();
             return new SyncTrainGaugeDataPacket(trainId, voltage, current, maxSpeed, power,
-                    grade, powered, carriages, motorCars, powerPerCarriage);
+                    grade, powered, carriages, motorCars, powerPerCarriage, manualFullSpeed);
         }
 
         @Override
@@ -67,6 +74,7 @@ public record SyncTrainGaugeDataPacket(UUID trainId, double voltage, double curr
             buffer.writeInt(p.carriages);
             buffer.writeInt(p.motorCars);
             buffer.writeFloat(p.powerPerCarriage);
+            buffer.writeBoolean(p.manualFullSpeed);
         }
     };
 
@@ -75,7 +83,7 @@ public record SyncTrainGaugeDataPacket(UUID trainId, double voltage, double curr
     public void handle(LocalPlayer player) {
         ClientTrainGaugeData.update(trainId, voltage, current);
         TrainHudData.update(trainId, maxSpeed, power, (float) voltage, grade, powered,
-                carriages, motorCars, powerPerCarriage);
+                carriages, motorCars, powerPerCarriage, manualFullSpeed);
     }
 
     @Override
