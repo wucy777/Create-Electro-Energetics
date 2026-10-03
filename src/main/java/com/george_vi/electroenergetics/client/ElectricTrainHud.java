@@ -64,7 +64,6 @@ public class ElectricTrainHud implements LayeredDraw.Layer {
     private int cachedDeciVolt = Integer.MIN_VALUE;
     private int cachedCars = Integer.MIN_VALUE;
     private int cachedMotors = Integer.MIN_VALUE;
-    private int cachedRatingCars = Integer.MIN_VALUE;
     private boolean cachedPowered;
     private double cachedGrade = Double.NaN;
     private float cachedPerCarriage = Float.NaN;
@@ -131,7 +130,6 @@ public class ElectricTrainHud implements LayeredDraw.Layer {
                 || powerKwI != cachedPowerKw || deciVoltI != cachedDeciVolt
                 || cars != cachedCars || motorsI != cachedMotors
                 || powered != cachedPowered || sample.grade() != cachedGrade
-                || cars != cachedRatingCars
                 || sample.powerPerCarriage() != cachedPerCarriage) {
             cachedSpeed = speedI;
             cachedCap = capI;
@@ -142,7 +140,6 @@ public class ElectricTrainHud implements LayeredDraw.Layer {
             cachedMotors = motorsI;
             cachedPowered = powered;
             cachedGrade = sample.grade();
-            cachedRatingCars = cars;
             cachedPerCarriage = sample.powerPerCarriage();
             rebuildText(speedI, capI, throttleI, powerKwI, deciVoltI,
                     cars, motorsI, powered, sample.grade(),
