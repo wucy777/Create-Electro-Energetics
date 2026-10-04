@@ -183,32 +183,68 @@ public class TrainMixin implements ICEETrainExtension {
         Train self = (Train) (Object) this;
         ElectricTrainData data = electroenergetics$electricTrainData;
 
-        // manualTick is true while a driver holds the controls, so their braking
-        // already happened in approachTargetSpeed; a destination means the
-        // schedule is stopping the train and Create's rate is the right one.
-        if (!data.isPowered || self.manualTick || self.navigation.destination != null || self.speed == 0) {
-            original.call();
+        // Gear driving owns the speed of a driven electric train, and this is the
+        // one place per tick that writes it. Doing it here rather than in
+        // approachTargetSpeed keeps a single writer: that method is called from
+        // control() and from Navigation at points that do not line up with the
+        // train's own tick, so integrating there as well would double-apply the
+        // law and make the train accelerate at twice the rate.
+        if (data.isPowered && data.driver.isDriven()) {
+            applyGearLaw(self, data);
             return;
         }
 
-        // Coasting, so the motors are not being driven and there is nothing to
-        // recover. Clearing this here matters: the flag is read by the circuit
-        // build on the following tick, and if it were only ever set it would latch
-        // on and the train would report regeneration for the rest of its life.
-        data.braking = false;
+        original.call();
+    }
 
-        double speedMs = Math.abs(self.speed) * 20d;
+    /**
+     * Integrate one tick of the gear driving law.
+     *
+     * <p>Speed is advanced by {@code a*dt} in world coordinates, which is why
+     * {@link TrainTractionModel#gearAcceleration} returns a world-frame figure:
+     * a travel-frame one flips sign as the train passes through zero and a held
+     * brake then drives the train away backwards.
+     *
+     * <p>Gravity is included here and nowhere else, which is what makes the
+     * positions differ on a slope - cutting the power rolls, and only the brake
+     * holds.
+     */
+    private void applyGearLaw(Train self, ElectricTrainData data) {
+        TrainDriverState st = data.driver;
         int carriages = Math.max(1, self.carriages.size());
-        // Blocks/Second² -> Blocks/Tick².
-        double perTick = TrainTractionModel.coastDeceleration(speedMs, data.trackGrade, carriages) / 400d;
+        double signedSpeedMs = self.speed * 20d;
 
-        if (self.speed > 0)
-            self.speed = Math.max(self.speed - perTick, 0);
-        else
-            self.speed = Math.min(self.speed + perTick, 0);
+        // trainGrade is a rise-over-run along the consist, which for a train
+        // moving in -x is the grade towards -x, so it is mirrored into +x.
+        double gradeToPlusX = self.speed < 0 ? -data.trackGrade : data.trackGrade;
 
-        // Create's own method clears this unconditionally, and a driver's next
-        // control() tick depends on it being clear when they let go.
+        double a = TrainTractionModel.gearAcceleration(
+                signedSpeedMs, gradeToPlusX, carriages, data.powerScale,
+                st.gear, st.cruiseSpeed,
+                CEEConfigs.server().trainValues.electricTrainBrakeDeceleration.getF(),
+                st.emergencyTicks > 0 && st.emergencyArmed,
+                st.emergencyPenalty);
+
+        // m/s² -> Blocks/Tick². 1 block = 1 m, so only the tick conversion is needed.
+        double next = self.speed + a / 400d;
+
+        // A gear change may not drag the train backwards through zero: without
+        // this a hold at a standstill would leave a floating-point residue and the
+        // train would creep. The brake is allowed to bring it to rest and no further.
+        if (Math.signum(next) != Math.signum(self.speed) && Math.abs(self.speed) > 1e-9d
+                && (st.gear == TrainGear.BRAKE || st.gear == TrainGear.COAST))
+            next = 0d;
+
+        self.speed = next;
+
+        // Regeneration is reported for the next circuit build, which runs before
+        // the following tick's motion.
+        data.braking = st.gear == TrainGear.BRAKE
+                || (st.gear == TrainGear.CRUISE && a < 0d)
+                || (st.emergencyArmed && st.emergencyTicks > 0);
+
+        // Create's own method clears this, and control() re-sets it every tick the
+        // driver holds the controls.
         self.manualTick = false;
     }
 
@@ -230,6 +266,16 @@ public class TrainMixin implements ICEETrainExtension {
         // Setting it only in the braking branch below, and clearing it here, means
         // every other outcome is covered without having to enumerate them.
         data.braking = false;
+
+        // A gear-driven train has its speed written by the gear law each tick, so
+        // Create's target-speed ramping must not also touch it. Selecting the
+        // lever is what commands this train now, not held keys and the speed
+        // wheel, and letting both run would have them fight over the same field.
+        if (data.isPowered && data.driver.isDriven()) {
+            // The gear law already wrote the speed this tick; Create's ramping
+            // must not touch it as well, or the two would fight over the field.
+            return;
+        }
 
         if (!data.isPowered) {
             original.call(accelerationMod);

@@ -51,6 +51,20 @@ public class ElectricTrainData {
     // the load resistance already has.
     public boolean braking = false;
 
+    // The driver's lever, vigilance timer and emergency state. Never null, so the
+    // control path and the packet handler do not have to null-check it.
+    public final TrainDriverState driver = new TrainDriverState();
+
+    // What cruise decided this tick, for the display.
+    public TrainTractionModel.CruiseState cruiseState = TrainTractionModel.CruiseState.STOPPED;
+
+    // Fraction of its rating the supply can currently deliver, from the terminal
+    // voltage of the last solve. Kept here because the gear law runs on the train's
+    // own tick while the voltage is only known after the circuit solves, so this is
+    // necessarily the previous tick's figure - the same one-tick lag the load
+    // resistance already has.
+    public double powerScale = 1d;
+
     // Packet throttling for gauge data sync
     public double lastSyncedVoltage = 0;
     public double lastSyncedCurrent = 0;

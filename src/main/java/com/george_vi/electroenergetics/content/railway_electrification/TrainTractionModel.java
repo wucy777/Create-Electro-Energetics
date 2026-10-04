@@ -282,8 +282,284 @@ public final class TrainTractionModel {
     }
 
     // ------------------------------------------------------------------
-    // Regenerative braking
+    // Cruise (the 匀速 running position)
     // ------------------------------------------------------------------
+
+    /**
+     * What the cruise position is doing about speed, so the driver can be told.
+     *
+     * <p>Cruise asks the motors for exactly the power that holds the current
+     * speed on this gradient - {@code P = v * (runningResistance + grade)}. Two
+     * things can go wrong and both are worth saying out loud rather than hiding:
+     * uphill the demand can exceed the rating, in which case the train runs at
+     * full power and loses speed; downhill gravity can exceed what the running
+     * resistance eats, in which case holding the speed needs the brake.
+     */
+    public enum CruiseState {
+        /** Level or gentle: holding the speed on traction alone. */
+        HOLDING,
+        /** Climb too steep for the rating: full power, losing speed. */
+        POWER_LIMITED,
+        /** Descent steep enough that the brake is needed to hold the speed. */
+        BRAKING,
+        /** Too slow to ask anything sensible of the motors. */
+        STOPPED
+    }
+
+    /** Speed below which cruise has nothing meaningful to hold [m/s]. */
+    public static final double CRUISE_MIN_SPEED = 0.5d;
+
+    /**
+     * Decide what cruise should do at this speed and gradient.
+     *
+     * @param powerScale fraction of the rating the supply can deliver
+     */
+    public static CruiseState cruiseState(double speedMs, double grade, int carriages, double powerScale) {
+        double v = Math.abs(speedMs);
+        if (v < CRUISE_MIN_SPEED)
+            return CruiseState.STOPPED;
+
+        // Traction needed to hold this speed: running resistance plus the gravity
+        // component. Negative means gravity alone would accelerate the train.
+        double needed = runningResistance(v, carriages) + gradeResistance(grade, carriages);
+
+        if (needed <= 0d)
+            return CruiseState.BRAKING;
+
+        double deliverable = availableEffort(v, carriages, powerScale);
+        return needed > deliverable ? CruiseState.POWER_LIMITED : CruiseState.HOLDING;
+    }
+
+    /**
+     * Braking deceleration cruise needs to hold the speed on a descent [m/s²].
+     *
+     * <p>Only the part gravity contributes beyond what drag already absorbs has
+     * to be braked away; on a shallow descent that is nothing.
+     */
+    public static double cruiseBrakeDeceleration(double speedMs, double grade, int carriages) {
+        double v = Math.abs(speedMs);
+        double needed = runningResistance(v, carriages) + gradeResistance(grade, carriages);
+        if (needed >= 0d)
+            return 0d;
+        double gamma = CEEConfigs.server().resistanceValues.electricTrainRotatingMassFactor.get();
+        double a = -needed / ((1d + gamma) * totalMass(carriages));
+        return Double.isFinite(a) && a > 0d ? a : 0d;
+    }
+
+    // ------------------------------------------------------------------
+    // Longitudinal motion (gear-driven driving)
+    // ------------------------------------------------------------------
+
+    /**
+     * Net acceleration along the direction of travel [m/s²], positive meaning
+     * faster. Signed and deliberately unclamped, unlike
+     * {@link #availableAcceleration}: on a climb too steep for the rating this
+     * returns a negative number, which is the train genuinely losing speed.
+     * Clamping it to zero was what made a stalled train look like a held one.
+     *
+     * <p>Drag and gravity are always included, so a train with the traction off
+     * ({@code tractionScale = 0}) rolls on a gradient exactly as it should.
+     *
+     * @param tractionScale fraction of the available effort to apply, 0-1
+     */
+    public static double netAcceleration(double speedMs, double grade, int carriages,
+                                         double powerScale, double tractionScale) {
+        double v = Math.abs(speedMs);
+        double gamma = CEEConfigs.server().resistanceValues.electricTrainRotatingMassFactor.get();
+        double force = -runningResistance(v, carriages) - gradeResistance(grade, carriages);
+        if (tractionScale > 0d)
+            force += availableEffort(v, carriages, powerScale) * Math.min(tractionScale, 1d);
+        double a = force / ((1d + gamma) * totalMass(carriages));
+        return Double.isFinite(a) ? a : 0d;
+    }
+
+    /**
+     * Traction share that would exactly hold the current speed on this gradient.
+     *
+     * <p>This is the cruise position expressed as a fraction rather than a power:
+     * it asks the motors for precisely the force that cancels drag and gravity, so
+     * the train neither gains nor loses speed. Returning a fraction rather than a
+     * wattage keeps it in the same units as the rest of the envelope, and means
+     * cruise cannot ask for more than the motors have - if the share would exceed
+     * 1, the caller runs at full power instead and the train slows.
+     */
+    public static double holdTractionScale(double speedMs, double grade, int carriages, double powerScale) {
+        double v = Math.abs(speedMs);
+        double needed = runningResistance(v, carriages) + gradeResistance(grade, carriages);
+        if (needed <= 0d)
+            return 0d;
+        double deliverable = availableEffort(v, carriages, powerScale);
+        if (deliverable <= 0d)
+            return 1d;
+        return Math.min(needed / deliverable, 1d);
+    }
+
+    /**
+     * Electrical power to hold the current speed [W], for the readout.
+     *
+     * <p>{@code P = v · F} with {@code F} the force cruise is actually applying,
+     * which is the quantity the driver asked to see.
+     */
+    public static double cruisePower(double speedMs, double grade, int carriages, double powerScale) {
+        double v = Math.abs(speedMs);
+        if (v < CRUISE_MIN_SPEED)
+            return auxiliaryPower(carriages);
+        double scale = holdTractionScale(v, grade, carriages, powerScale);
+        double force = availableEffort(v, carriages, powerScale) * scale;
+        double traction = force * v / (driveEfficiency() * Math.max(
+                CEEConfigs.server().resistanceValues.electricTrainAuxiliaryLoadFactor.get(), 1e-4d));
+        double total = traction + auxiliaryPower(carriages);
+        return Double.isFinite(total) && total > 0d ? total : MIN_DEMAND;
+    }
+
+    // ------------------------------------------------------------------
+    // Gear-driven motion
+    // ------------------------------------------------------------------
+
+    /** Emergency brake rate [m/s²]. Well above service braking, and briefly applied. */
+    public static final double EMERGENCY_BRAKE = 6.0d;
+
+    /** Speed band around the cruise setting where neither traction nor brake is applied [m/s]. */
+    private static final double CRUISE_DEADBAND = 0.5d;
+
+    /** Fastest a train may be driven backwards, so reverse is a shunting move [m/s]. */
+    public static final double SHUNT_SPEED = 5.0d;
+
+    /**
+     * Speed cap left in force after the emergency brake is used [m/s], until the
+     * next station call. This is the cost of using it.
+     */
+    public static final double PENALTY_SPEED = 40d / 3.6d;   // 40 km/h
+
+    /**
+     * Acceleration in world coordinates (+x) for the current lever position
+     * [m/s²]. Kept out of the mixin so it can be exercised without a running game.
+     *
+     * <p>Deliberately world-frame rather than "along the direction of travel".
+     * A travel-frame figure flips sign when the train passes through zero, so a
+     * brake held on a train that momentarily reaches a standstill starts pushing
+     * it the other way and the train accelerates away backwards. Returning the
+     * world-frame value means the caller simply does {@code speed += a * dt}, and
+     * a brake always opposes motion whichever way the train is going.
+     *
+     * <p>The train is treated as a point mass on a slope:
+     * <pre>
+     *   a = [ traction(gear) - sign(v)·drag - g·grade ] / ((1+γ)·m)
+     * </pre>
+     * where {@code grade} is rise-over-run towards +x, so a positive grade is a
+     * climb in +x and gravity pulls towards −x. Drag is proportional to v² and
+     * always opposes motion; at a standstill it is zero, which is why the brake
+     * is what holds a train on a hill and drag does not.
+     *
+     * @param signedSpeedMs current speed, positive towards +x
+     * @param gradeToPlusX rise over run towards +x; positive is uphill towards +x
+     * @param powerScale    fraction of the rating the supply can deliver
+     * @param cruiseSpeedMs speed the cruise position holds, as a magnitude
+     * @param brakeMs2      configured service braking rate
+     * @param emergency     whether the emergency brake is being applied
+     * @param penalty       whether the post-emergency speed cap is in force
+     */
+    public static double gearAcceleration(double signedSpeedMs, double gradeToPlusX, int carriages,
+                                          double powerScale, TrainGear gear, double cruiseSpeedMs,
+                                          double brakeMs2, boolean emergency, boolean penalty) {
+        double v = signedSpeedMs;
+        double speed = Math.abs(v);
+        double gamma = CEEConfigs.server().resistanceValues.electricTrainRotatingMassFactor.get();
+        double mass = (1d + gamma) * totalMass(carriages);
+        if (mass <= 0d)
+            return 0d;
+
+        // Drag opposes motion and vanishes at a standstill.
+        double force = -Math.signum(v) * runningResistance(speed, carriages);
+        // Gravity pulls down the slope, i.e. towards -x for a climb towards +x.
+        force -= mass * G * gradeToPlusX;
+
+        double effort = availableEffort(speed, carriages, powerScale);
+        double ceiling = designMaxSpeed();
+        // The emergency brake leaves a speed cap behind until the next station, which
+        // is what makes using it a real decision rather than a free extra stop. The
+        // cap is applied to the TRACTION, not to the speed itself: clamping the speed
+        // would also clamp a train rolling downhill past the cap, which would let the
+        // penalty double as a speed limiter on descents - not what it is for.
+        if (penalty)
+            ceiling = Math.min(ceiling, PENALTY_SPEED);
+        // Which way the train is going, or would go if released from rest. Used
+        // only to aim traction and the brake; gravity never needs it.
+        double heading = speed < 1e-6d ? 1d : Math.signum(v);
+
+        switch (gear) {
+            case ACCELERATE -> {
+                if (speed < ceiling)
+                    force += effort;
+            }
+            case REVERSE -> {
+                // Into the -x direction, capped to a shunting speed. Blocked while
+                // still rolling forwards: there the lever means "stop", and the
+                // brake is what stops a train.
+                if (speed < Math.min(ceiling, SHUNT_SPEED) && !(v > 1e-6d))
+                    force -= effort;
+            }
+            case CRUISE -> {
+                double target = Math.max(cruiseSpeedMs, 0d);
+                if (speed < target - CRUISE_DEADBAND) {
+                    if (speed < ceiling)
+                        force += heading * effort;
+                } else if (speed > target + CRUISE_DEADBAND) {
+                    force -= heading * brakeMs2 * mass;
+                } else {
+                    // Hold the setting exactly. The world-frame force needed to
+                    // cancel drag and gravity is
+                    //     sign(v)*drag + m*g*grade
+                    // which is positive on a climb and negative on a descent steep
+                    // enough to overcome drag. Positive is met by the motors, up to
+                    // their limit; a negative result means the brake has to take up
+                    // the surplus, first regeneratively then with friction. That is
+                    // the whole "hold the set speed, climbing at full power and
+                    // braking on the way down" behaviour.
+                    double needed = Math.signum(v) * runningResistance(speed, carriages)
+                            + mass * G * gradeToPlusX;
+                    if (needed >= 0d) {
+                        force += Math.min(needed, effort);
+                    } else {
+                        double brakeNeed = -needed;
+                        double fromMotors = Math.min(brakeNeed, effort);
+                        double fromFriction = Math.min(brakeNeed - fromMotors, brakeMs2 * mass);
+                        force -= fromMotors + fromFriction;
+                    }
+                }
+            }
+            case COAST -> {
+                // Nothing but drag and gravity, which is the point of the position:
+                // it rolls on a slope and holds nothing, including at a standstill.
+            }
+            case BRAKE -> force -= heading * brakeMs2 * mass;
+        }
+
+        // On top of whatever the lever is doing, and enough to stop the train from
+        // line speed by itself.
+        if (emergency && speed > 1e-6d)
+            force -= Math.signum(v) * EMERGENCY_BRAKE * mass;
+
+        double a = force / mass;
+
+        // At a standstill, a brake that can cover the slope pins the train instead
+        // of leaving a residual creep from the gravity term. If it cannot cover
+        // the slope the value is left alone and the train slides, which is honest
+        // and is exactly why the default exceeds Create's steepest grade.
+        if (speed < 1e-6d && a != 0d) {
+            boolean braked = gear == TrainGear.BRAKE || emergency;
+            if (braked) {
+                double pull = Math.abs(G * gradeToPlusX);
+                double hold = gear == TrainGear.BRAKE ? brakeMs2 : 0d;
+                if (emergency)
+                    hold = Math.max(hold, EMERGENCY_BRAKE);
+                if (hold >= pull)
+                    return 0d;
+            }
+        }
+
+        return Double.isFinite(a) ? a : 0d;
+    }
 
     /**
      * Electrical power the motors can push back into the line while braking [W].

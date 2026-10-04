@@ -51,6 +51,8 @@ public enum CEEPackets implements BasePacketPayload.PacketTypeProvider {
     ANALOG_LEVER_PANEL_CHANGE_STATE(AnalogPanelAttachmentChangeStatePacket.class, AnalogPanelAttachmentChangeStatePacket.STREAM_CODEC),
     SET_MENU_PANEL_ATTACHMENT_OPTIONS(SetMenuPanelAttachmentOptionsPacket.class, SetMenuPanelAttachmentOptionsPacket.STREAM_CODEC),
     SET_PANEL_ATTACHMENT_OPTIONS(SetPanelAttachmentOptionsPacket.class, SetPanelAttachmentOptionsPacket.STREAM_CODEC),
+    SET_TRAIN_GEAR(com.george_vi.electroenergetics.content.railway_electrification.SetTrainGearPacket.class,
+            com.george_vi.electroenergetics.content.railway_electrification.SetTrainGearPacket.STREAM_CODEC),
     ;
 
     private final CatnipPacketRegistry.PacketType<?> type;

@@ -3,6 +3,8 @@ package com.george_vi.electroenergetics.simulation.infrastructure;
 import com.george_vi.electroenergetics.CEERegistries;
 import com.george_vi.electroenergetics.config.CEEConfigs;
 import com.george_vi.electroenergetics.content.railway_electrification.ElectricTrainData;
+import com.george_vi.electroenergetics.content.railway_electrification.TrainDriverState;
+import com.george_vi.electroenergetics.content.railway_electrification.TrainGear;
 import com.george_vi.electroenergetics.content.railway_electrification.TrainTractionModel;
 import com.george_vi.electroenergetics.content.railway_electrification.gauges.SyncTrainGaugeDataPacket;
 import com.george_vi.electroenergetics.content.railway_electrification.pantograph.TrainPantographEntry;
@@ -456,6 +458,53 @@ public class CatenaryModule {
             double powerScale = TrainTractionModel.powerScaleForVoltage(tractionVoltage);
 
             trainData.trackGrade = grade;
+            // Published for the gear law, which runs on the train's own tick. This
+            // is necessarily last tick's terminal voltage, the same one-tick lag
+            // the load resistance itself already has.
+            trainData.powerScale = powerScale;
+
+            // Cruise's own verdict for this tick, for the display: whether it is
+            // holding, running out of power on a climb, or braking down a descent.
+            trainData.cruiseState = TrainTractionModel.cruiseState(
+                    trainSpeedMs, grade, carriages, powerScale);
+
+            // Driver state timers, advanced in this same per-train pass rather than
+            // in a loop of their own: the module already visits every train once a
+            // tick, and adding a second sweep over all trains would double that
+            // cost for no benefit.
+            TrainDriverState driver = trainData.driver;
+            driver.tickDriverPresence();
+
+            // Vigilance: a prompt every CONFIRM_INTERVAL, and the lever drops to the
+            // brake if it goes unanswered for CONFIRM_GRACE. Only while actually
+            // driven - an unmanned train is already in some lever position and
+            // nagging about it would be pointless.
+            if (driver.isDriven()) {
+                if (driver.confirmWaiting >= 0) {
+                    driver.confirmWaiting++;
+                    if (driver.confirmWaiting > TrainDriverState.CONFIRM_GRACE_TICKS)
+                        driver.failSafe();
+                } else if (driver.confirmTimer > 0) {
+                    driver.confirmTimer--;
+                } else {
+                    driver.confirmWaiting = 0;
+                    driver.confirmTimer = TrainDriverState.CONFIRM_INTERVAL_TICKS;
+                }
+            } else {
+                driver.confirmWaiting = -1;
+                driver.confirmTimer = TrainDriverState.CONFIRM_INTERVAL_TICKS;
+            }
+
+            // Emergency brake application, and the speed cap it leaves behind.
+            if (driver.emergencyTicks > 0)
+                driver.emergencyTicks--;
+            if (driver.emergencyPenalty && train.getCurrentStation() != null)
+                driver.clearPenalty();
+
+            // A station call always releases the lever from reverse, so a train
+            // cannot be left set to shunt away the moment it is dispatched.
+            if (train.getCurrentStation() != null && driver.gear == TrainGear.REVERSE)
+                driver.gear = TrainGear.BRAKE;
 
             if (active) {
                 // Speed the traction can sustain against resistance and gradient.

@@ -21,6 +21,7 @@
   },
   "mixins": [
     "BlockStateBaseMixin",
+    "CarriageContraptionEntityControlMixin",
     "CarriageContraptionEntityMixin",
     "CarriageContraptionMixin",
     "CarriageMixin",
