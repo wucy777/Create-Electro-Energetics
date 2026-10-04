@@ -294,6 +294,20 @@ public class TrainMixin implements ICEETrainExtension {
     public void electroEnergetics$approachTargetSpeed(float accelerationMod, Operation<Void> original) {
         ElectricTrainData data = electroenergetics$electricTrainData;
 
+        // A gear-driven train has its speed written by the gear law each tick, so
+        // Create's target-speed ramping must not also touch it. Selecting the
+        // lever is what commands this train now, not held keys and the speed
+        // wheel, and letting both run would have them fight over the same field.
+        //
+        // This return is deliberately ABOVE the brake-flag clear below. control()
+        // reaches here on its 5-tick keepalive, which can land after the gear law
+        // has already set the flag for this tick; clearing first would then wipe
+        // the regeneration report once every five ticks, so a braking train drew
+        // its recovered power in a stutter. The gear law owns both the speed and
+        // the flag for a driven train, so this method leaves both alone.
+        if (data.isPowered && data.driver.isDriven())
+            return;
+
         // Cleared here, once, before any branch can return early. The flag is read
         // by the next circuit build, so a path that set it and then returned -
         // reaching the target exactly, losing power mid-brake, a station call -
@@ -301,16 +315,6 @@ public class TrainMixin implements ICEETrainExtension {
         // Setting it only in the braking branch below, and clearing it here, means
         // every other outcome is covered without having to enumerate them.
         data.braking = false;
-
-        // A gear-driven train has its speed written by the gear law each tick, so
-        // Create's target-speed ramping must not also touch it. Selecting the
-        // lever is what commands this train now, not held keys and the speed
-        // wheel, and letting both run would have them fight over the same field.
-        if (data.isPowered && data.driver.isDriven()) {
-            // The gear law already wrote the speed this tick; Create's ramping
-            // must not touch it as well, or the two would fight over the field.
-            return;
-        }
 
         if (!data.isPowered) {
             original.call(accelerationMod);
