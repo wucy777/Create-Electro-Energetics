@@ -234,7 +234,8 @@ public class ElectricTrainHud implements LayeredDraw.Layer {
         textSpeed = powered
                 ? speed + " / " + cap + " m/s"
                 : speed + " m/s";
-        textGear = gear < 0 ? "--"
+        textGear = gear < 0 || gear >= TrainGear.values().length
+                ? "--"
                 : TrainControlHud.gearLabel(TrainGear.values()[gear]);
         textGrade = describeGrade(grade);
         // Rating is per carriage, so show the consist's rating against what it is
