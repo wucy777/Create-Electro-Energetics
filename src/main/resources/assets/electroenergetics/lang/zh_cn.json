@@ -34,7 +34,7 @@
   "block.electroenergetics.buzzer.tooltip.behaviour1": "发出蜂鸣声。",
   "block.electroenergetics.buzzer.tooltip.condition1": "有电流通过时",
   "block.electroenergetics.buzzer.tooltip.summary": "可以发出蜂鸣声。",
-  "block.electroenergetics.clear_glass.tooltip.summary": "完全_透明_。你会撞上它，而且疾跑撞上它会_中断疾跑_——就像任何一堵你看不见的墙。记住你把它放在哪了。",
+  "block.electroenergetics.clear_glass.tooltip.summary": "没有边框，几乎_全透明_。你会撞上它，而且疾跑撞上它会_中断疾跑_——就像任何一堵你看不见的墙。记住你把它放在哪了。",
   "block.electroenergetics.capacitor": "电容",
   "block.electroenergetics.catenary_holder": "接触网支架",
   "block.electroenergetics.clear_glass": "通透玻璃",

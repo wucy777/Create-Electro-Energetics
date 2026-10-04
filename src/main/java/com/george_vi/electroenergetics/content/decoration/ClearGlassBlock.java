@@ -5,18 +5,20 @@ import net.minecraft.world.level.block.TransparentBlock;
 import net.minecraft.world.level.block.state.BlockBehaviour;
 
 /**
- * Glass with the frame removed, leaving only the sparkle marks.
+ * Frameless glass: one faint tinted sheet, no border, so a wall of it reads as a
+ * single pane instead of a grid of tiles.
  *
  * <p>Extending {@link TransparentBlock} (vanilla glass' own behaviour class)
  * inherits the two things that matter: shared faces between two of the same block
  * are not drawn, so a wall of this has no internal seams, and light propagates
  * down through it.
  *
- * <p>The frame is painted into vanilla glass' texture, so removing it is a
- * texture property rather than a code one - this class simply ships a texture
- * that is transparent everywhere except the interior sparkles. The model declares
- * the cutout render type, matching vanilla glass; see
- * {@code models/block/clear_glass.json}.
+ * <p>Both "frameless" and "see-through" are texture properties rather than code
+ * ones. The block ships a texture that is a single flat fill at low alpha, so the
+ * only thing the class has to get right is the render type: the model declares
+ * {@code minecraft:translucent}, because {@code cutout} - which vanilla glass
+ * uses - discards the alpha channel outright. Under cutout this texture would be
+ * drawn as a fully opaque sheet, or not at all.
  */
 public class ClearGlassBlock extends TransparentBlock {
 

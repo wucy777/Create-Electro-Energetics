@@ -1,7 +1,5 @@
 package com.george_vi.electroenergetics;
 
-import com.george_vi.electroenergetics.client.CEECT;
-import com.george_vi.electroenergetics.client.ClearGlassCTBehaviour;
 import com.george_vi.electroenergetics.client.ElectricStatsTooltipModifier;
 import com.george_vi.electroenergetics.config.CEEConfigs;
 import com.george_vi.electroenergetics.content.accumulator.AccumulatorBlock;
@@ -73,7 +71,6 @@ import com.simibubi.create.api.boiler.BoilerHeater;
 import com.simibubi.create.content.kinetics.gauge.GaugeGenerator;
 import com.simibubi.create.foundation.data.AssetLookup;
 import com.simibubi.create.foundation.data.BlockStateGen;
-import com.simibubi.create.foundation.data.CreateRegistrate;
 import com.simibubi.create.foundation.data.ModelGen;
 import com.simibubi.create.foundation.data.SharedProperties;
 import com.tterrag.registrate.util.entry.BlockEntry;
@@ -638,8 +635,8 @@ public class CEEBlocks {
             .register();
 
     /**
-     * Frameless glass: fully transparent, with only vanilla's interior sparkle
-     * marks kept so it can be told apart from plain air.
+     * Frameless glass: a single faint tinted sheet with no border, so a wall of it
+     * reads as one continuous pane rather than a grid of tiles.
      *
      * <p>Properties are copied from vanilla glass rather than from a stone preset,
      * because almost everything that makes glass behave like glass lives in them:
@@ -649,13 +646,17 @@ public class CEEBlocks {
      * becomes {@link MapColor#NONE} so it does not tint the map, and the
      * destruction tool becomes a pickaxe to match the rest of this mod.
      *
-     * <p>The texture is vanilla glass with the border frame deleted, so the pane
-     * itself is invisible and only the sparkles remain. Nothing in it is
-     * semi-transparent, which is why this uses the cutout render type (as vanilla
-     * glass does) rather than translucent: there is no blending to do and no
-     * depth-sorting to get wrong. The render type is set here as well as in the
-     * model, so re-running datagen cannot quietly drop it and turn the block into
-     * an opaque cube.
+     * <p>The texture is a flat fill at a low alpha - no frame and no sparkles - so
+     * the pane is see-through but still visible against the sky. That semi
+     * transparency is what decides the render type: this must be
+     * {@code minecraft:translucent}, because {@code cutout} discards alpha
+     * entirely and would either draw a solid sheet or nothing at all. It is set
+     * here as well as in the model, so re-running datagen cannot quietly change
+     * the render type and turn the block into an opaque cube.
+     *
+     * <p>The particle texture is separate and opaque. The block surface is nearly
+     * invisible, so without its own texture, mining this would give no visual
+     * feedback whatsoever.
      */
     public static final BlockEntry<ClearGlassBlock> CLEAR_GLASS = REGISTRATE.block("clear_glass", ClearGlassBlock::new)
             .initialProperties(() -> Blocks.GLASS)
@@ -667,17 +668,8 @@ public class CEEBlocks {
                     .isViewBlocking((state, level, pos) -> false))
             .blockstate((c, p) -> p.simpleBlock(c.get(), p.models()
                     .cubeAll(c.getName(), p.modLoc("block/clear_glass"))
-                    .renderType("minecraft:cutout")
-                    // The block surface is fully transparent, so the model's
-                    // particle texture is what supplies the break dust. Without
-                    // its own faint texture, mining this would give no visual
-                    // feedback whatsoever.
+                    .renderType("minecraft:translucent")
                     .texture("particle", p.modLoc("block/clear_glass_particle"))))
-            // The frame. Registered through Create's CT system, not an OptiFine
-            // ctm set, because a copycat panel replays the material model's quads
-            // directly and never passes through the pipeline wrapper Continuity
-            // hooks. See CEECT and ClearGlassCTBehaviour.
-            .onRegister(CreateRegistrate.connectedTextures(() -> new ClearGlassCTBehaviour(CEECT.CLEAR_GLASS)))
             .transform(pickaxeOnly())
             .item()
             // A separate icon, not the block model. The block is deliberately
