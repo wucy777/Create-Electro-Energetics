@@ -34,7 +34,7 @@
   "block.electroenergetics.buzzer.tooltip.behaviour1": "Starts buzzing.",
   "block.electroenergetics.buzzer.tooltip.condition1": "When Supplied with Electric Current",
   "block.electroenergetics.buzzer.tooltip.summary": "Creates a buzzing sound.",
-  "block.electroenergetics.clear_glass.tooltip.summary": "Completely _invisible_. You will walk into it, and sprinting into it _stops your sprint_ - like any other wall you cannot see. Remember where you put it.",
+  "block.electroenergetics.clear_glass.tooltip.summary": "Frameless and almost completely _transparent_. You will walk into it, and sprinting into it _stops your sprint_ - like any other wall you cannot see. Remember where you put it.",
   "block.electroenergetics.capacitor": "Capacitor",
   "block.electroenergetics.catenary_holder": "Catenary Holder",
   "block.electroenergetics.clear_glass": "Clear Glass",

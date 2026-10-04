@@ -1,6 +1,5 @@
 package com.george_vi.electroenergetics.events;
 
-import com.george_vi.electroenergetics.CEEBlocks;
 import com.george_vi.electroenergetics.CEEFluids;
 import com.george_vi.electroenergetics.CEEItems;
 import com.george_vi.electroenergetics.CEERegistries;
@@ -120,13 +119,12 @@ public class ModEvents {
         ItemBlockRenderTypes.setRenderLayer(CEEFluids.TRANSFORMER_OIL.getSource(), RenderType.translucent());
         ItemBlockRenderTypes.setRenderLayer(CEEFluids.PLANT_OIL.get(), RenderType.translucent());
         ItemBlockRenderTypes.setRenderLayer(CEEFluids.PLANT_OIL.getSource(), RenderType.translucent());
-        // Belt and braces: the block model already declares the cutout render
-        // type (matching vanilla glass), but this block is almost entirely
-        // transparent, so falling back to the solid pass would turn it into an
-        // opaque cube. Cutout, not translucent: the texture is fully opaque or
-        // fully clear with nothing in between, so there is nothing to blend and
-        // no depth sorting to get wrong.
-        ItemBlockRenderTypes.setRenderLayer(CEEBlocks.CLEAR_GLASS.get(), RenderType.cutout());
+        // Clear glass is deliberately NOT listed here. Its block model declares
+        // minecraft:translucent, and this call would override that: forcing the
+        // cutout pass makes the renderer treat every texel as either fully opaque
+        // or fully discarded, so the sheet's low alpha would be rounded up to
+        // solid and the glass would turn into an opaque cube. Leaving it out lets
+        // the model decide.
         RadialWrenchMenu.registerRotationProperty(DoubleConnectorBlock.ROLL, "Roll");
         RadialWrenchMenu.registerRotationProperty(DoubleConnectorBlock.STYLE, "Style");
         RadialWrenchMenu.registerRotationProperty(ConnectorBlock.STYLE, "Style");
