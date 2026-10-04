@@ -31,12 +31,19 @@ import org.spongepowered.asm.mixin.injection.Redirect;
 public class ControlsMovementBehaviourMixin {
 
     /**
-     * Handle travel, as a fraction of the lever's range: the value Create chases is
-     * clamped to +/-0.5 in its own code, so these are chosen on the same scale.
+     * Handle travel, on the same scale Create uses.
      *
-     * <p>ACCELERATE is positive because the handle leans forward under power, and
-     * REVERSE is negative because it leans back. COAST sits just below the brake so
-     * the neutral positions are distinguishable at a glance on the dial.
+     * <p>Create chases {@code Math.min(motion.length(), 0.5) * f}, where the motion is
+     * a non-negative length and {@code f} is +/-1 chosen from the carriage's facing
+     * so the handle leans the right way from the driver's seat. Returning a signed
+     * value in the same [-0.5, 0.5] band therefore needs no orientation handling of
+     * its own: it passes through Create's {@code min} unchanged and picks up exactly
+     * the same {@code f} correction, so ACCELERATE leans the way Create leans at full
+     * speed and REVERSE leans the way it leans when rolling backwards.
+     *
+     * <p>The values are ordered so the neutral positions are distinguishable at a
+     * glance rather than sitting on top of one another: COAST just below centre and
+     * BRAKE below that, with CRUISE between centre and full power.
      */
     private static float electroEnergetics$handleFor(TrainGear gear) {
         return switch (gear) {

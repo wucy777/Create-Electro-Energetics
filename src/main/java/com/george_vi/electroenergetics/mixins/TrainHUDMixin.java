@@ -1,6 +1,7 @@
 package com.george_vi.electroenergetics.mixins;
 
 import com.george_vi.electroenergetics.content.railway_electrification.ElectricManualSpeed;
+import com.george_vi.electroenergetics.content.railway_electrification.TrainGear;
 import com.george_vi.electroenergetics.content.railway_electrification.TrainHudData;
 import com.llamalad7.mixinextras.injector.ModifyExpressionValue;
 import com.simibubi.create.content.contraptions.actors.trainControls.ControlsHandler;
@@ -12,6 +13,9 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
+
+import java.util.Collection;
+import java.util.List;
 
 /**
  * Keeps Create's experience-bar speed readout in step with the speed a manually
@@ -70,6 +74,53 @@ public class TrainHUDMixin {
         // lever panel uses, so the two can never disagree about which train this is.
         if (TrainHudData.leverDriven(train.id))
             cir.setReturnValue(false);
+    }
+
+    /**
+     * Makes the experience-bar direction arrow follow the lever instead of S.
+     *
+     * <p>Create decides that arrow with {@code reversing =
+     * ControlsHandler.currentlyPressed.contains(1)}, and 1 is the S key. On an
+     * electric train S does nothing, so the arrow flipped whenever the driver
+     * happened to press S - an indicator pointing backwards while the train was
+     * plainly going forwards, which is the "arrow in the middle of the experience
+     * bar" that gives the game away.
+     *
+     * <p>The field is read three times in that method (lines 190, 192, 193) and only
+     * the first is the direction test, so the injection is pinned by ORDINAL 0 rather
+     * than by target alone. Without that it would also rewrite the steering-key reads
+     * that follow, and hitching the arrow to the lever would break the steering
+     * indication on the same HUD.
+     *
+     * <p>Only for electric trains: a fuel train's arrow keeps following its own keys,
+     * and its Motion-based handle is untouched.
+     */
+    @ModifyExpressionValue(
+            method = "renderOverlay",
+            at = @At(value = "FIELD",
+                    target = "Lcom/simibubi/create/content/contraptions/actors/trainControls/ControlsHandler;currentlyPressed:Ljava/util/Collection;",
+                    ordinal = 0),
+            remap = false)
+    private static Collection<Integer> electroEnergetics$leverDrivesDirectionArrow(Collection<Integer> original) {
+        Train train = drivenTrain();
+        if (train == null || !TrainHudData.leverDriven(train.id))
+            return original;
+        TrainHudData.GearState gear = TrainHudData.gear(train.id);
+        if (gear == null)
+            return original;
+        // Hand Create a view that reports "reversing" exactly when the lever does,
+        // leaving everything else in the collection alone.
+        boolean reversing = gear.gear() == TrainGear.REVERSE.ordinal();
+        if (!reversing) {
+            if (!original.contains(1))
+                return original;
+            return original.stream().filter(i -> i != 1).toList();
+        }
+        if (original.contains(1))
+            return original;
+        List<Integer> withReverse = new java.util.ArrayList<>(original);
+        withReverse.add(1);
+        return withReverse;
     }
 
     /** The train whose controls the local player holds, or {@code null}. */
