@@ -15,6 +15,22 @@ public class ElectricTrainData {
     public double accumulatorActualVoltage = 0d;
     public boolean hasCreativeSource = false;
     public boolean isPowered = false;
+
+    /**
+     * Whether this consist carries traction motors, regardless of whether they are
+     * energised right now.
+     *
+     * <p>This is what decides that a train is an <i>electric</i> train and therefore
+     * lever-driven, as opposed to a fuel train, which keeps Create's controls. It is
+     * deliberately not {@link #isPowered}: a set that has run off the end of the
+     * catenary or flattened its accumulator is still an electric train, and it still
+     * needs its brake and its vigilance timer. Keying the control scheme on the
+     * supply instead would hand it back to Create's throttle-and-wheel scheme the
+     * moment the voltage dropped - a completely different set of controls appearing
+     * mid-journey, and the friction brake along with them. Latched once true, since
+     * a consist does not lose its motors.
+     */
+    public boolean hasTractionMotors = false;
     public double lastVoltage = 0d;
 
     public double lastSpeed;

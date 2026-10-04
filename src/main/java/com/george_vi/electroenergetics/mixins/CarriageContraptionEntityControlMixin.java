@@ -49,9 +49,13 @@ public class CarriageContraptionEntityControlMixin {
             return;
 
         ElectricTrainData data = ((ICEETrainExtension) train).getElectricTrainData();
-        // Only a train with traction available is lever-driven. A fuel train, or an
-        // electric one with no supply, falls through to Create entirely.
-        if (data.isPowered)
+        // Keyed on the consist carrying traction motors rather than on it being
+        // energised this instant. An electric train that has run off the end of the
+        // catenary is still an electric train, and it still needs its lever, its
+        // brake and its vigilance timer; keying this on the supply would hand it
+        // back to Create's controls, with W/S suddenly live again, the moment the
+        // voltage dipped. Fuel trains never set this flag, so they are untouched.
+        if (data.hasTractionMotors)
             data.driver.markDriverPresent();
     }
 }

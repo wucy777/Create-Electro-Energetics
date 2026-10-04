@@ -195,7 +195,7 @@ public class TrainMixin implements ICEETrainExtension {
         // control() and from Navigation at points that do not line up with the
         // train's own tick, so integrating there as well would double-apply the
         // law and make the train accelerate at twice the rate.
-        if (data.isPowered && data.driver.isDriven()) {
+        if (data.hasTractionMotors && data.driver.isDriven()) {
             applyGearLaw(self, data);
             return;
         }
@@ -305,7 +305,7 @@ public class TrainMixin implements ICEETrainExtension {
         // the regeneration report once every five ticks, so a braking train drew
         // its recovered power in a stutter. The gear law owns both the speed and
         // the flag for a driven train, so this method leaves both alone.
-        if (data.isPowered && data.driver.isDriven())
+        if (data.hasTractionMotors && data.driver.isDriven())
             return;
 
         // Cleared here, once, before any branch can return early. The flag is read

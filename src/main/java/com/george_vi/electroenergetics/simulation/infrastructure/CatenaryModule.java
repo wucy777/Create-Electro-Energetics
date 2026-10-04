@@ -417,6 +417,14 @@ public class CatenaryModule {
             }
             float acceleration = (float) (trainSpeed - trainData.lastSpeed);
 
+            // Latched here, because this is where the motors are actually counted.
+            // It is what marks a train as electric for the control scheme, so it has
+            // to survive a loss of supply: this runs whether or not the train is
+            // energised, and the flag is never cleared, since a consist does not lose
+            // its motors.
+            if (motorCars > 0)
+                trainData.hasTractionMotors = true;
+
             for (Map.Entry<Integer, Vec3> ce : positions.entrySet()) {
                 Integer carriageID = ce.getKey();
                 Vec3 pos = ce.getValue();
