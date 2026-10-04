@@ -3,33 +3,37 @@ package com.george_vi.electroenergetics.client;
 import com.george_vi.electroenergetics.content.railway_electrification.TrainGear;
 
 /**
- * Screen-space layout and hit-testing for the driver's control panel.
+ * Geometry of the lever panel: one vertical slot with a handle that slides in it.
  *
- * <p>Kept apart from the renderer because the geometry has to be shared by three
- * things that must agree exactly: the renderer, the click test, and the hover
- * highlight. Scattering the rectangles across the drawing code is how a button
- * ends up a few pixels away from where it can be clicked.
+ * <p>Shared by the renderer and the key handling so the panel that is drawn and the
+ * panel that responds cannot drift apart. The layout is a single scale with five
+ * detents, not five separate buttons - the handle sits at one position and moves, the
+ * way a real driving handle does.
  *
- * <p>Laid out against a nominal width and height and then anchored to the actual
- * window, so the panel sits in the bottom-right corner at any GUI scale. The
- * centre and top of the screen are deliberately left clear - that is where the
- * track ahead is.
+ * <p>Anchored bottom-right, and sized so the middle and top of the screen stay clear:
+ * that is where the track ahead is.
  */
 final class TrainControlLayout {
 
-    /** Panel width, in GUI pixels. Five gear rows plus the two buttons. */
-    static final int PANEL_W = 118;
-    static final int ROW_H = 16;
-    static final int MARGIN = 4;
+    /** Panel width in GUI pixels. Wide enough for the label and the handle. */
+    static final int PANEL_W = 104;
 
-    /** Height of the lever column: one row per gear. */
+    /** The vertical travel of the handle: one detent per lever position. */
+    static final int DETENT_H = 18;
     static final int GEAR_COUNT = TrainGear.values().length;
-    static final int LEVER_H = GEAR_COUNT * ROW_H;
+    static final int SLOT_H = (GEAR_COUNT - 1) * DETENT_H;
 
-    /** The two buttons under the lever. */
-    static final int BUTTON_H = 18;
+    /** Handle dimensions. */
+    static final int HANDLE_W = 22;
+    static final int HANDLE_H = 11;
 
-    static final int TOTAL_H = 14 + LEVER_H + 4 + BUTTON_H + BUTTON_H + MARGIN + 10;
+    static final int MARGIN = 4;
+    /** Header row showing which position the lever is in. */
+    static final int HEADER_H = 12;
+    /** Footer rows: the key hints, and the status line. */
+    static final int FOOTER_H = 22;
+
+    static final int TOTAL_H = HEADER_H + SLOT_H + HANDLE_H + FOOTER_H;
 
     private TrainControlLayout() {}
 
@@ -41,62 +45,30 @@ final class TrainControlLayout {
         return guiHeight - TOTAL_H - MARGIN;
     }
 
-    /** Top edge of gear row {@code i}. */
-    static int gearRowY(int panelY, int i) {
-        return panelY + 14 + i * ROW_H;
+    /** Centre of the slot, where the handle's track is. */
+    static int slotCenterX(int panelX) {
+        return panelX + PANEL_W - 22;
     }
 
-    /** Index of the gear under the cursor, or -1. */
-    static int gearAt(int panelX, int panelY, double mouseX, double mouseY) {
-        if (mouseX < panelX || mouseX > panelX + PANEL_W)
-            return -1;
-        for (int i = 0; i < GEAR_COUNT; i++) {
-            int y = gearRowY(panelY, i);
-            if (mouseY >= y && mouseY < y + ROW_H)
-                return i;
-        }
-        return -1;
-    }
-
-    /** Whether the point is inside the panel at all, so clicks can be swallowed. */
-    static boolean inside(int panelX, int panelY, double mouseX, double mouseY) {
-        return mouseX >= panelX && mouseX <= panelX + PANEL_W
-                && mouseY >= panelY && mouseY <= panelY + TOTAL_H;
-    }
-
-    // The two buttons. Named zones rather than indices, because they are not a
-    // list: the emergency button only exists in reverse, and the two must not be
-    // confused if one is hidden.
-
-    static final int NONE = 0;
-    static final int CONFIRM = 1;
-    static final int EMERGENCY = 2;
-
-    static int confirmY(int panelY) {
-        return panelY + 14 + LEVER_H + 4;
-    }
-
-    static int emergencyY(int panelY) {
-        return confirmY(panelY) + BUTTON_H;
+    /** Top of the slot: the ACCELERATE end. */
+    static int slotTopY(int panelY) {
+        return panelY + HEADER_H;
     }
 
     /**
-     * Which button is under the cursor. The emergency button is only testable when
-     * {@code emergencyVisible}, so a click where it would have been cannot fire it
-     * while the lever is not in reverse.
+     * Centre Y of the handle for a given lever position.
+     *
+     * <p>Index 0 (ACCELERATE) is at the top and the last index (REVERSE) at the
+     * bottom, which is the order the enum is declared in and the order the driver
+     * sees: pushing the lever away accelerates, pulling it back reverses.
      */
-    static int buttonAt(int panelX, int panelY, double mouseX, double mouseY,
-                        boolean emergencyVisible) {
-        if (mouseX < panelX || mouseX > panelX + PANEL_W)
-            return NONE;
-        int cy = confirmY(panelY);
-        if (mouseY >= cy && mouseY < cy + BUTTON_H)
-            return CONFIRM;
-        if (emergencyVisible) {
-            int ey = emergencyY(panelY);
-            if (mouseY >= ey && mouseY < ey + BUTTON_H)
-                return EMERGENCY;
-        }
-        return NONE;
+    static int handleCenterY(int panelY, int gearIndex) {
+        int clamped = Math.max(0, Math.min(GEAR_COUNT - 1, gearIndex));
+        return slotTopY(panelY) + clamped * DETENT_H + HANDLE_H / 2;
+    }
+
+    /** Y of the label for a detent, aligned with that detent on the slot. */
+    static int detentLabelY(int panelY, int gearIndex) {
+        return handleCenterY(panelY, gearIndex) - 4;
     }
 }

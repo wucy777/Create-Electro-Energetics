@@ -16,36 +16,39 @@ import net.neoforged.api.distmarker.Dist;
 import net.neoforged.api.distmarker.OnlyIn;
 
 /**
- * The driver's lever and buttons, bottom-right.
+ * The driver's lever, bottom-right: one slot with a handle that slides in it.
  *
- * <p>A real EMU has a handle with a few detents; this is that, on screen. Clicking
- * a row notches the lever there. The two buttons sit underneath: the vigilance
- * acknowledgement, which is always present, and the emergency brake, which only
- * appears in reverse because that is the only position where it means anything.
+ * <p>A handle on a scale, not a row of buttons. The five positions are labelled down
+ * the side and the handle sits at the one that is selected, so the driver reads the
+ * lever's position at a glance rather than working out which button was last pressed.
  *
- * <p>Left-bottom is the readout; this corner is the controls. The centre and top of
- * the screen are left clear on purpose, since that is where the track ahead is.
+ * <p>Driven by the raw arrow keys and J/K, described in {@link TrainControlKeys}. Not
+ * by the mouse: while driving, the cursor is captured for looking around and is not
+ * on screen to point at anything.
  *
- * <p>Purely a view: every value shown comes from the server through
- * {@link TrainHudData}, and clicks are sent as packets. Nothing here decides
- * anything about the train.
+ * <p>A view only. Every value comes from the server through {@link TrainHudData}, and
+ * the keys are read in {@link TrainControlInput}; nothing here decides anything.
  */
 @OnlyIn(Dist.CLIENT)
 public class TrainControlHud implements LayeredDraw.Layer {
 
     public static final TrainControlHud INSTANCE = new TrainControlHud();
 
-    // Colour scheme: dark translucent panel with a light edge, so it reads against
-    // both a bright sky and a dark tunnel.
     private static final int BACKDROP = 0xC8101216;
     private static final int BORDER = 0xFF3A3F46;
     private static final int TEXT = 0xFFE6E6E6;
     private static final int TEXT_DIM = 0xFF9AA0A6;
-    private static final int ACTIVE_BG = 0xFF2D6A4F;
     private static final int ACTIVE_TEXT = 0xFFFFFFFF;
-    private static final int HOVER_BG = 0xFF3A3F46;
     private static final int WARN = 0xFFFFB454;
     private static final int DANGER = 0xFFFF6B5E;
+    private static final int REGEN = 0xFF7EE787;
+
+    /** Slot rail and the handle riding in it. */
+    private static final int RAIL = 0xFF2A2E34;
+    private static final int DETENT_MARK = 0xFF4A5058;
+    private static final int HANDLE = 0xFFD8DEE6;
+    private static final int HANDLE_EDGE = 0xFF6E767F;
+    private static final int HANDLE_GRIP = 0xFF8A929B;
 
     private TrainControlHud() {}
 
@@ -66,10 +69,6 @@ public class TrainControlHud implements LayeredDraw.Layer {
         TrainHudData.GearState gear = TrainHudData.gear(train.id);
         if (gear == null)
             return;   // no server sample yet: draw nothing rather than a guess
-        // A fuel train gets a sample too, because that packet also feeds the carriage
-        // voltmeters. Without this the lever panel would appear on a diesel crew's
-        // screen. One shared test, so the panel, the click handler and the wheel
-        // suppression cannot disagree.
         if (!TrainHudData.leverDriven(train.id))
             return;
 
@@ -81,75 +80,87 @@ public class TrainControlHud implements LayeredDraw.Layer {
 
         graphics.fill(x, y, x + TrainControlLayout.PANEL_W, y + TrainControlLayout.TOTAL_H, BACKDROP);
         graphics.renderOutline(x, y, TrainControlLayout.PANEL_W, TrainControlLayout.TOTAL_H, BORDER);
-        graphics.drawString(font, "Traction", x + 4, y + 3, TEXT_DIM, false);
 
-        // The emergency button only exists in reverse, which is the position where
-        // it means anything: it is the "stop, I am not shunting" action.
-        boolean emergencyVisible = gear.gear() == TrainGear.REVERSE.ordinal();
-
-        // Create's own conversion for cursor positions (ValueSettingsScreen:305,
-        // XaeroTrainMap:58): gui = xpos * guiScaledWidth / screenWidth. xpos is
-        // already in screen coordinates, so the divisor is getScreenWidth(), not
-        // getWidth() - the framebuffer differs from the screen under display scaling
-        // or HiDPI, and using it would misplace the hover highlight and, in
-        // TrainControlInput, the click test with it.
-        double mouseX = mc.mouseHandler.xpos() * w / mc.getWindow().getScreenWidth();
-        double mouseY = mc.mouseHandler.ypos() * h / mc.getWindow().getScreenHeight();
-        int hoveredGear = TrainControlLayout.gearAt(x, y, mouseX, mouseY);
-        int hoveredButton = TrainControlLayout.buttonAt(x, y, mouseX, mouseY, emergencyVisible);
-
+        int current = gear.gear();
         TrainGear[] gears = TrainGear.values();
+        boolean valid = current >= 0 && current < gears.length;
+        TrainGear selected = valid ? gears[current] : TrainGear.BRAKE;
+
+        // Header: the position's name, which is what the driver reads first.
+        graphics.drawString(font, shortLabel(selected), x + 4, y + 3, ACTIVE_TEXT, false);
+
+        int cx = TrainControlLayout.slotCenterX(x);
+        int top = TrainControlLayout.slotTopY(y);
+        int railTop = top;
+        int railBottom = top + TrainControlLayout.SLOT_H + TrainControlLayout.HANDLE_H;
+
+        // The rail the handle slides in.
+        graphics.fill(cx - 1, railTop, cx + 1, railBottom, RAIL);
+
+        // A tick at every detent, so the positions are countable, and the label for
+        // each one beside it. The selected label is bright, the rest dim.
         for (int i = 0; i < gears.length; i++) {
-            int rowY = TrainControlLayout.gearRowY(y, i);
-            boolean active = i == gear.gear();
-            boolean hover = i == hoveredGear;
-            int bg = active ? ACTIVE_BG : (hover ? HOVER_BG : 0);
-            if (bg != 0)
-                graphics.fill(x + 2, rowY, x + TrainControlLayout.PANEL_W - 2,
-                        rowY + TrainControlLayout.ROW_H - 1, bg);
-            // The lever position itself: a solid bar on the left edge, so the
-            // current notch is readable at a glance without reading the label.
-            if (active)
-                graphics.fill(x + 2, rowY, x + 4, rowY + TrainControlLayout.ROW_H - 1, ACTIVE_TEXT);
-            graphics.drawString(font, gearLabel(gears[i]), x + 8, rowY + 4,
-                    active ? ACTIVE_TEXT : TEXT, false);
+            int my = TrainControlLayout.handleCenterY(y, i);
+            boolean isCurrent = i == current;
+            graphics.fill(cx - 4, my - 0, cx + 4, my + 1,
+                    isCurrent ? ACTIVE_TEXT : DETENT_MARK);
+            graphics.drawString(font, shortLabel(gears[i]), x + 4,
+                    TrainControlLayout.detentLabelY(y, i),
+                    isCurrent ? ACTIVE_TEXT : TEXT_DIM, false);
         }
 
-        int cy = TrainControlLayout.confirmY(y);
-        boolean confirmDue = gear.confirmDue();
-        drawButton(graphics, font, x, cy, "Acknowledge",
-                confirmDue ? DANGER : TEXT,
-                hoveredButton == TrainControlLayout.CONFIRM,
-                confirmDue);
+        // The handle itself: a bar across the rail with a grip line, so it reads as a
+        // handle rather than a blip on the scale.
+        int hy = TrainControlLayout.handleCenterY(y, valid ? current : 0);
+        int hx = cx - TrainControlLayout.HANDLE_W / 2;
+        graphics.fill(hx, hy - TrainControlLayout.HANDLE_H / 2,
+                hx + TrainControlLayout.HANDLE_W, hy + TrainControlLayout.HANDLE_H / 2, HANDLE);
+        graphics.renderOutline(hx, hy - TrainControlLayout.HANDLE_H / 2,
+                TrainControlLayout.HANDLE_W, TrainControlLayout.HANDLE_H, HANDLE_EDGE);
+        graphics.fill(hx + 4, hy - 1, hx + TrainControlLayout.HANDLE_W - 4, hy + 1, HANDLE_GRIP);
 
-        if (emergencyVisible) {
-            int ey = TrainControlLayout.emergencyY(y);
-            drawButton(graphics, font, x, ey, "Emergency brake",
-                    DANGER, hoveredButton == TrainControlLayout.EMERGENCY, false);
-        }
+        // Footer: the key hints, then the one thing worth saying.
+        int fy = y + TrainControlLayout.TOTAL_H - TrainControlLayout.FOOTER_H + 2;
+        graphics.drawString(font, "\u2191\u2193 lever   J ack", x + 4, fy, TEXT_DIM, false);
 
-        // A penalty that is still running is worth stating; otherwise the driver
-        // only notices the train is slow and does not know why.
-        if (gear.emergencyPenalty()) {
-            graphics.drawString(font, "LIMITED to 40 km/h",
-                    x + 4, y + TrainControlLayout.TOTAL_H - 9, WARN, false);
-        } else if (gear.regen()) {
-            graphics.drawString(font, "regenerating",
-                    x + 4, y + TrainControlLayout.TOTAL_H - 9, 0xFF7EE787, false);
-        }
+        String status = statusLine(gear);
+        if (!status.isEmpty())
+            graphics.drawString(font, status, x + 4, fy + 10, statusColor(gear), false);
     }
 
-    private static void drawButton(GuiGraphics graphics, Font font, int x, int y,
-                                   String label, int colour, boolean hover, boolean alert) {
-        int bg = hover ? HOVER_BG : (alert ? 0x60FF6B5E : 0);
-        if (bg != 0)
-            graphics.fill(x + 2, y, x + TrainControlLayout.PANEL_W - 2, y + TrainControlLayout.BUTTON_H - 1, bg);
-        graphics.renderOutline(x + 2, y, TrainControlLayout.PANEL_W - 4, TrainControlLayout.BUTTON_H - 1, BORDER);
-        graphics.drawString(font, label, x + 8, y + 5, colour, false);
+    /** The one thing to tell the driver right now, in priority order. */
+    private static String statusLine(TrainHudData.GearState gear) {
+        if (gear.confirmDue())
+            return "PRESS J";
+        if (gear.emergencyPenalty())
+            return "LIMIT 40 km/h";
+        if (gear.emergencyArmed())
+            return "K = emergency";
+        if (gear.regen())
+            return "regenerating";
+        if (gear.gear() == TrainGear.CRUISE.ordinal()) {
+            return switch (gear.cruiseState()) {
+                case 0 -> "holding speed";
+                case 1 -> "power limited";
+                case 2 -> "braking downhill";
+                default -> "stopped";
+            };
+        }
+        return "";
     }
 
-    /** Short label per notch. Kept here rather than in the enum so the enum stays UI-free. */
-    static String gearLabel(TrainGear gear) {
+    private static int statusColor(TrainHudData.GearState gear) {
+        if (gear.confirmDue())
+            return DANGER;
+        if (gear.emergencyPenalty())
+            return WARN;
+        if (gear.regen())
+            return REGEN;
+        return TEXT;
+    }
+
+    /** Compact label, since the panel is narrow and the scale is read vertically. */
+    static String shortLabel(TrainGear gear) {
         return switch (gear) {
             case ACCELERATE -> "Accelerate";
             case CRUISE -> "Hold speed";

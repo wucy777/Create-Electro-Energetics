@@ -105,6 +105,10 @@ public class GameEvents {
 
         ElectricPropertiesOverlay.INSTANCE.ticks++;
 
+        // Read the cab keys once a tick. Does nothing at all unless the player is
+        // driving an electric train, so it costs a few field reads when it is not.
+        TrainControlInput.tick();
+
         // Safety?
         WireInteractionHandler.preventUseOnBlockPacket = false;
 
@@ -121,25 +125,13 @@ public class GameEvents {
     }
 
     /**
-     * Clicks on the driver's lever panel.
+     * Clicks on the driver's lever panel are no longer handled.
      *
-     * <p>Must run before the click reaches the world, or the same click that notches
-     * the lever would also swing at whatever is behind the panel. Cancelling here is
-     * the only way to stop that; the panel only claims clicks inside its own
-     * rectangle while a driver holds the controls of an electric train, so ordinary
-     * play is unaffected everywhere else.
-     *
-     * <p>{@code Pre} rather than {@code Post}: by the time a Post event fires the
-     * swing or the block placement has already been decided.
+     * <p>They were, and it was wrong: while driving, the mouse is captured by the
+     * game for looking around, so the cursor is not on screen and cannot be pointed
+     * at a panel at all. The lever is driven by the raw keys in
+     * {@link com.george_vi.electroenergetics.client.TrainControlInput} instead.
      */
-    @OnlyIn(Dist.CLIENT)
-    @SubscribeEvent
-    public static void mouseClicked(InputEvent.MouseButton.Pre event) {
-        if (event.getAction() != org.lwjgl.glfw.GLFW.GLFW_PRESS)
-            return;
-        if (TrainControlInput.onClick(event.getButton()))
-            event.setCanceled(true);
-    }
 
     @OnlyIn(Dist.CLIENT)
     @SubscribeEvent
