@@ -14,6 +14,7 @@ import com.george_vi.electroenergetics.mixin_interfaces.IPantographList;
 import com.george_vi.electroenergetics.simulation.CircuitBuilder;
 import com.george_vi.electroenergetics.simulation.SimulationResults;
 import com.george_vi.electroenergetics.simulation.electrical_properties.ElectricalProperties;
+import com.george_vi.electroenergetics.simulation.electrical_properties.NortonProperties;
 import com.simibubi.create.Create;
 import com.simibubi.create.content.trains.entity.Carriage;
 import com.simibubi.create.content.trains.entity.CarriageContraptionEntity;
@@ -226,10 +227,61 @@ public class CatenaryModule {
             // Guard against a non-finite demand producing a broken resistance.
             if (!(electricalPower > 0d) || Double.isNaN(electricalPower))
                 electricalPower = TrainTractionModel.MIN_DEMAND;
-            trainData.displayPower = electricalPower;
-            double trainResistance = lastVoltage * lastVoltage / electricalPower;
 
-            builder.connect(groundNode, trainNode, ElectricalProperties.resistor(trainResistance));
+            // Regenerative braking. Set by the braking branch of the drive path on
+            // the previous tick, so this is the same one-tick lag the load itself
+            // already has - the demand above is likewise built from lastSpeed and
+            // lastVoltage. Only a train actually slowing under the brake is
+            // regenerating; coasting does not, because the motors are not being
+            // driven against anything.
+            var trainCfg = CEEConfigs.server().trainValues;
+            double regenPower = 0d;
+            if (trainData.braking && trainCfg.electricTrainRegenerativeBraking.get()) {
+                // The brake's own contribution, not the whole deceleration: part of
+                // the slowdown on a gradient is gravity and running resistance, and
+                // the motors can only recover from the force the brake applies. On
+                // a steep descent that difference can be zero or negative, in which
+                // case the train is gravity-driven and there is nothing to recover.
+                double coast = TrainTractionModel.coastDeceleration(trainSpeedMs, grade, carriages);
+                double brakeOnly = Math.max(trainCfg.electricTrainBrakeDeceleration.get() - coast, 0d);
+                regenPower = TrainTractionModel.regenerativePower(
+                        trainSpeedMs, brakeOnly, carriages,
+                        trainCfg.electricTrainRegenerativeFraction.get(),
+                        trainCfg.electricTrainRegenMinSpeed.get());
+            }
+            trainData.regenPower = regenPower;
+
+            if (regenPower > 0d) {
+                // A generator, not a load: the motors push power back up the
+                // pantograph. Modelled the same way the mod's own alternator is -
+                // a Norton source whose internal resistance is the max-power-
+                // transfer value V^2/(4P) and whose source current is V/internal -
+                // so the line sees a source behind an impedance rather than an
+                // ideal one, and it cannot deliver more than the motors recover.
+                double lineVoltage = Math.abs(lastVoltage);
+                double internal = (lineVoltage * lineVoltage) / (4d * regenPower);
+                if (Double.isFinite(internal) && internal > 0d) {
+                    builder.connect(trainNode, groundNode,
+                            new NortonProperties(internal, lineVoltage / internal));
+                    // The auxiliaries still draw while braking, so they go back in
+                    // as an ordinary load; only the traction side is a source.
+                    double aux = TrainTractionModel.auxiliaryPower(carriages);
+                    double auxResistance = lineVoltage * lineVoltage / aux;
+                    if (Double.isFinite(auxResistance) && auxResistance > 0d)
+                        builder.connect(groundNode, trainNode,
+                                ElectricalProperties.resistor(auxResistance));
+                } else {
+                    regenPower = 0d;
+                }
+                // Reported as a negative draw, which is what the HUD and the
+                // on-train ammeters should show while the line is being fed.
+                trainData.displayPower = -regenPower;
+            } else {
+                trainData.regenPower = 0d;
+                trainData.displayPower = electricalPower;
+                double trainResistance = lastVoltage * lastVoltage / electricalPower;
+                builder.connect(groundNode, trainNode, ElectricalProperties.resistor(trainResistance));
+            }
 
             for (TrainPantographEntry pe : trainExtension.getElectricTrainData().pantographs)
                 if (pe.active && pe.node != null)

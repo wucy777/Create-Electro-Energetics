@@ -97,13 +97,11 @@ public class ElectricTrainHud implements LayeredDraw.Layer {
         // gain or lose carriages.
         int rows = 6;
 
-        // What the driver can actually reach right now. Create caps manual
-        // driving at maxSpeed() * manualTrainSpeedModifier * throttle (see
-        // CarriageContraptionEntity.control), and it sizes the experience-bar
-        // speed bar from that same product. ElectricManualSpeed resolves both
-        // halves on both sides, so this panel, Create's bar and the train itself
-        // all agree - including the throttle, which is what makes the number move
-        // as the wheel is scrolled.
+        // The train's own ceiling, with no throttle term: this is what fills the
+        // readout. Create's experience bar divides by the same figure, so the two
+        // agree. The throttle still caps how fast the train may go (Create
+        // multiplies it into the target speed), so pulling the wheel back drops
+        // this reading rather than shrinking what "full" means.
         float manualCap = sample.maxSpeed()
                 * ElectricManualSpeed.speedBarFactor(train, manualSpeedModifier());
 
@@ -179,11 +177,16 @@ public class ElectricTrainHud implements LayeredDraw.Layer {
         textGrade = describeGrade(grade);
         // Rating is per carriage, so show the consist's rating against what it is
         // actually drawing; that is the comparison that shows whether the set is
-        // near its limit or cruising well below it.
-        textPower = powered
-                ? formatPowerKw(powerKw) + " / "
-                        + String.format("%.2f", cars * perCarriage / 1e6) + " MW"
-                : "--";
+        // near its limit or cruising well below it. A negative figure is the
+        // motors regenerating, so it is labelled rather than printed as a bare
+        // minus, which would read as a broken reading.
+        if (!powered)
+            textPower = "--";
+        else if (powerKw < 0)
+            textPower = "regen " + formatPowerKw(-powerKw);
+        else
+            textPower = formatPowerKw(powerKw) + " / "
+                    + String.format("%.2f", cars * perCarriage / 1e6) + " MW";
         textCatenary = String.format("%.1f", deciVolt / 10d) + " kV"
                 + (powered ? "" : " (unpowered)");
         textCars = cars + "  (" + motors + " motorised)";

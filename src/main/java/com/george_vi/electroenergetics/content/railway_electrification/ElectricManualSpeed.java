@@ -4,7 +4,6 @@ import com.george_vi.electroenergetics.config.CEEConfigs;
 import com.george_vi.electroenergetics.config.CServer;
 import com.george_vi.electroenergetics.mixin_interfaces.ICEETrainExtension;
 import com.simibubi.create.content.trains.entity.Train;
-import net.minecraft.util.Mth;
 
 /**
  * Create's manual-driving speed cap, resolved for an electric train.
@@ -26,18 +25,17 @@ import net.minecraft.util.Mth;
  *   <li>{@link #topSpeedFactor} is what the server feeds into
  *       {@code CarriageContraptionEntity.control()}: the handicap is dropped, so
  *       the raw ceiling becomes {@code maxSpeed()}. Create multiplies the throttle
- *       in straight afterwards, exactly as it does for a fuel train.</li>
+ *       in straight afterwards, exactly as it does for a fuel train, so pulling the
+ *       speed wheel back really does cap the train.</li>
  *   <li>{@link #speedBarFactor} is the divisor for the speed readouts - Create's
- *       18-segment experience bar and this mod's driver HUD. That has to be the
- *       speed that fills the bar, i.e. {@code maxSpeed() * throttle} once the
- *       handicap is gone. Using the raw ceiling here was a bug: it made the bar
- *       ignore the throttle, so scrolling the speed wheel changed the train but
- *       moved nothing on screen.</li>
+ *       18-segment experience bar and this mod's driver HUD. It is the train's own
+ *       ceiling with <b>no</b> throttle term, so the bar reads the true speed
+ *       against the full scale at all times and the throttle changes how fast the
+ *       bar fills rather than what full means.</li>
  * </ul>
  *
  * <p>Fuel trains get Create's own factor back untouched and keep dividing by
- * {@code maxSpeed() * manualTrainSpeedModifier} with no throttle term, so nothing
- * about them changes.
+ * {@code maxSpeed() * manualTrainSpeedModifier}, so nothing about them changes.
  */
 public final class ElectricManualSpeed {
 
@@ -67,34 +65,28 @@ public final class ElectricManualSpeed {
     }
 
     /**
-     * Factor applied to {@code maxSpeed()} to get the speed at which the speed
-     * readouts are full.
+     * Divisor for the speed readouts: what speed fills the bar completely.
+     *
+     * <p>This is the train's own ceiling and deliberately <b>not</b> the throttle.
+     * The bar used to be scaled by the throttle as well, so scrolling the speed
+     * wheel down shrank the denominator and the bar ran ahead of the train - at
+     * half throttle, doing half the ceiling speed, it already read full. The
+     * request is that the bar always reads the true speed against the full 100,
+     * so pulling the throttle back visibly drops the reading instead of hiding it.
+     *
+     * <p>Fuel trains are untouched: they keep Create's
+     * {@code maxSpeed() * manualTrainSpeedModifier} and no throttle term, exactly
+     * as before.
      *
      * <p>Both readouts, this mod's panel and Create's experience bar, may only be
-     * touched for a train that is actually electrically driven. A fuel train must
-     * keep Create's readout exactly as it was, throttle term and all - hence the
+     * touched for a train that is actually electrically driven - hence the
      * explicit check rather than folding this into the handicap test.
      */
     public static float speedBarFactor(Train train, float original) {
         Traction traction = traction(train);
         if (!traction.electric())
             return original;
-        float handicap = traction.waived() ? 1f : original;
-        return handicap * throttleFactor(train);
-    }
-
-    /**
-     * Create's throttle as a multiplier, floored at the smallest step its own
-     * speed wheel can scroll to.
-     *
-     * <p>That floor matters because this value becomes a divisor: a schedule is
-     * free to set a throttle of 0, and dividing by it would make the bar read
-     * {@code NaN} instead of empty. 1/18 is the same lower bound
-     * {@code TrainHUD.onScroll} clamps to, so a hand-driven train can never reach
-     * it and only a schedule can.
-     */
-    private static float throttleFactor(Train train) {
-        return (float) Mth.clamp(train.throttle, 1d / 18d, 1d);
+        return traction.waived() ? 1f : original;
     }
 
     /**

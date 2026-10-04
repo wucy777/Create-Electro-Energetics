@@ -5,6 +5,7 @@ import com.george_vi.electroenergetics.CEERegistries;
 import com.george_vi.electroenergetics.config.CEEConfigs;
 import com.george_vi.electroenergetics.content.railway_electrification.ElectricTrainData;
 import com.george_vi.electroenergetics.content.railway_electrification.TrainHudData;
+import com.george_vi.electroenergetics.content.railway_electrification.TrainTractionModel;
 import com.george_vi.electroenergetics.content.railway_electrification.sound_effects.TrainSoundModifier;
 import com.george_vi.electroenergetics.content.railway_electrification.sound_effects.sound_types.ElectricTrainSoundType;
 import com.george_vi.electroenergetics.mixin_interfaces.ICEETrainExtension;
@@ -156,6 +157,62 @@ public class TrainMixin implements ICEETrainExtension {
     }
 
     /**
+     * Coasting, which is not the same thing as braking.
+     *
+     * <p>Create uses one number for both: {@code acceleration()} sets the ramp-up
+     * rate, the braking rate <i>and</i> the rate a train loses speed at with
+     * nothing driving it. Since {@code approachTargetSpeed} brakes at the same
+     * figure, releasing the throttle, holding reverse and scrolling the speed
+     * wheel below the current speed all decelerated identically - there was no
+     * brake at all, just a fixed friction-free stop.
+     *
+     * <p>Physically they are different by an order of magnitude. Coasting is
+     * running resistance alone: at 100 m/s a carriage sheds about 0.16 m/s², so
+     * it coasts for kilometres. Service braking is a controlled ~0.8 m/s² that
+     * stops the same train in a fraction of the distance and puts energy back
+     * into the line. So this replaces only the coasting path; braking stays in
+     * {@code approachTargetSpeed} and {@code acceleration()}, where Create's
+     * braking-distance maths also reads it.
+     *
+     * <p>Only powered electric trains are affected. Anything else - a fuel train,
+     * an unpowered one, or a scheduled one with a destination - falls through to
+     * Create unchanged.
+     */
+    @WrapMethod(method = "tickPassiveSlowdown")
+    private void electroEnergetics$tickPassiveSlowdown(Operation<Void> original) {
+        Train self = (Train) (Object) this;
+        ElectricTrainData data = electroenergetics$electricTrainData;
+
+        // manualTick is true while a driver holds the controls, so their braking
+        // already happened in approachTargetSpeed; a destination means the
+        // schedule is stopping the train and Create's rate is the right one.
+        if (!data.isPowered || self.manualTick || self.navigation.destination != null || self.speed == 0) {
+            original.call();
+            return;
+        }
+
+        // Coasting, so the motors are not being driven and there is nothing to
+        // recover. Clearing this here matters: the flag is read by the circuit
+        // build on the following tick, and if it were only ever set it would latch
+        // on and the train would report regeneration for the rest of its life.
+        data.braking = false;
+
+        double speedMs = Math.abs(self.speed) * 20d;
+        int carriages = Math.max(1, self.carriages.size());
+        // Blocks/Second² -> Blocks/Tick².
+        double perTick = TrainTractionModel.coastDeceleration(speedMs, data.trackGrade, carriages) / 400d;
+
+        if (self.speed > 0)
+            self.speed = Math.max(self.speed - perTick, 0);
+        else
+            self.speed = Math.min(self.speed + perTick, 0);
+
+        // Create's own method clears this unconditionally, and a driver's next
+        // control() tick depends on it being clear when they let go.
+        self.manualTick = false;
+    }
+
+    /**
      * Speed ramping, where the constant-power taper belongs.
      *
      * <p>Speeding up uses the traction the motors can actually deliver at the
@@ -165,6 +222,14 @@ public class TrainMixin implements ICEETrainExtension {
     @WrapMethod(method = "approachTargetSpeed")
     public void electroEnergetics$approachTargetSpeed(float accelerationMod, Operation<Void> original) {
         ElectricTrainData data = electroenergetics$electricTrainData;
+
+        // Cleared here, once, before any branch can return early. The flag is read
+        // by the next circuit build, so a path that set it and then returned -
+        // reaching the target exactly, losing power mid-brake, a station call -
+        // would leave the train reporting regeneration for the rest of its life.
+        // Setting it only in the braking branch below, and clearing it here, means
+        // every other outcome is covered without having to enumerate them.
+        data.braking = false;
 
         if (!data.isPowered) {
             original.call(accelerationMod);
@@ -188,11 +253,22 @@ public class TrainMixin implements ICEETrainExtension {
                 ? data.availableAcceleration
                 : CEEConfigs.server().trainValues.electricTrainMaxAcceleration.getF();
         double up = Math.max(traction, 0f) / 400d;
-        double down = CEEConfigs.server().trainValues.electricTrainBrakeDeceleration.getF() / 400d;
 
-        if (self.speed < actualTarget)
+        if (self.speed < actualTarget) {
+            data.braking = false;
             self.speed = Math.min(self.speed + up * accelerationMod, actualTarget);
-        else
+        } else {
+            // The brake is a NET rate, not an added force: it is what the train
+            // does while the brake is held, on any gradient. That is what lets a
+            // train be stopped and held on Create's steepest track - a 1-in-3
+            // slope pulls at g*slope = 3.27 m/s^2, so the configured figure (3.5
+            // by default) has to exceed it on its own rather than being an extra
+            // term added to gravity. It also means the stopping distance is the
+            // same uphill, downhill and on the level, which is how a driver
+            // expects a brake to behave.
+            double down = CEEConfigs.server().trainValues.electricTrainBrakeDeceleration.getF() / 400d;
+            data.braking = true;
             self.speed = Math.max(self.speed - down * accelerationMod, actualTarget);
+        }
     }
 }

@@ -261,4 +261,76 @@ public final class TrainTractionModel {
     public static double auxiliaryPower(int carriages) {
         return Math.max(1, carriages) * 2_000d;
     }
+
+    /**
+     * Retarding acceleration with the motors off and no brakes applied [m/s²].
+     *
+     * <p>This is what a train coasts down at: running resistance alone, divided
+     * by the effective mass. It is what makes coasting and braking different
+     * things. At 100 m/s a single carriage sheds about 0.16 m/s² and needs
+     * roughly ten minutes to coast to a stand, which is why a real train coasts
+     * for kilometres and why the driver uses the brake to stop at all.
+     */
+    public static double coastDeceleration(double speedMs, double grade, int carriages) {
+        double v = Math.abs(speedMs);
+        double resisting = runningResistance(v, carriages) + gradeResistance(grade, carriages);
+        if (resisting <= 0d)
+            return 0d;
+        double gamma = CEEConfigs.server().resistanceValues.electricTrainRotatingMassFactor.get();
+        double a = resisting / ((1d + gamma) * totalMass(carriages));
+        return Double.isFinite(a) && a > 0d ? a : 0d;
+    }
+
+    // ------------------------------------------------------------------
+    // Regenerative braking
+    // ------------------------------------------------------------------
+
+    /**
+     * Electrical power the motors can push back into the line while braking [W].
+     *
+     * <p>The retarding force is the same inertia term the train accelerates
+     * against, {@code (1+γ)·m·a}, and the mechanical power that has to go
+     * somewhere is {@code F·v}. A real EMU converts a share of that back to
+     * electricity through the motors and the converter; the rest is friction
+     * (brake pads blending in) and losses. {@code regenFraction} is that share.
+     *
+     * <p>It fades out below {@code regenMinSpeed}. This is not a convenience: a
+     * motor's back-EMF is proportional to speed, so as the train slows there is
+     * progressively less voltage to push current against, and at a standstill
+     * there is none at all - a real train finishes the stop on friction alone.
+     * Modelling that also stops this from claiming recovery during the last few
+     * metres of every stop, where the power would be significant while the
+     * physics says it cannot happen.
+     *
+     * @param speedMs        current speed [m/s]; sign is ignored
+     * @param decelerationMs2 braking rate actually being applied [m/s²], positive
+     * @param regenFraction  share of the braking power the motors recover, 0-1
+     * @param regenMinSpeed  speed below which recovery fades to nothing [m/s]
+     * @return recoverable power [W], zero when not braking meaningfully
+     */
+    public static double regenerativePower(double speedMs, double decelerationMs2, int carriages,
+                                           double regenFraction, double regenMinSpeed) {
+        double v = Math.abs(speedMs);
+        if (v <= 0d || decelerationMs2 <= 0d || regenFraction <= 0d)
+            return 0d;
+
+        // Linear fade over the last stretch before regenMinSpeed, so the power
+        // falls away smoothly instead of switching off at a threshold.
+        double fade = regenMinSpeed <= 0d ? 1d : Math.min(v / regenMinSpeed, 1d);
+
+        double retardingForce = inertiaForce(decelerationMs2, carriages);
+        double mechanical = retardingForce * v;
+
+        // The motors cannot absorb more than they are rated for. Without this cap
+        // a single carriage braking from 100 m/s would report ~18 MW against a
+        // 1.375 MW rating, because the retarding force needed for a 3.5 m/s^2 stop
+        // at that speed is far beyond what the motors can convert. Real trains
+        // blend in the friction brakes for exactly this reason: the motors take
+        // what they can and the pads dissipate the rest, which is also why
+        // recovery is poor during hard stops from high speed.
+        double rated = ratedElectricalPower(carriages);
+
+        double power = Math.min(mechanical * Math.min(regenFraction, 1d), rated) * fade;
+        return Double.isFinite(power) && power > 0d ? power : 0d;
+    }
 }

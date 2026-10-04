@@ -28,8 +28,17 @@ public class CTrains extends ConfigBase {
     public final ConfigBool electricTrainManualFullSpeed = b(true, "electricTrainManualFullSpeed",
             "Let a manually driven electric train reach the speed its own traction model allows. Create drives manual trains to maxSpeed() * manualTrainSpeedModifier (0.75 by default), a handicap meant for fuel trains; with this on, an electric train ignores that factor so the configured electricTrainMaxSpeed is actually reachable. Scheduled trains are unaffected.");
 
-    public final ConfigFloat electricTrainBrakeDeceleration = f(0.8f, 0.05f, "electricTrainBrakeDeceleration",
-            "Service braking deceleration, used for stopping and braking distances only. Kept separate from traction so that Create's braking distance stays realistic, and so that a power-limited climb does not make the train think it needs forever to stop. [in Blocks / Second²]");
+    public final ConfigFloat electricTrainBrakeDeceleration = f(3.5f, 0.05f, "electricTrainBrakeDeceleration",
+            "Service braking deceleration, as a NET rate: it is what the train actually does while the brake is held, on any gradient. Must exceed gravity's component along the steepest track Create can lay, or a train could not be held stationary on it and would slide. Create's steepest straight slope is 1 in 3 (TrackPlacement caps minHDistance at max(ascend*3, 6)), i.e. 18.43 degrees, whose along-slope pull is g*slope = 3.27 Blocks/Second². Hence the 3.5 default, which leaves a small margin. NOTE this is far above real railway practice (0.8-1.0) and is forced by that slope: real adhesion railways never exceed about a 10% grade. Lowering it below ~3.3 makes steep slopes unholdable; raising it shortens every stopping distance, e.g. 300 km/h takes ~0.9 km at 3.5 versus ~3.4 km at a realistic 1.0. [in Blocks / Second²]");
+
+    public final ConfigBool electricTrainRegenerativeBraking = b(true, "electricTrainRegenerativeBraking",
+            "Motors act as generators while braking and push power back into the catenary, the way a real EMU does. The recovered power shows up as a negative draw, so the amps fall and the line is fed rather than loaded. Turn off to make every stop purely friction, with no feed back.");
+
+    public final ConfigFloat electricTrainRegenerativeFraction = f(0.7f, 0f, 1f, "electricTrainRegenerativeFraction",
+            "Share of the braking power the motors can recover. The rest is friction and is lost. Real EMUs recover roughly 60-80% of the energy of a stop, the loss being motor, converter and gear losses plus the friction blend at low speed. [0-1]");
+
+    public final ConfigFloat electricTrainRegenMinSpeed = f(3f, 0f, "electricTrainRegenMinSpeed",
+            "Below this speed regenerative braking fades out and friction takes over. A real train does this because a motor's EMF collapses as it slows, so there is nothing left to push against. Prevents the model from claiming recovery while crawling. [in Blocks / Second]");
 
     public final ConfigBool electricTrainGradeResistance = b(true, "electricTrainGradeResistance",
             "Apply gradient resistance. Uphill raises the force needed and lowers the sustainable speed; downhill lets gravity assist so less power is drawn.");

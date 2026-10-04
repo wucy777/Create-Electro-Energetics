@@ -42,6 +42,15 @@ public class ElectricTrainData {
     // Total current draw for display on ammeters attached to train contraptions
     public double displayCurrent = 0;
 
+    // Power the motors pushed back into the line while braking [W]. Zero unless
+    // the train is actually slowing under the brake, and reported on the HUD.
+    public double regenPower = 0d;
+
+    // Whether the brake is being held this tick. Set by the drive path's braking
+    // branch and read by the next circuit build, which is the same one-tick lag
+    // the load resistance already has.
+    public boolean braking = false;
+
     // Packet throttling for gauge data sync
     public double lastSyncedVoltage = 0;
     public double lastSyncedCurrent = 0;
