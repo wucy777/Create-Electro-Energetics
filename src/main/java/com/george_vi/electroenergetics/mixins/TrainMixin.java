@@ -250,20 +250,33 @@ public class TrainMixin implements ICEETrainExtension {
         // m/s² -> Blocks/Tick². 1 block = 1 m, so only the tick conversion is needed.
         double next = self.speed + a / 400d;
 
-        // A gear change may not drag the train backwards through zero: without
-        // this a hold at a standstill would leave a floating-point residue and the
-        // train would creep. The brake is allowed to bring it to rest and no further.
-        if (Math.signum(next) != Math.signum(self.speed) && Math.abs(self.speed) > 1e-9d
-                && (st.gear == TrainGear.BRAKE || st.gear == TrainGear.COAST))
+        // Bring a stop to rest instead of through it.
+        //
+        // Any deceleration applied to a speed that is nearly zero steps past it and
+        // comes out negative, which is the train reversing - physically wrong for a
+        // brake, and visible as a train that answers a full stop by rolling gently
+        // backwards. The test is on the ACCELERATION rather than on the lever
+        // position: an earlier version enumerated BRAKE and COAST and therefore
+        // missed the emergency brake fired from any other position, which the
+        // harness showed as a train that never stopped. Opposing the motion is what
+        // makes it a stop; anything else is a genuine reversal, as REVERSE from rest.
+        if (Math.abs(self.speed) > 1e-9d && Math.signum(a) != Math.signum(self.speed)
+                && Math.signum(next) != Math.signum(self.speed))
             next = 0d;
 
         self.speed = next;
 
-        // Regeneration is reported for the next circuit build, which runs before
-        // the following tick's motion.
-        data.braking = st.gear == TrainGear.BRAKE
-                || (st.gear == TrainGear.CRUISE && a < 0d)
-                || (st.emergencyArmed && st.emergencyTicks > 0);
+        // Regeneration is reported for the next circuit build, which runs before the
+        // following tick's motion.
+        //
+        // Taken from the electric deceleration the law actually applied, rather than
+        // enumerated from the lever position. Enumerating was wrong in both
+        // directions: it credited the brake even when the motors had faded out at low
+        // speed and the pads were doing all of it, and it missed the penalty case
+        // where an over-speed train is braked while the lever sits at ACCELERATE. The
+        // law already works out exactly how much of the retarding is electrical, so
+        // that figure is the honest test for "are the motors generating".
+        data.braking = data.gearStep.dynamicBrake > 0d;
 
         // Create's own method clears this, and control() re-sets it every tick the
         // driver holds the controls.

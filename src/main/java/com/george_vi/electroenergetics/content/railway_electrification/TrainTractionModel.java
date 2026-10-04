@@ -578,9 +578,14 @@ public final class TrainTractionModel {
         double ceiling = designMaxSpeed();
         // The emergency brake leaves a speed cap behind until the next station, which
         // is what makes using it a real decision rather than a free extra stop. The
-        // cap is applied to the TRACTION, not to the speed itself: clamping the speed
-        // would also clamp a train rolling downhill past the cap, which would let the
-        // penalty double as a speed limiter on descents - not what it is for.
+        // cap lowers the ceiling rather than clamping train.speed: a clamp would be a
+        // teleport the physics never agreed to, and it would also stop the train
+        // dead the instant it crossed the cap. Lowering the ceiling instead means the
+        // train runs out of traction there and, if it is already over the cap, is
+        // braked down to it - see the ACCELERATE and CRUISE branches, which apply the
+        // brake when they are above the ceiling. Without that second part a descent
+        // simply ignored the penalty: the harness showed a train on a 1-in-3 grade
+        // accelerating to 1762 km/h with the cap supposedly in force.
         if (penalty)
             ceiling = Math.min(ceiling, PENALTY_SPEED);
         // Which way the train is going, or would go if released from rest. Used
@@ -597,26 +602,61 @@ public final class TrainTractionModel {
         // Accumulated as the motor brake is applied, so the caller knows how much
         // of the stop the motors are doing and can regenerate only that share.
         double dynamicApplied = 0d;
+        // The world-frame force the lever's braking contributed, so the emergency
+        // brake can REPLACE it rather than pile on top. See the block after the
+        // switch.
+        double leverBrakeForce = 0d;
+
+        // An emergency brake takes the traction off. Every real one does - it is a
+        // brake pipe application, and on an electric train it trips the traction
+        // contactors - and it has to here or the lever would decide whether the
+        // train can be stopped at all. With the power left on, a train at
+        // ACCELERATE on a descent kept its motors pulling against the brake, and on
+        // the steepest grade that out-pulled it: the harness showed an emergency
+        // stop from 100 km/h on a 1-in-3 descent that never terminated.
+        boolean tractionCut = emergency && speed > 1e-6d;
 
         switch (gear) {
             case ACCELERATE -> {
-                if (speed < ceiling)
-                    force += effort;
+                if (!tractionCut) {
+                    if (speed < ceiling) {
+                        force += effort;
+                    } else if (speed > ceiling) {
+                        // Over the ceiling the motors contribute nothing, so the
+                        // penalty has to be enforced with the brake or a descent
+                        // would simply ignore it. Doing it this way rather than
+                        // clamping train.speed keeps it physical: the train is
+                        // genuinely slowed, and a clamp would be a teleport the
+                        // physics never agreed to.
+                        leverBrakeForce -= heading * brakeTotal * mass;
+                        force += leverBrakeForce;
+                        dynamicApplied = dynamicPart;
+                    }
+                }
             }
             case REVERSE -> {
                 // Into the -x direction, capped to a shunting speed. Blocked while
                 // still rolling forwards: there the lever means "stop", and the
                 // brake is what stops a train.
-                if (speed < Math.min(ceiling, SHUNT_SPEED) && !(v > 1e-6d))
+                if (!tractionCut && speed < Math.min(ceiling, SHUNT_SPEED) && !(v > 1e-6d))
                     force -= effort;
             }
             case CRUISE -> {
-                double target = Math.max(cruiseSpeedMs, 0d);
+                // The held speed is capped by the ceiling, which is how the emergency
+                // penalty applies here: with the cap in force cruise holds 40 km/h
+                // rather than braking only below whatever the driver set. Without
+                // this the penalty would be honoured going uphill and quietly ignored
+                // on a descent, where the set speed exceeds it.
+                double target = Math.min(Math.max(cruiseSpeedMs, 0d), ceiling);
                 if (speed < target - CRUISE_DEADBAND) {
-                    if (speed < ceiling)
+                    // Holding a speed takes traction; an emergency brake takes that
+                    // away and lets the brake do the work instead, exactly as it does
+                    // in the other positions.
+                    if (!tractionCut && speed < ceiling)
                         force += heading * effort;
-                } else if (speed > target + CRUISE_DEADBAND) {
-                    force -= heading * brakeTotal * mass;
+                } else if (speed > target + CRUISE_DEADBAND || tractionCut) {
+                    leverBrakeForce = -heading * brakeTotal * mass;
+                    force += leverBrakeForce;
                     dynamicApplied = dynamicPart;
                 } else {
                     // Hold the setting exactly. The world-frame force needed to
@@ -642,7 +682,8 @@ public final class TrainTractionModel {
                         double dynamicAvail = Math.min(dynamicPart * mass, effort);
                         double fromMotors = Math.min(brakeNeed, dynamicAvail);
                         double fromFriction = Math.min(brakeNeed - fromMotors, brakeMs2 * mass);
-                        force -= fromMotors + fromFriction;
+                        leverBrakeForce = -(fromMotors + fromFriction);
+                        force += leverBrakeForce;
                         dynamicApplied = fromMotors / mass;
                     }
                 }
@@ -654,17 +695,24 @@ public final class TrainTractionModel {
                 // means cutting it, and this is the position that is meant to roll.
             }
             case BRAKE -> {
-                force -= heading * brakeTotal * mass;
+                leverBrakeForce = -heading * brakeTotal * mass;
+                force += leverBrakeForce;
                 dynamicApplied = dynamicPart;
             }
         }
 
-        // On top of whatever the lever is doing, and enough to stop the train from
-        // line speed by itself. The adhesion factor raises only the friction part;
-        // the motors are already at their limit.
+        // Emergency braking REPLACES the lever's braking instead of adding to it.
+        //
+        // It is not a second brake bolted alongside the service one: it is the same
+        // friction brake taken to the limit of adhesion with sanding. Adding them
+        // gave 3.5 + 4.0 = 7.5 m/s^2, roughly twice what any real train can do and a
+        // stopping distance to match. Whichever the lever was applying is undone
+        // here and the emergency rate put in its place, so the position of the lever
+        // does not change how hard the emergency brake bites.
         if (emergency && speed > 1e-6d) {
+            force -= leverBrakeForce;
             force -= Math.signum(v) * emergencyBrakeDeceleration(speed) * mass;
-            dynamicApplied = Math.max(dynamicApplied, dynamicPart);
+            dynamicApplied = dynamicPart;
         }
 
         double a = force / mass;
