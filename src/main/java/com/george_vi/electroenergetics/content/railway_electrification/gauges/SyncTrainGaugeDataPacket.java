@@ -37,11 +37,20 @@ import java.util.UUID;
  *                         experience-bar speed readout has to divide by the same
  *                         factor the train is driven with (see
  *                         {@code ElectricManualSpeed}).
+ * @param gear             the lever position, as a {@code TrainGear} ordinal
+ * @param confirmDue       whether the vigilance prompt is waiting for an answer
+ * @param emergencyArmed   whether the emergency brake is available/armed
+ * @param emergencyPenalty whether the post-emergency speed cap is in force
+ * @param cruiseState      what cruise decided, as a {@code CruiseState} ordinal
+ * @param regen            whether the motors are feeding the line right now
  */
 public record SyncTrainGaugeDataPacket(UUID trainId, double voltage, double current,
                                        float maxSpeed, float power, double grade,
                                        boolean powered, int carriages, int motorCars,
-                                       float powerPerCarriage, boolean manualFullSpeed)
+                                       float powerPerCarriage, boolean manualFullSpeed,
+                                       int gear, boolean confirmDue, boolean emergencyArmed,
+                                       boolean emergencyPenalty, int cruiseState,
+                                       boolean regen)
         implements ClientboundPacketPayload {
 
     public static final StreamCodec<ByteBuf, SyncTrainGaugeDataPacket> STREAM_CODEC = new StreamCodec<>() {
@@ -58,8 +67,19 @@ public record SyncTrainGaugeDataPacket(UUID trainId, double voltage, double curr
             int motorCars = buffer.readInt();
             float powerPerCarriage = buffer.readFloat();
             boolean manualFullSpeed = buffer.readBoolean();
+            int gear = buffer.readByte();
+            // Packed into one byte: the lever state is four flags and a two-bit
+            // enum, and this rides a per-train broadcast, so it is worth keeping
+            // to a single byte rather than five.
+            int flags = buffer.readUnsignedByte();
+            int cruiseState = buffer.readByte();
+            boolean confirmDue = (flags & 1) != 0;
+            boolean emergencyArmed = (flags & 2) != 0;
+            boolean emergencyPenalty = (flags & 4) != 0;
+            boolean regen = (flags & 8) != 0;
             return new SyncTrainGaugeDataPacket(trainId, voltage, current, maxSpeed, power,
-                    grade, powered, carriages, motorCars, powerPerCarriage, manualFullSpeed);
+                    grade, powered, carriages, motorCars, powerPerCarriage, manualFullSpeed,
+                    gear, confirmDue, emergencyArmed, emergencyPenalty, cruiseState, regen);
         }
 
         @Override
@@ -75,6 +95,11 @@ public record SyncTrainGaugeDataPacket(UUID trainId, double voltage, double curr
             buffer.writeInt(p.motorCars);
             buffer.writeFloat(p.powerPerCarriage);
             buffer.writeBoolean(p.manualFullSpeed);
+            buffer.writeByte(p.gear);
+            int flags = (p.confirmDue ? 1 : 0) | (p.emergencyArmed ? 2 : 0)
+                    | (p.emergencyPenalty ? 4 : 0) | (p.regen ? 8 : 0);
+            buffer.writeByte(flags);
+            buffer.writeByte(p.cruiseState);
         }
     };
 
@@ -84,6 +109,8 @@ public record SyncTrainGaugeDataPacket(UUID trainId, double voltage, double curr
         ClientTrainGaugeData.update(trainId, voltage, current);
         TrainHudData.update(trainId, maxSpeed, power, (float) voltage, grade, powered,
                 carriages, motorCars, powerPerCarriage, manualFullSpeed);
+        TrainHudData.updateGear(trainId, gear, confirmDue, emergencyArmed,
+                emergencyPenalty, cruiseState, regen);
     }
 
     @Override

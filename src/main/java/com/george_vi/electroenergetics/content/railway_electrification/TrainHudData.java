@@ -42,6 +42,24 @@ public final class TrainHudData {
 
     private static final Map<UUID, Sample> SAMPLES = new ConcurrentHashMap<>();
 
+    /**
+     * Lever and driver state, kept apart from {@link Sample} because it changes on
+     * a different schedule: the traction figures come from the electrical solve,
+     * while the lever only moves when the driver does something. Merging them
+     * would mean re-sending the whole traction block on every lever nudge.
+     *
+     * @param gear             lever position, a {@code TrainGear} ordinal
+     * @param confirmDue       the vigilance prompt is waiting; the driver must press
+     * @param emergencyArmed   the emergency brake is available
+     * @param emergencyPenalty the speed cap from a previous emergency use is in force
+     * @param cruiseState      what cruise is doing, a {@code CruiseState} ordinal
+     * @param regen            the motors are feeding the line right now
+     */
+    public record GearState(int gear, boolean confirmDue, boolean emergencyArmed,
+                            boolean emergencyPenalty, int cruiseState, boolean regen) {}
+
+    private static final Map<UUID, GearState> GEARS = new ConcurrentHashMap<>();
+
     private TrainHudData() {}
 
     public static void update(UUID trainId, float maxSpeed, float power, float voltage,
@@ -49,6 +67,18 @@ public final class TrainHudData {
                               float powerPerCarriage, boolean manualFullSpeed) {
         SAMPLES.put(trainId, new Sample(maxSpeed, power, voltage, grade, powered,
                 carriages, motorCars, powerPerCarriage, manualFullSpeed));
+    }
+
+    public static void updateGear(UUID trainId, int gear, boolean confirmDue,
+                                  boolean emergencyArmed, boolean emergencyPenalty,
+                                  int cruiseState, boolean regen) {
+        GEARS.put(trainId, new GearState(gear, confirmDue, emergencyArmed,
+                emergencyPenalty, cruiseState, regen));
+    }
+
+    /** Lever state, or {@code null} when the server has not sent one. */
+    public static GearState gear(UUID trainId) {
+        return GEARS.get(trainId);
     }
 
     /** Latest sample, or {@code null} when the server has not sent one. */

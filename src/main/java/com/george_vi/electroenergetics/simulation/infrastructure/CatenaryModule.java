@@ -552,7 +552,11 @@ public class CatenaryModule {
                                         CEEConfigs.server().trainValues
                                                 .electricTrainPowerPerCarriage.getF(),
                                         CEEConfigs.server().trainValues
-                                                .electricTrainManualFullSpeed.get())
+                                                .electricTrainManualFullSpeed.get(),
+                                        driver.gear.ordinal(), driver.confirmWaiting >= 0,
+                                        driver.emergencyArmed, driver.emergencyPenalty,
+                                        trainData.cruiseState.ordinal(),
+                                        trainData.regenPower > 0d)
                         );
                         trainData.lastSyncedVoltage = voltage;
                         trainData.lastSyncedCurrent = totalCurrent;
