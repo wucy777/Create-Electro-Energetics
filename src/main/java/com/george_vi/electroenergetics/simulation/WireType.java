@@ -20,8 +20,17 @@ import java.util.function.Supplier;
 
 public class WireType {
 
-    /** Heat lost per tick, in temperature units, at zero current. */
-    private static final double HEATING_COOLING_PER_TICK = 33.3d;
+    /**
+     * Heat lost per tick, in temperature units, at zero current.
+     *
+     * <p>Public because the wire heater subtracts it every tick, and the rating
+     * functions below divide by it. Those two must be the same number: the heater
+     * works in float while this is a double, so if the heater wrote its own
+     * {@code 33.3f} literal the two would not cancel exactly and a wire sitting on
+     * its rating could drift a hair either side of it. The heater casts this value
+     * instead, so there is only one constant.
+     */
+    public static final double HEATING_COOLING_PER_TICK = 33.3d;
 
     /** Temperature scale at which the heater's self-limiting term halves the input. */
     private static final double HEATING_HALF_POINT = 1000d;

@@ -256,6 +256,24 @@ public class CatenaryModule {
             ICEETrainExtension trainExtension = (ICEETrainExtension)train;
             ElectricTrainData trainData = trainExtension.getElectricTrainData();
 
+            // Only finish a train whose nodes this level's solve actually contains.
+            // The results passed in belong to one level, so a train last connected in
+            // another dimension has no nodes in them: getVoltageAt returns 0, the
+            // train is written as unpowered with maxSpeed 0 and zero available
+            // acceleration, and its gradient is reset. The server ticks every level
+            // in turn, so the last level decides the answer for every train in the
+            // world - a single dangling wire in a second dimension was enough to
+            // stop every electric train in the overworld.
+            //
+            // The test is deliberately "connected somewhere else", not "not connected
+            // here": connectedWireState is only ever assigned on pantograph contact,
+            // so it stays null for an accumulator-only train. Skipping on null would
+            // stop such a train from ever discharging, which is a regression the
+            // guard must not introduce.
+            if (trainData.connectedWireState != null
+                    && trainData.connectedWireState != levelWireSimulationState)
+                continue;
+
             AttachedNode groundNode = trainData.groundNode;
             AttachedNode trainNode = trainData.trainNode;
             double voltage;
@@ -355,6 +373,24 @@ public class CatenaryModule {
                         100, new UpdateElectricTrainSoundPacket(train.id, carriageID, (float) trainSpeed, acceleration, active, CEERegistries.ELECTRIC_TRAIN_SOUND_TYPE.getId(trainExtension.getSoundType())));
             }
             trainData.isPowered = active;
+
+            // An electric train does not burn fuel, and this is the only thing that
+            // says so. Create's burnFuel() consumes from carriage storage whenever
+            // fuelTicks reaches zero, and its fuel storage is every exposed inventory
+            // on the consist - MountedStorageManager.canUseForFuel accepts any
+            // storage that is not on the blacklist - so merely not being a fuel
+            // train is not enough: coal sitting in an on-board chest would be eaten
+            // one item at a time, silently, and other mods' fuel handlers would run
+            // with it. Keeping the counter above zero makes burnFuel take its early
+            // return.
+            //
+            // Gated on the consist carrying electric motors rather than on being
+            // powered. The baseline pinned it only while active, which still let a
+            // stationary electric train with a flat accumulator and no catenary eat
+            // its cargo; an electric train has no business consuming fuel in any
+            // state, and this can only ever destroy fewer items than before.
+            if (motorCars > 0 && train.fuelTicks <= 1)
+                train.fuelTicks = 10;
 
             // Gradient and supply share for this tick. These are recomputed here
             // rather than reused from buildCircuit because the terminal voltage

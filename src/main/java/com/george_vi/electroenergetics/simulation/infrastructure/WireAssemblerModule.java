@@ -13,6 +13,17 @@ import java.util.Map;
 
 public class WireAssemblerModule {
 
+    /**
+     * Lowest resistance the solver gives a cut span, in ohms.
+     *
+     * <p>Public because the wire heater has to divide by exactly this number: it
+     * works out the current through each cut segment from the voltage across it, and
+     * if it divided by the un-clamped {@code R * length * progress} instead it would
+     * over-read wherever this clamp engaged. Keeping one constant means the two
+     * cannot drift apart.
+     */
+    public static final double CUT_SEGMENT_MIN_RESISTANCE = 0.001d;
+
     final InfrastructureSavedData sd;
     final ServerLevel level;
     final WireSimulationState wireSimulationState;
@@ -48,10 +59,10 @@ public class WireAssemblerModule {
                     if (node.equals(lastNode))
                         continue;
                     float progress = cut.point() - totalProgress;
-                    out.add(new ObjectDoubleImmutablePair<>(new DirectionalNodeConnection(lastNode, node), Math.max(0.001, resistance * progress)));
+                    out.add(new ObjectDoubleImmutablePair<>(new DirectionalNodeConnection(lastNode, node), Math.max(CUT_SEGMENT_MIN_RESISTANCE, resistance * progress)));
                     lastNode = node;
                 }
-                out.add(new ObjectDoubleImmutablePair<>(new DirectionalNodeConnection(lastNode, connection.node2()), Math.max(0.001, resistance * (1.01f - totalProgress))));
+                out.add(new ObjectDoubleImmutablePair<>(new DirectionalNodeConnection(lastNode, connection.node2()), Math.max(CUT_SEGMENT_MIN_RESISTANCE, resistance * (1.01f - totalProgress))));
             }
         }
     }

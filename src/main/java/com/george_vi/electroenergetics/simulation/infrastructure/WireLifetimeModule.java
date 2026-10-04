@@ -67,7 +67,29 @@ public class WireLifetimeModule {
                     prevPoint = point;
                     double vd = Math.abs(results.getVoltageAt(prevNode, node));
                     prevNode = node;
-                    current = Math.max(current, vd / (wholeWireResistance * dist));
+                    // The floor must match the one the solver applied. Cut spans are
+                    // built by WireAssemblerModule, which clamps each segment to at
+                    // least CUT_SEGMENT_MIN_RESISTANCE ohm; dividing by the raw
+                    // R*length*dist instead over-reads the current by
+                    // floor/(R*length*dist) wherever the clamp engaged. With the
+                    // current wire figures that is not a corner case: an iron rail
+                    // span is R*length = 7.23e-5 * 8 = 5.8e-4 ohm, below the floor
+                    // for its whole length, so the heater read up to 1.7x the real
+                    // current at full span and far more on short segments - a rail
+                    // rated 1000 A fused at a few hundred, and smoked for it.
+                    //
+                    // For a single cut this makes the heater exactly equal to the
+                    // solver: progress and dist are both the distance from node1.
+                    // With several cuts the assembler's own accounting differs (it
+                    // measures every segment from node1 rather than from the
+                    // previous cut), which is upstream behaviour and not something
+                    // this floor can correct.
+                    //
+                    // It also removes the division-by-zero that the uncut branch
+                    // above already guards against: the clamped divisor is >= 1e-3.
+                    current = Math.max(current, vd / Math.max(
+                            WireAssemblerModule.CUT_SEGMENT_MIN_RESISTANCE,
+                            wholeWireResistance * dist));
                 }
             }
 
@@ -86,9 +108,16 @@ public class WireLifetimeModule {
             // would overflow float and turn the temperature into NaN/infinity, which
             // would then persist forever. 1e6 A is far beyond anything a circuit in
             // this mod produces, so it never changes real behaviour.
+            // Cooling and the self-limiting term, plus the heat the current adds. The
+            // cooling constant is taken from WireType rather than written as its own
+            // 33.3f literal, so that this integrator and the rating functions in
+            // WireType - which divide by the same number to derive a rating from a
+            // melting point - cannot disagree about it. They are float and double
+            // respectively, so a duplicated literal would not cancel exactly.
+            float coolingPerTick = (float) WireType.HEATING_COOLING_PER_TICK;
             float rawTemp = (float) Math.min(current, HEATING_ARITHMETIC_GUARD);
             rawTemp *= Math.min(temp < 0 ? 0 : 1 / (1 + (temp / 1000)), 1);
-            rawTemp = Math.max(temp - 33.3f + rawTemp, 0);
+            rawTemp = Math.max(temp - coolingPerTick + rawTemp, 0);
             // A non-finite temperature would latch: every later tick would recompute
             // it as non-finite again and the wire would neither cool nor break.
             if (!Float.isFinite(rawTemp))
@@ -112,15 +141,11 @@ public class WireLifetimeModule {
             // reaches the melting point.
             //
             // The cap cannot change WHEN a wire breaks: the break test below reads the
-            // uncapped rawTemp, so every burn time is decided by the real current. It
-            // must read rawTemp for a second reason too - a value pinned at the cap
-            // would compare equal to itself, so 'increase' would read false forever and
-            // a hard short could never break its wire at all.
+            // uncapped rawTemp, so every burn time is decided by the real current.
             //
             // An infinite melting point (glass insulators, bundle conductors) makes
             // Math.min a no-op, leaving those wires exactly as they were.
             float newTemp = (float) Math.min(rawTemp, meltingPoint * 1.05);
-            boolean increase = rawTemp > temp;
 
             connectionData.wireData.temperature = newTemp;
 
@@ -143,13 +168,14 @@ public class WireLifetimeModule {
             // and stops as soon as it is not, instead of trailing off with the stored
             // heat.
             //
-            // The tolerance matters, and it must round the rating UP. maxTemperature
-            // lives in a float field, and the round trip through it loses enough
-            // precision that a 1000 A wire reads back as 999.999976 A; comparing
-            // strictly would then make every wire smoke at exactly its rated current,
-            // which is the very bug being fixed. Rounding up by one part in 10^5 costs
-            // nothing measurable - it is far below any threshold a player could aim at
-            // and far below the gaps between the ratings (415 to 1000 A).
+            // The tolerance rounds the rating up rather than comparing exactly. The
+            // margin it covers is tiny: the integrator subtracts 33.3f while the
+            // rating is derived from 33.3d, so the two do not cancel exactly and a
+            // wire sitting exactly on its rating can land a hair either side of it.
+            // Rounding up keeps a wire from smoking at precisely its rated current,
+            // which is the bug being fixed here; the cost is that it fails at
+            // 1.00001x its rating instead of 1x, far below any gap a player could
+            // aim at (the ratings are 415 and 1000 A).
             double ratedCurrent = WireType.ampacityForTemperature(meltingPoint) * (1d + 1e-5);
             if (current > ratedCurrent && level.isLoaded(connection.node1().sourcePos())) {
                 // Smoke particles
@@ -176,7 +202,22 @@ public class WireLifetimeModule {
                 }
             }
 
-            if (rawTemp > meltingPoint && increase) {
+            // A wire fails when it is above its melting point AND still being
+            // overloaded - not merely when its temperature is rising. The rising
+            // test that used to be here left a wire permanently unfailable: the
+            // stored value is capped at 1.05 * meltingPoint, and a replacement wire
+            // inherits that temperature from the one that fused. From the cap, a
+            // current only slightly over the rating produces an equilibrium that is
+            // still above the melting point, so the wire *cools* towards it - the
+            // temperature never rises, the old test never fired, and because smoke
+            // only needs the current to be over the rating the wire streamed smoke
+            // forever without ever failing. That is the "inexplicable smoke" this
+            // change set exists to remove, so the test is now on the cause.
+            //
+            // Burn times are unchanged by this: a wire heated from cold crosses its
+            // melting point on a rising tick, when both tests agree, and the
+            // overload test is also what decides whether it can recover.
+            if (rawTemp > meltingPoint && current > ratedCurrent) {
                 if (longestWireToBreak == null) {
                     longestWireToBreak = connection;
                     longestWireDataToBreak = connectionData.wireData;
