@@ -71,9 +71,16 @@ public final class TrainControlInput {
         int px = TrainControlLayout.panelX(w);
         int py = TrainControlLayout.panelY(h);
 
-        // Cursor position, converted the same way the renderer does.
-        double mouseX = mc.mouseHandler.xpos() * w / mc.getWindow().getGuiScaledWidth();
-        double mouseY = mc.mouseHandler.ypos() * h / mc.getWindow().getGuiScaledHeight();
+        // Converted exactly the way Create converts cursor positions (see
+        // ValueSettingsScreen:305 and the train map overlays):
+        //     gui = xpos * guiScaledWidth / screenWidth
+        // mouseHandler.xpos() is already in SCREEN coordinates, so the divisor must
+        // be getScreenWidth(), not getWidth() - the latter is the framebuffer, and
+        // the two differ under display scaling or a HiDPI setup, which would put the
+        // hit test somewhere other than the drawn panel. Both this and
+        // TrainControlHud use this same expression.
+        double mouseX = mc.mouseHandler.xpos() * w / mc.getWindow().getScreenWidth();
+        double mouseY = mc.mouseHandler.ypos() * h / mc.getWindow().getScreenHeight();
 
         if (!TrainControlLayout.inside(px, py, mouseX, mouseY))
             return false;

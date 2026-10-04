@@ -87,8 +87,14 @@ public class TrainControlHud implements LayeredDraw.Layer {
         // it means anything: it is the "stop, I am not shunting" action.
         boolean emergencyVisible = gear.gear() == TrainGear.REVERSE.ordinal();
 
-        double mouseX = mc.mouseHandler.xpos() * w / mc.getWindow().getWidth();
-        double mouseY = mc.mouseHandler.ypos() * h / mc.getWindow().getHeight();
+        // Create's own conversion for cursor positions (ValueSettingsScreen:305,
+        // XaeroTrainMap:58): gui = xpos * guiScaledWidth / screenWidth. xpos is
+        // already in screen coordinates, so the divisor is getScreenWidth(), not
+        // getWidth() - the framebuffer differs from the screen under display scaling
+        // or HiDPI, and using it would misplace the hover highlight and, in
+        // TrainControlInput, the click test with it.
+        double mouseX = mc.mouseHandler.xpos() * w / mc.getWindow().getScreenWidth();
+        double mouseY = mc.mouseHandler.ypos() * h / mc.getWindow().getScreenHeight();
         int hoveredGear = TrainControlLayout.gearAt(x, y, mouseX, mouseY);
         int hoveredButton = TrainControlLayout.buttonAt(x, y, mouseX, mouseY, emergencyVisible);
 
