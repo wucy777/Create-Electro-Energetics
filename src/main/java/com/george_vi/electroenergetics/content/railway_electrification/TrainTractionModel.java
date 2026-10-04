@@ -322,9 +322,6 @@ public final class TrainTractionModel {
     /** Speed band around the cruise setting where neither traction nor brake is applied [m/s]. */
     private static final double CRUISE_DEADBAND = 0.5d;
 
-    /** Fastest a train may be driven backwards, so reverse is a shunting move [m/s]. */
-    public static final double SHUNT_SPEED = 5.0d;
-
     /**
      * Speed cap left in force after the emergency brake is used [m/s], until the
      * next station call. This is the cost of using it.
@@ -373,6 +370,43 @@ public final class TrainTractionModel {
     /** Friction (adhesion) service braking rate [m/s²]. The only part that holds at rest. */
     public static double frictionBrake() {
         return Math.max(CEEConfigs.server().trainValues.electricTrainBrakeDeceleration.get(), 0d);
+    }
+
+    /**
+     * Retarding acceleration the motors can provide by being driven in reverse
+     * [m/s²], which is what the REVERSE position adds on top of the friction brake.
+     *
+     * <p>This is NOT regenerative braking, and the difference matters: it uses the
+     * same tractive-effort curve as driving ({@link #availableEffort}), so at a
+     * standstill it is the full starting figure rather than nothing. A motor under
+     * power holds torque at zero speed - that is how a real drive holds a train on a
+     * grade - whereas a motor being back-driven as a generator cannot, because its
+     * back-EMF has collapsed. So unlike the regenerative brake, this one does count
+     * toward holding a stationary train.
+     *
+     * <p>Above the base speed it is power-limited, exactly like traction.
+     */
+    public static double motorReverseBrake(double speedMs, int carriages, double powerScale) {
+        double gamma = CEEConfigs.server().resistanceValues.electricTrainRotatingMassFactor.get();
+        double effective = (1d + gamma) * totalMass(carriages);
+        if (effective <= 0d)
+            return 0d;
+        double effort = availableEffort(speedMs, carriages, powerScale);
+        double a = effort / effective;
+        return Double.isFinite(a) && a > 0d ? a : 0d;
+    }
+
+    /**
+     * Steepest gradient the train can be held on, as rise over run, with the given
+     * braking deceleration available [m/s²].
+     *
+     * <p>Both the brake and gravity are divided by the same effective mass
+     * {@code (1+γ)·m} on their way to an acceleration, so the rotating-mass factor
+     * cancels and the test reduces to {@code brake >= g·grade}. That makes this exact
+     * rather than approximate, and it is the number to design a railway against.
+     */
+    public static double maxHoldableGrade(double brakeMs2) {
+        return brakeMs2 / G;
     }
 
     /** Electric braking rate at full effect [m/s²], before the low-speed fade. */
@@ -424,6 +458,11 @@ public final class TrainTractionModel {
      */
     public static double holdingBrakeDeceleration() {
         return frictionBrake();
+    }
+
+    /** Fastest the train may be driven backwards from rest [m/s]. A shunting speed. */
+    public static double reverseMaxSpeed() {
+        return Math.max(CEEConfigs.server().trainValues.electricTrainReverseMaxSpeed.get(), 0d);
     }
 
     /**
@@ -538,11 +577,31 @@ public final class TrainTractionModel {
                 }
             }
             case REVERSE -> {
-                // Into the -x direction, capped to a shunting speed. Blocked while
-                // still rolling forwards: there the lever means "stop", and the
-                // brake is what stops a train.
-                if (!tractionCut && speed < Math.min(ceiling, SHUNT_SPEED) && !(v > 1e-6d))
+                // The reverse position is two different things depending on what the
+                // train is doing, which is what makes it the strongest brake on the
+                // train as well as the only reverse gear.
+                //
+                // 静止挂入 = 倒车挡: from a standstill with nothing pulling the train
+                // forward, the motors drive it backwards. No brake, so gravity gets to
+                // help on a downhill and the shunt can be brisk - hence the higher cap.
+                //
+                // 向前运动 / 停止但有下坡前溜趋势 = 制动 + 电机反拖: the lever becomes a
+                // brake, and the motors drive in reverse against the motion on top of
+                // the friction pads. Because a powered motor holds torque at zero
+                // speed, unlike a generator, this is the one position that can hold a
+                // stationary train on a grade far steeper than the pads alone.
+                double gravityTowardForward = -mass * G * gradeToPlusX;
+                boolean forwardTendency = v > 1e-6d
+                        || (speed < 1e-6d && gravityTowardForward > 0d);
+                if (forwardTendency) {
+                    double motorBrake = motorReverseBrake(speed, carriages, powerScale);
+                    // heading is sign(v), so -heading opposes motion when rolling, and
+                    // when stopped heading is +1 and this opposes the forward pull.
+                    leverBrakeForce = -heading * (brakeMs2 + motorBrake) * mass;
+                    force += leverBrakeForce;
+                } else if (!tractionCut && speed < Math.min(ceiling, reverseMaxSpeed())) {
                     force -= effort;
+                }
             }
             case CRUISE -> {
                 // The held speed is capped by the ceiling, which is how the emergency
@@ -625,21 +684,36 @@ public final class TrainTractionModel {
         // slope the value is left alone and the train slides, which is honest and
         // is the whole reason the friction figure matters so much here.
         //
-        // Only the FRICTION part counts: the electric brake has already faded to
-        // zero by the time the train is stopped, so crediting its full rate here
-        // would let a train appear to hold on a grade it would really roll down.
+        // What counts toward holding depends on the position, and the distinction is
+        // physical rather than bookkeeping:
+        //   BRAKE   friction only. The regenerative part has already faded to zero by
+        //           the time the train is stopped, because a generator's back-EMF has
+        //           collapsed; crediting it would let a train appear to hold a grade
+        //           it would really roll down.
+        //   REVERSE friction PLUS the motor brake. This is the position where the
+        //           motors are driven, not back-driven, and a powered motor holds its
+        //           torque at zero speed. That is exactly how a real drive holds a
+        //           train on a grade, and it is why this position is the strongest
+        //           hold on the train.
         if (speed < 1e-6d && a != 0d) {
-            boolean braked = gear == TrainGear.BRAKE || emergency;
-            if (braked) {
-                double pull = Math.abs(G * gradeToPlusX);
-                double hold = gear == TrainGear.BRAKE ? holdingBrakeDeceleration() : 0d;
-                if (emergency)
-                    hold = Math.max(hold, holdingBrakeDeceleration() * EMERGENCY_ADHESION_FACTOR);
-                if (hold >= pull) {
-                    if (out != null)
-                        out.dynamicBrake = 0d;   // stopped: no electric brake, by definition
-                    return 0d;
-                }
+            double pull = Math.abs(G * gradeToPlusX);
+            double hold = 0d;
+            boolean braked = false;
+            if (gear == TrainGear.BRAKE) {
+                hold = frictionBrake();
+                braked = true;
+            } else if (gear == TrainGear.REVERSE) {
+                hold = frictionBrake() + motorReverseBrake(0d, carriages, powerScale);
+                braked = true;
+            }
+            if (emergency) {
+                hold = Math.max(hold, frictionBrake() * EMERGENCY_ADHESION_FACTOR);
+                braked = true;
+            }
+            if (braked && hold >= pull) {
+                if (out != null)
+                    out.dynamicBrake = 0d;   // stopped: no regenerative brake, by definition
+                return 0d;
             }
         }
 

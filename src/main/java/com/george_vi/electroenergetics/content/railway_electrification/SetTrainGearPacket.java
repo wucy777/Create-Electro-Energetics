@@ -65,27 +65,16 @@ public record SetTrainGearPacket(UUID trainId, int gearOrdinal, boolean confirm,
         if (train == null || train.carriages.isEmpty())
             return;
 
-        // Only someone actually at the train may command it. The client only
-        // shows the panel while holding the controls, but a packet must not trust
-        // that: a stale or hand-made one should not be able to throw the lever on
-        // a train the sender is nowhere near. Proximity to any carriage is the
-        // cheap, server-side version of that check.
-        boolean near = false;
-        for (com.simibubi.create.content.trains.entity.Carriage carriage : train.carriages) {
-            Carriage.DimensionalCarriageEntity dce =
-                    carriage.getDimensionalIfPresent(player.level().dimension());
-            if (dce == null || dce.rotationAnchors == null)
-                continue;
-            net.minecraft.world.phys.Vec3 anchor = dce.rotationAnchors.getFirst();
-            if (anchor != null && player.position().distanceToSqr(anchor) < 32d * 32d) {
-                near = true;
-                break;
-            }
-        }
-        if (!near)
-            return;
-
+        // Only the person actually at the controls may command the train. This is
+        // checked against Create's own record of who is holding them, which the
+        // server ticks from the contraption entity - not against anything the client
+        // claims, and not against proximity. Proximity was the earlier test and it
+        // was too weak: standing next to a train is not driving it, and a passenger
+        // riding it would have passed. This cannot be spoofed by a hand-made packet,
+        // because driverId is written only from the world state.
         TrainDriverState state = ((ICEETrainExtension) train).getElectricTrainData().driver;
+        if (!state.isDriver(player.getUUID()))
+            return;
 
         if (emergency) {
             // Only meaningful in reverse, which is where the panel offers it. The

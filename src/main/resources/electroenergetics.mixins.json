@@ -8,6 +8,7 @@
   "plugin": "com.george_vi.electroenergetics.CEEMixinPlugin",
   "client": [
     "CarriageSoundsMixin",
+    "ControlsMovementBehaviourMixin",
     "HumanoidModelMixin",
     "ItemInHandRendererMixin",
     "LevelRendererAccessor",
@@ -21,7 +22,6 @@
   },
   "mixins": [
     "BlockStateBaseMixin",
-    "CarriageContraptionEntityControlMixin",
     "CarriageContraptionEntityMixin",
     "CarriageContraptionMixin",
     "CarriageMixin",

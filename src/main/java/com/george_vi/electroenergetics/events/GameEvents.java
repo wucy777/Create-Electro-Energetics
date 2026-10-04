@@ -39,7 +39,9 @@ import com.george_vi.electroenergetics.content.railway_electrification.TrainDriv
 import com.george_vi.electroenergetics.mixin_interfaces.ICEETrainExtension;
 import net.minecraft.server.MinecraftServer;
 import com.simibubi.create.Create;
+import com.simibubi.create.content.trains.entity.Carriage;
 import com.simibubi.create.content.trains.entity.Train;
+import java.util.UUID;
 import dev.engine_room.flywheel.api.event.ReloadLevelRendererEvent;
 import net.createmod.catnip.platform.CatnipServices;
 import net.minecraft.client.Minecraft;
@@ -200,6 +202,19 @@ public class GameEvents {
             ElectricTrainData data = ((ICEETrainExtension) train).getElectricTrainData();
             TrainDriverState driver = data.driver;
 
+            // Ask Create who is holding this train's controls, once a tick.
+            //
+            // This replaces a heartbeat set from control(), and the reason matters:
+            // control() is only invoked while the driver is HOLDING A KEY. Create's
+            // keepalive keeps the context alive for a few ticks after the last key
+            // press and then drops it, so a lever-driven train - where the driver
+            // mostly is not pressing anything - would time out and fall back to
+            // Create's controls after a few ticks, which is exactly the bug this
+            // fixes. getControllingPlayer() is set when the player grabs the controls
+            // and cleared only when they let go, so it is the honest signal for "is
+            // somebody driving this train".
+            driver.setDriverPresent(controllingPlayer(train));
+
             driver.tickDriverPresence();
 
             // Vigilance: a prompt every CONFIRM_INTERVAL, and the lever drops to the
@@ -239,6 +254,29 @@ public class GameEvents {
             // impossible. Leaving the lever alone is also harmless: reverse is capped
             // at a walking pace and takes an explicit selection.
         }
+    }
+
+    /**
+     * Whether anybody is holding this train's controls, and who.
+     *
+     * <p>Create records this on the carriage's contraption entity when a player
+     * interacts with the controls block, and clears it when they stop. Checking it
+     * directly is what makes the lever survive long periods with no keys held.
+     *
+     * <p>Any carriage counts, not just the leading one: a driver can be at the
+     * controls of whichever carriage they walked to.
+     */
+    private static UUID controllingPlayer(Train train) {
+        for (Carriage carriage : train.carriages) {
+            UUID[] found = new UUID[1];
+            carriage.forEachPresentEntity(e -> e.getControllingPlayer().ifPresent(id -> {
+                if (found[0] == null)
+                    found[0] = id;
+            }));
+            if (found[0] != null)
+                return found[0];
+        }
+        return null;
     }
 
     @SubscribeEvent

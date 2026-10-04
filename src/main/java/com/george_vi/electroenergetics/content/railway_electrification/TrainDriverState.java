@@ -25,13 +25,21 @@ public class TrainDriverState {
     public TrainGear gear = TrainGear.BRAKE;
 
     /**
+     * The player currently holding this train's controls, or {@code null}.
+     *
+     * <p>Set once a tick from Create's own control record, so it is the authority on
+     * who is driving: it is what the lever packet is checked against, and what
+     * decides whether the gear law owns the train's speed at all.
+     */
+    public java.util.UUID driverId = null;
+
+    /**
      * Ticks remaining in which a driver is considered to be at the controls.
      *
-     * <p>A countdown rather than a boolean because the two sides run on different
-     * schedules: {@code control()} is driven by key packets every few ticks while
-     * {@code Train.tick()} runs every tick, so a flag set by one and cleared by
-     * the other would flicker the train between gear control and Create's own.
-     * Refreshed whenever a driver is seen, and allowed to lapse on its own.
+     * <p>A short countdown rather than reading {@link #driverId} directly, so that a
+     * player who is momentarily not reported - a chunk unload, a dimension change -
+     * does not make the train lurch back into Create's control scheme for a tick or
+     * two. A few ticks of grace, and no more.
      */
     public int driverTicks = 0;
 
@@ -40,15 +48,24 @@ public class TrainDriverState {
         return driverTicks > 0;
     }
 
+    /** Record who is driving, or {@code null} for nobody. Called once a tick. */
+    public void setDriverPresent(java.util.UUID id) {
+        driverId = id;
+        if (id != null)
+            driverTicks = 5;
+    }
+
     /** Called each train tick, before the motion is integrated. */
     public void tickDriverPresence() {
         if (driverTicks > 0)
             driverTicks--;
+        if (driverTicks == 0)
+            driverId = null;
     }
 
-    /** Called from the control path whenever a driver is at the controls. */
-    public void markDriverPresent() {
-        driverTicks = 10;
+    /** Whether this player is the one driving, so may command the lever. */
+    public boolean isDriver(java.util.UUID id) {
+        return id != null && id.equals(driverId);
     }
 
     /** Speed cruise is holding, in Blocks/Second. Captured when cruise is selected. */
