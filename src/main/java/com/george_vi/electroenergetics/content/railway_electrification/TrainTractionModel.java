@@ -159,13 +159,19 @@ public final class TrainTractionModel {
      */
     public static double maxSustainableSpeed(double grade, int carriages, double powerScale) {
         double ceiling = designMaxSpeed();
-        double mass = totalMass(carriages);
-        double effortLimit = startingEffort(carriages, powerScale);
 
         double lo = 0d, hi = ceiling;
         for (int i = 0; i < 40; i++) {
             double mid = (lo + hi) * 0.5d;
-            double need = runningResistance(mid, carriages) + mass * G * grade;
+            // Must go through gradeResistance(), not a local mass*g*grade: that
+            // method is where electricTrainGradeResistance is honoured, and the
+            // other two users of the gravity term (availableAcceleration and
+            // electricalDemand) both go through it. Building the term locally
+            // here made the ceiling drop on a climb while the current draw
+            // stayed at its level-track value - an engine pulling a grade for
+            // free, and the two figures disagreeing.
+            double need = runningResistance(mid, carriages)
+                    + gradeResistance(grade, carriages);
             double have = availableEffort(mid, carriages, powerScale);
             if (have >= need)
                 lo = mid;
