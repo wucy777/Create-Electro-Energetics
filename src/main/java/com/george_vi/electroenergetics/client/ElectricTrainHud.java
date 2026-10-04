@@ -104,6 +104,10 @@ public class ElectricTrainHud implements LayeredDraw.Layer {
         TrainHudData.Sample sample = TrainHudData.get(train.id);
         if (sample == null)
             return;
+        // The readout belongs to the electric train too: on a fuel train the ceiling,
+        // catenary and gear rows would all be meaningless.
+        if (!TrainHudData.leverDriven(train.id))
+            return;
 
         // The row count is fixed so the panel does not jump around as trains
         // gain or lose carriages.

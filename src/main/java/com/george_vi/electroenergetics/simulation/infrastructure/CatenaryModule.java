@@ -517,6 +517,12 @@ public class CatenaryModule {
             boolean shouldSync = trainData.ticksSinceGaugeSync >= 5
                     || significantVoltageChange || significantCurrentChange;
 
+            // Sent for every train, fuel ones included, because this packet is also
+            // what feeds the train-mounted voltmeters and ammeters - a gauge on a
+            // carriage should read the line whether or not that consist has traction
+            // motors. The lever fields it now carries are simply ignored by the
+            // client for a train without motors; see TrainControlHud, which gates on
+            // the motor count rather than on this being an electric train.
             if (shouldSync && !train.carriages.isEmpty()) {
                 Carriage.DimensionalCarriageEntity firstCarriage =
                         train.carriages.getFirst().getDimensionalIfPresent(level.dimension());

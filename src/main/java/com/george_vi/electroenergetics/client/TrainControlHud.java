@@ -66,6 +66,12 @@ public class TrainControlHud implements LayeredDraw.Layer {
         TrainHudData.GearState gear = TrainHudData.gear(train.id);
         if (gear == null)
             return;   // no server sample yet: draw nothing rather than a guess
+        // A fuel train gets a sample too, because that packet also feeds the carriage
+        // voltmeters. Without this the lever panel would appear on a diesel crew's
+        // screen. One shared test, so the panel, the click handler and the wheel
+        // suppression cannot disagree.
+        if (!TrainHudData.leverDriven(train.id))
+            return;
 
         int w = graphics.guiWidth();
         int h = graphics.guiHeight();

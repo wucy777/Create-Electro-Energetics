@@ -61,6 +61,10 @@ public final class TrainControlInput {
         TrainHudData.GearState gear = gearState(train);
         if (gear == null)
             return false;   // no server sample: the panel is not drawn either
+        // The panel is not drawn on a fuel train, so it must not swallow clicks there
+        // either; the two use the same test so they cannot disagree.
+        if (!TrainHudData.leverDriven(train.id))
+            return false;
 
         int w = mc.getWindow().getGuiScaledWidth();
         int h = mc.getWindow().getGuiScaledHeight();

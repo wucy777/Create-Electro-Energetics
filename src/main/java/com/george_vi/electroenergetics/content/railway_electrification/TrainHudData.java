@@ -105,8 +105,27 @@ public final class TrainHudData {
         return s == null || !s.powered() ? 0f : s.maxSpeed();
     }
 
+    /**
+     * Whether this train is one the lever drives, i.e. an electric train the server
+     * has sent lever state for.
+     *
+     * <p>One place, so the panel renderer, the click handler and the speed-wheel
+     * suppression cannot disagree about which trains are lever-driven. The test is
+     * the consist carrying traction motors, not being energised right now: a set
+     * that has lost its supply is still an electric train and keeps its controls.
+     *
+     * <p>False for a fuel train even though the server syncs a sample for those too,
+     * because that packet is also what feeds the carriage voltmeters. Without the
+     * motor count here the lever panel would appear on a diesel crew's screen.
+     */
+    public static boolean leverDriven(UUID trainId) {
+        Sample s = SAMPLES.get(trainId);
+        return s != null && s.motorCars() > 0 && GEARS.containsKey(trainId);
+    }
+
     /** Drop samples for trains that no longer exist, so the map cannot grow forever. */
     public static void retain(java.util.function.Predicate<UUID> keep) {
         SAMPLES.keySet().removeIf(id -> !keep.test(id));
+        GEARS.keySet().removeIf(id -> !keep.test(id));
     }
 }

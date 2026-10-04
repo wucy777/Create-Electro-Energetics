@@ -66,10 +66,9 @@ public class TrainHUDMixin {
         // right now. An electric train that has run off the end of the catenary, or
         // whose accumulator is flat, is still an electric train: it should not
         // suddenly grow a working throttle wheel because its supply dropped, and
-        // then lose it again when the pantograph picks up. motorCars is the same
-        // field the readout counts, so the two always agree.
-        TrainHudData.Sample sample = TrainHudData.get(train.id);
-        if (sample != null && sample.motorCars() > 0)
+        // then lose it again when the pantograph picks up. The same shared test the
+        // lever panel uses, so the two can never disagree about which train this is.
+        if (TrainHudData.leverDriven(train.id))
             cir.setReturnValue(false);
     }
 
