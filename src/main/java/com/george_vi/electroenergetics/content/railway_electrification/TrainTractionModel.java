@@ -507,6 +507,8 @@ public final class TrainTractionModel {
         double v = signedSpeedMs;
         double speed = Math.abs(v);
         double gamma = CEEConfigs.server().resistanceValues.electricTrainRotatingMassFactor.get();
+        // Effective mass, for inertia: a train has to accelerate its own rotating
+        // parts too, so gamma is added here and every force below is divided by it.
         double mass = (1d + gamma) * totalMass(carriages);
         if (mass <= 0d)
             return 0d;
@@ -514,7 +516,16 @@ public final class TrainTractionModel {
         // Drag opposes motion and vanishes at a standstill.
         double force = -Math.signum(v) * runningResistance(speed, carriages);
         // Gravity pulls down the slope, i.e. towards -x for a climb towards +x.
-        force -= mass * G * gradeToPlusX;
+        //
+        // Deliberately gradeResistance() rather than mass*G*grade: gravity acts on the
+        // REAL mass, not the effective one, because the rotating parts do not weigh
+        // more just because they also have to be spun up. Using the effective mass
+        // here - as this originally did - overstated gravity by (1+gamma) = 6%, which
+        // made every slope in the gear law 6% steeper than the same slope in
+        // availableAcceleration, maxSustainableSpeed and the HUD, all of which go
+        // through gradeResistance. Sharing the function is what keeps them consistent;
+        // a second copy of the expression is what let them drift.
+        force -= gradeResistance(gradeToPlusX, carriages);
 
         double effort = availableEffort(speed, carriages, powerScale);
         double ceiling = designMaxSpeed();
@@ -533,6 +544,23 @@ public final class TrainTractionModel {
         // Which way the train is going, or would go if released from rest. Used
         // only to aim traction and the brake; gravity never needs it.
         double heading = speed < 1e-6d ? 1d : Math.signum(v);
+
+        // The direction the BRAKE should push at a standstill.
+        //
+        // A brake opposes motion, and at a standstill there is none - so it has to
+        // oppose the direction the train is about to move instead, which is the way
+        // gravity is pulling. Using `heading` here was wrong in a way that only shows
+        // on a gradient: heading is +1 at rest regardless of the slope, so on an
+        // uphill the brake pushed towards -x, the same direction as gravity, and a
+        // train that could not hold slid away FASTER than gravity alone would take it
+        // - the brake behaving as a downhill assist. On a downhill it happened to
+        // look right, which is why it survived the earlier tests: they only ever
+        // checked the descent. Verified by simulation in _cache/calc_max_grade.py,
+        // which reproduces the runaway and now agrees with the closed form.
+        //
+        // Zero on level ground at rest, which is correct: there is nothing to hold
+        // against, so the brake has no direction to push.
+        double brakeHeading = speed < 1e-6d ? -Math.signum(gradeToPlusX) : Math.signum(v);
 
         // Braking is blended rather than a single number, and the blend depends on
         // speed: the electric part fades out as the train slows, the friction part
@@ -570,7 +598,7 @@ public final class TrainTractionModel {
                         // clamping train.speed keeps it physical: the train is
                         // genuinely slowed, and a clamp would be a teleport the
                         // physics never agreed to.
-                        leverBrakeForce -= heading * brakeTotal * mass;
+                        leverBrakeForce -= brakeHeading * brakeTotal * mass;
                         force += leverBrakeForce;
                         dynamicApplied = dynamicPart;
                     }
@@ -590,14 +618,15 @@ public final class TrainTractionModel {
                 // the friction pads. Because a powered motor holds torque at zero
                 // speed, unlike a generator, this is the one position that can hold a
                 // stationary train on a grade far steeper than the pads alone.
-                double gravityTowardForward = -mass * G * gradeToPlusX;
+                // Gravity's pull along +x, as a force on the REAL mass.
+                double gravityTowardForward = -gradeResistance(gradeToPlusX, carriages);
                 boolean forwardTendency = v > 1e-6d
                         || (speed < 1e-6d && gravityTowardForward > 0d);
                 if (forwardTendency) {
                     double motorBrake = motorReverseBrake(speed, carriages, powerScale);
-                    // heading is sign(v), so -heading opposes motion when rolling, and
-                    // when stopped heading is +1 and this opposes the forward pull.
-                    leverBrakeForce = -heading * (brakeMs2 + motorBrake) * mass;
+                    // brakeHeading opposes the motion when rolling, and opposes the
+                    // direction gravity would take it when stopped.
+                    leverBrakeForce = -brakeHeading * (brakeMs2 + motorBrake) * mass;
                     force += leverBrakeForce;
                 } else if (!tractionCut && speed < Math.min(ceiling, reverseMaxSpeed())) {
                     force -= effort;
@@ -617,7 +646,7 @@ public final class TrainTractionModel {
                     if (!tractionCut && speed < ceiling)
                         force += heading * effort;
                 } else if (speed > target + CRUISE_DEADBAND || tractionCut) {
-                    leverBrakeForce = -heading * brakeTotal * mass;
+                    leverBrakeForce = -brakeHeading * brakeTotal * mass;
                     force += leverBrakeForce;
                     dynamicApplied = dynamicPart;
                 } else {
@@ -657,7 +686,7 @@ public final class TrainTractionModel {
                 // means cutting it, and this is the position that is meant to roll.
             }
             case BRAKE -> {
-                leverBrakeForce = -heading * brakeTotal * mass;
+                leverBrakeForce = -brakeHeading * brakeTotal * mass;
                 force += leverBrakeForce;
                 dynamicApplied = dynamicPart;
             }
@@ -696,7 +725,14 @@ public final class TrainTractionModel {
         //           train on a grade, and it is why this position is the strongest
         //           hold on the train.
         if (speed < 1e-6d && a != 0d) {
-            double pull = Math.abs(G * gradeToPlusX);
+            // Gravity's contribution to the ACCELERATION, which is what this test
+            // compares against: gradeResistance is a force on the real mass, and the
+            // equation of motion divides every force by the effective mass, so the
+            // pull appears as g*grade/(1+gamma). Dividing by (1+gamma) is not a fudge
+            // - the rotating parts genuinely resist being accelerated down the slope
+            // - and leaving it out made the test 6% stricter than the physics, so a
+            // train would have been told it could not hold a grade it could.
+            double pull = Math.abs(G * gradeToPlusX) / (1d + gamma);
             double hold = 0d;
             boolean braked = false;
             if (gear == TrainGear.BRAKE) {
