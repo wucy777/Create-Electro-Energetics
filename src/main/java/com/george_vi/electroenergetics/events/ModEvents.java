@@ -7,6 +7,7 @@ import com.george_vi.electroenergetics.CEERegistries;
 import com.george_vi.electroenergetics.CreateElectroEnergetics;
 import com.george_vi.electroenergetics.client.ElectricPropertiesOverlay;
 import com.george_vi.electroenergetics.client.ElectricTrainHud;
+import com.george_vi.electroenergetics.client.TrainControlHud;
 import com.george_vi.electroenergetics.content.accumulator.AccumulatorBlockEntity;
 import com.george_vi.electroenergetics.content.clamp_meter.ClampMeterRenderer;
 import com.george_vi.electroenergetics.content.connector.ConnectorBlock;
@@ -151,7 +152,12 @@ public class ModEvents {
     public static void registerGuiOverlays(RegisterGuiLayersEvent event) {
         event.registerAbove(VanillaGuiLayers.CROSSHAIR, CreateElectroEnergetics.rl("electric_properties_overlay"), ElectricPropertiesOverlay.INSTANCE);
         // Above the hotbar, so it clears Create's own train HUD (experience bar).
+        // This is the readout in the bottom-left corner.
         event.registerAbove(VanillaGuiLayers.HOTBAR, CreateElectroEnergetics.rl("electric_train_hud"), ElectricTrainHud.INSTANCE);
+        // The lever and its buttons, bottom-right. Separate from the readout above
+        // because the two are drawn in different corners and change at different
+        // rates: the readout follows the simulation, the lever follows clicks.
+        event.registerAbove(VanillaGuiLayers.HOTBAR, CreateElectroEnergetics.rl("train_control_hud"), TrainControlHud.INSTANCE);
     }
 
     @SubscribeEvent

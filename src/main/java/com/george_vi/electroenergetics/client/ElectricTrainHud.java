@@ -1,6 +1,7 @@
 package com.george_vi.electroenergetics.client;
 
 import com.george_vi.electroenergetics.content.railway_electrification.ElectricManualSpeed;
+import com.george_vi.electroenergetics.content.railway_electrification.TrainGear;
 import com.george_vi.electroenergetics.content.railway_electrification.TrainHudData;
 import com.simibubi.create.content.contraptions.actors.trainControls.ControlsHandler;
 import com.simibubi.create.content.trains.entity.Carriage;
@@ -47,6 +48,10 @@ public class ElectricTrainHud implements LayeredDraw.Layer {
     private static final int MARGIN = 4;
     private static final int LINE_HEIGHT = 10;
 
+    /** Row label colour, shared by the status line's fallback. */
+    private static final int LABEL = 0x9AA0A6;
+    private static final int VALUE = 0xFFFFFF;
+
     /** Smoothed display values so the readout does not flicker tick to tick. */
     private float shownSpeed;
     private float shownMaxSpeed;
@@ -56,14 +61,14 @@ public class ElectricTrainHud implements LayeredDraw.Layer {
     // Row text plus the quantised values it was built from. Rebuilt only when a
     // displayed digit actually changes, since this renders every frame.
     private String textSpeed = "";
-    private String textThrottle = "";
+    private String textGear = "";
     private String textGrade = "";
     private String textPower = "";
     private String textCatenary = "";
     private String textCars = "";
     private int cachedSpeed = Integer.MIN_VALUE;
     private int cachedCap = Integer.MIN_VALUE;
-    private int cachedThrottle = Integer.MIN_VALUE;
+    private int cachedGear = Integer.MIN_VALUE;
     private int cachedPowerKw = Integer.MIN_VALUE;
     private int cachedDeciVolt = Integer.MIN_VALUE;
     private int cachedCars = Integer.MIN_VALUE;
@@ -71,6 +76,13 @@ public class ElectricTrainHud implements LayeredDraw.Layer {
     private boolean cachedPowered;
     private double cachedGrade = Double.NaN;
     private float cachedPerCarriage = Float.NaN;
+
+    /**
+     * The lever sample this frame, held for the status line and the gear row. Not
+     * part of the cached-value comparison because it is read directly while
+     * drawing rather than formatted into a cached string.
+     */
+    private TrainHudData.GearState gearState;
 
     private ElectricTrainHud() {}
 
@@ -99,9 +111,8 @@ public class ElectricTrainHud implements LayeredDraw.Layer {
 
         // The train's own ceiling, with no throttle term: this is what fills the
         // readout. Create's experience bar divides by the same figure, so the two
-        // agree. The throttle still caps how fast the train may go (Create
-        // multiplies it into the target speed), so pulling the wheel back drops
-        // this reading rather than shrinking what "full" means.
+        // agree. The throttle no longer caps an electric train's speed at all -
+        // the lever does - so this is simply the modelled ceiling.
         float manualCap = sample.maxSpeed()
                 * ElectricManualSpeed.speedBarFactor(train, manualSpeedModifier());
 
@@ -109,9 +120,13 @@ public class ElectricTrainHud implements LayeredDraw.Layer {
         float speed = (float) Math.abs(train.speed) * 20f;
         lerp(speed, manualCap, sample.power(), partialTicks);
 
+        // Bottom-left, with the rows stacked upwards from the bottom margin, so
+        // the readout sits under the eye instead of across the middle of the view.
+        gearState = TrainHudData.gear(train.id);
+
         var font = mc.font;
         int x = MARGIN;
-        int y = graphics.guiHeight() - MARGIN - LINE_HEIGHT * rows - 40;
+        int y = graphics.guiHeight() - MARGIN - LINE_HEIGHT * 7;
 
         int label = 0x9AA0A6;
         int value = 0xFFFFFF;
@@ -124,7 +139,7 @@ public class ElectricTrainHud implements LayeredDraw.Layer {
         // is narrowed back explicitly.
         int speedI = (int) Math.round(shownSpeed);
         int capI = (int) Math.round(shownMaxSpeed);
-        int throttleI = (int) Math.round(train.throttle * 100f);
+        int gearI = gearState == null ? -1 : gearState.gear();
         int powerKwI = (int) Math.round(shownPower / 1000f);
         int deciVoltI = (int) Math.round(sample.voltage() / 100f);   // 0.1 kV steps
         int cars = sample.carriages() > 0 ? sample.carriages()
@@ -132,14 +147,14 @@ public class ElectricTrainHud implements LayeredDraw.Layer {
         int motorsI = sample.motorCars();
         boolean powered = sample.powered();
 
-        if (speedI != cachedSpeed || capI != cachedCap || throttleI != cachedThrottle
+        if (speedI != cachedSpeed || capI != cachedCap || gearI != cachedGear
                 || powerKwI != cachedPowerKw || deciVoltI != cachedDeciVolt
                 || cars != cachedCars || motorsI != cachedMotors
                 || powered != cachedPowered || sample.grade() != cachedGrade
                 || sample.powerPerCarriage() != cachedPerCarriage) {
             cachedSpeed = speedI;
             cachedCap = capI;
-            cachedThrottle = throttleI;
+            cachedGear = gearI;
             cachedPowerKw = powerKwI;
             cachedDeciVolt = deciVoltI;
             cachedCars = cars;
@@ -147,13 +162,13 @@ public class ElectricTrainHud implements LayeredDraw.Layer {
             cachedPowered = powered;
             cachedGrade = sample.grade();
             cachedPerCarriage = sample.powerPerCarriage();
-            rebuildText(speedI, capI, throttleI, powerKwI, deciVoltI,
+            rebuildText(speedI, capI, gearI, powerKwI, deciVoltI,
                     cars, motorsI, powered, sample.grade(),
                     sample.powerPerCarriage());
         }
 
         drawRow(graphics, font, x, y, 0, label, "Speed", value, textSpeed);
-        drawRow(graphics, font, x, y, 1, label, "Throttle", value, textThrottle);
+        drawRow(graphics, font, x, y, 1, label, "Gear", value, textGear);
         drawRow(graphics, font, x, y, 2, label, "Gradient",
                 gradeColor(sample.grade()), textGrade);
         drawRow(graphics, font, x, y, 3, label, "Power", value, textPower);
@@ -161,10 +176,56 @@ public class ElectricTrainHud implements LayeredDraw.Layer {
         // Carriage count and how many of them actually pull, so the rating above
         // can be sanity-checked at a glance.
         drawRow(graphics, font, x, y, 5, label, "Cars", value, textCars);
+
+        // Status line under the block. This is where the things a driver has to act
+        // on go, in priority order: the vigilance prompt first, because ignoring it
+        // drops the lever to the brake; then the emergency-brake penalty, so a
+        // mysteriously slow train is explained; then what cruise is doing, which is
+        // the one readout that says whether the set is holding its speed.
+        String status = statusLine();
+        if (!status.isEmpty())
+            graphics.drawString(font, status, x, y + LINE_HEIGHT * 6 + 2, statusColor(), true);
+    }
+
+    /** The single most important thing to tell the driver right now, or "". */
+    private String statusLine() {
+        TrainHudData.GearState gear = gearState;
+        if (gear == null)
+            return "";
+        if (gear.confirmDue())
+            return "PRESS ACKNOWLEDGE";
+        if (gear.emergencyPenalty())
+            return "EMERGENCY USED - LIMITED TO 40 km/h";
+        if (gear.emergencyArmed())
+            return "emergency brake armed";
+        if (gear.regen())
+            return "regenerating into the line";
+        if (gear.gear() == TrainGear.CRUISE.ordinal()) {
+            return switch (gear.cruiseState()) {
+                case 0 -> "holding the set speed";
+                case 1 -> "power limited - slowing on the climb";
+                case 2 -> "braking to hold on the descent";
+                default -> "stopped";
+            };
+        }
+        return "";
+    }
+
+    private int statusColor() {
+        TrainHudData.GearState gear = gearState;
+        if (gear == null)
+            return VALUE;
+        if (gear.confirmDue())
+            return 0xFFFF6B5E;
+        if (gear.emergencyPenalty())
+            return 0xFFFFB454;
+        if (gear.regen())
+            return 0xFF7EE787;
+        return VALUE;
     }
 
     /** Rebuilds the cached row text; only called when a displayed value changed. */
-    private void rebuildText(int speed, int cap, int throttle, int powerKw, int deciVolt,
+    private void rebuildText(int speed, int cap, int gear, int powerKw, int deciVolt,
                              int cars, int motors, boolean powered, double grade,
                              float perCarriage) {
         // With no supply the traction can sustain nothing, so the ceiling is
@@ -173,7 +234,8 @@ public class ElectricTrainHud implements LayeredDraw.Layer {
         textSpeed = powered
                 ? speed + " / " + cap + " m/s"
                 : speed + " m/s";
-        textThrottle = throttle + "%";
+        textGear = gear < 0 ? "--"
+                : TrainControlHud.gearLabel(TrainGear.values()[gear]);
         textGrade = describeGrade(grade);
         // Rating is per carriage, so show the consist's rating against what it is
         // actually drawing; that is the comparison that shows whether the set is

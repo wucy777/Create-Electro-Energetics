@@ -3,6 +3,7 @@ package com.george_vi.electroenergetics.events;
 import com.george_vi.electroenergetics.*;
 import com.george_vi.electroenergetics.client.ClientNodeData;
 import com.george_vi.electroenergetics.client.ElectricPropertiesOverlay;
+import com.george_vi.electroenergetics.client.TrainControlInput;
 import com.george_vi.electroenergetics.client.WireEffects;
 import com.george_vi.electroenergetics.client.WireRenderer;
 import com.george_vi.electroenergetics.commands.CEECommands;
@@ -109,6 +110,27 @@ public class GameEvents {
     public static void mouseScrolled(InputEvent.MouseScrollingEvent event) {
         double delta = event.getScrollDeltaY();
         event.setCanceled(FuseBlockItem.mouseScrolled(delta) || ChangeLengthWireInteractionBehaviour.mouseScrolled(delta));
+    }
+
+    /**
+     * Clicks on the driver's lever panel.
+     *
+     * <p>Must run before the click reaches the world, or the same click that notches
+     * the lever would also swing at whatever is behind the panel. Cancelling here is
+     * the only way to stop that; the panel only claims clicks inside its own
+     * rectangle while a driver holds the controls of an electric train, so ordinary
+     * play is unaffected everywhere else.
+     *
+     * <p>{@code Pre} rather than {@code Post}: by the time a Post event fires the
+     * swing or the block placement has already been decided.
+     */
+    @OnlyIn(Dist.CLIENT)
+    @SubscribeEvent
+    public static void mouseClicked(InputEvent.MouseButton.Pre event) {
+        if (event.getAction() != org.lwjgl.glfw.GLFW.GLFW_PRESS)
+            return;
+        if (TrainControlInput.onClick(event.getButton()))
+            event.setCanceled(true);
     }
 
     @OnlyIn(Dist.CLIENT)
