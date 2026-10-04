@@ -1,5 +1,6 @@
 package com.george_vi.electroenergetics.events;
 
+import com.george_vi.electroenergetics.CEEBlocks;
 import com.george_vi.electroenergetics.CEEFluids;
 import com.george_vi.electroenergetics.CEEItems;
 import com.george_vi.electroenergetics.CEERegistries;
@@ -119,12 +120,20 @@ public class ModEvents {
         ItemBlockRenderTypes.setRenderLayer(CEEFluids.TRANSFORMER_OIL.getSource(), RenderType.translucent());
         ItemBlockRenderTypes.setRenderLayer(CEEFluids.PLANT_OIL.get(), RenderType.translucent());
         ItemBlockRenderTypes.setRenderLayer(CEEFluids.PLANT_OIL.getSource(), RenderType.translucent());
-        // Clear glass is deliberately NOT listed here. Its block model declares
-        // minecraft:translucent, and this call would override that: forcing the
-        // cutout pass makes the renderer treat every texel as either fully opaque
-        // or fully discarded, so the sheet's low alpha would be rounded up to
-        // solid and the glass would turn into an opaque cube. Leaving it out lets
-        // the model decide.
+        // Clear glass is translucent, and it has to be registered here as well as in
+        // its block model. The model's render_type is only a hint to the model
+        // baker; the layer a block is actually drawn in comes from
+        // ItemBlockRenderTypes.getChunkRenderType, which looks this block up in
+        // TYPE_BY_BLOCK and falls back to RenderType.solid() when it is absent.
+        // Left unregistered the sheet would go through the solid pass, which neither
+        // discards nor blends, so its low alpha would be written as an opaque cube.
+        //
+        // The pass must be translucent, not cutout: cutout has no blending either and
+        // simply drops texels under alpha 0.1, so alpha 30 would survive the cutoff
+        // and be drawn fully opaque. This pairing - translucent here and in the model
+        // - is what the block shipped with when it was first added and verified to
+        // look right in game.
+        ItemBlockRenderTypes.setRenderLayer(CEEBlocks.CLEAR_GLASS.get(), RenderType.translucent());
         RadialWrenchMenu.registerRotationProperty(DoubleConnectorBlock.ROLL, "Roll");
         RadialWrenchMenu.registerRotationProperty(DoubleConnectorBlock.STYLE, "Style");
         RadialWrenchMenu.registerRotationProperty(ConnectorBlock.STYLE, "Style");
