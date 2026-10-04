@@ -1,6 +1,7 @@
 package com.george_vi.electroenergetics;
 
 import com.george_vi.electroenergetics.client.CEECT;
+import com.george_vi.electroenergetics.client.ClearGlassCTBehaviour;
 import com.george_vi.electroenergetics.client.ElectricStatsTooltipModifier;
 import com.george_vi.electroenergetics.config.CEEConfigs;
 import com.george_vi.electroenergetics.content.accumulator.AccumulatorBlock;
@@ -70,7 +71,6 @@ import com.george_vi.electroenergetics.foundation.base.DirectionalRolledDeviceBl
 import com.simibubi.create.AllTags;
 import com.simibubi.create.api.boiler.BoilerHeater;
 import com.simibubi.create.content.kinetics.gauge.GaugeGenerator;
-import com.simibubi.create.foundation.block.connected.SimpleCTBehaviour;
 import com.simibubi.create.foundation.data.AssetLookup;
 import com.simibubi.create.foundation.data.BlockStateGen;
 import com.simibubi.create.foundation.data.CreateRegistrate;
@@ -673,11 +673,11 @@ public class CEEBlocks {
                     // its own faint texture, mining this would give no visual
                     // feedback whatsoever.
                     .texture("particle", p.modLoc("block/clear_glass_particle"))))
-            // The perimeter frame. Registered through Create's CT system, not an
-            // OptiFine/Continuity ctm set, because a copycat panel replays the
-            // material model's quads directly and never passes through the render
-            // pipeline wrapper Continuity hooks. See CEECT for the full reasoning.
-            .onRegister(CreateRegistrate.connectedTextures(() -> new SimpleCTBehaviour(CEECT.CLEAR_GLASS)))
+            // The frame. Registered through Create's CT system, not an OptiFine
+            // ctm set, because a copycat panel replays the material model's quads
+            // directly and never passes through the pipeline wrapper Continuity
+            // hooks. See CEECT and ClearGlassCTBehaviour.
+            .onRegister(CreateRegistrate.connectedTextures(() -> new ClearGlassCTBehaviour(CEECT.CLEAR_GLASS)))
             .transform(pickaxeOnly())
             .item()
             // A separate icon, not the block model. The block is deliberately
