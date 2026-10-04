@@ -4,6 +4,7 @@ import com.george_vi.electroenergetics.CEEElectricTrainSoundTypes;
 import com.george_vi.electroenergetics.CEERegistries;
 import com.george_vi.electroenergetics.config.CEEConfigs;
 import com.george_vi.electroenergetics.content.railway_electrification.ElectricTrainData;
+import com.george_vi.electroenergetics.content.railway_electrification.TrainDriverState;
 import com.george_vi.electroenergetics.content.railway_electrification.TrainHudData;
 import com.george_vi.electroenergetics.content.railway_electrification.TrainTractionModel;
 import com.george_vi.electroenergetics.content.railway_electrification.sound_effects.TrainSoundModifier;
