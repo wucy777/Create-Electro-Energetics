@@ -649,10 +649,11 @@ public class CEEBlocks {
      * <p>The texture is a flat fill at a low alpha - no frame and no sparkles - so
      * the pane is see-through but still visible against the sky. That semi
      * transparency is what decides the render type: this must be
-     * {@code minecraft:translucent}, because {@code cutout} discards alpha
-     * entirely and would either draw a solid sheet or nothing at all. It is set
-     * here as well as in the model, so re-running datagen cannot quietly change
-     * the render type and turn the block into an opaque cube.
+     * {@code minecraft:translucent}. The cutout passes would draw it fully opaque
+     * instead, since they do not blend and only drop texels below alpha 0.1. The
+     * type is declared here as well as registered in {@code ModEvents.clientInit},
+     * because a model's {@code render_type} alone is not authoritative; see the
+     * comment there.
      *
      * <p>The particle texture is separate and opaque. The block surface is nearly
      * invisible, so without its own texture, mining this would give no visual
