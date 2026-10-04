@@ -226,10 +226,8 @@ public class TrainMixin implements ICEETrainExtension {
         // Create does this inside approachTargetSpeed (if (manualTick)
         // leaveStation()), and that is exactly the method this mode bypasses for a
         // driven electric train - so without this the station would never be
-        // released. The train would sit at the platform with currentStation set
-        // forever, and because the driver-state tick drops the lever to the brake
-        // while a station is held, a reversing train would additionally be stuck
-        // unable to select any gear. A hard softlock rather than a cosmetic bug.
+        // released and the train would sit at the platform with currentStation set
+        // forever. A hard softlock rather than a cosmetic bug.
         //
         // Only for a gear that commands movement: selecting the brake or cutting the
         // power at a platform should leave the train checked in, which is what lets
