@@ -42,15 +42,46 @@ public final class TrainControlInput {
     private TrainControlInput() {}
 
     /**
+     * Whether this key is one of the cab's, so it may be consumed before it reaches
+     * any other mod.
+     *
+     * <p>Consulted by {@code KeyboardHandlerMixin} on every key press in the game, so
+     * it is a set of integer comparisons and nothing else.
+     */
+    public static boolean isCabKey(int key) {
+        return key == TrainControlKeys.LEVER_UP
+                || key == TrainControlKeys.LEVER_DOWN
+                || key == TrainControlKeys.CONFIRM
+                || key == TrainControlKeys.EMERGENCY;
+    }
+
+    /**
+     * Whether the player is currently driving an electric train, which is the only
+     * situation in which the cab takes its keys away from everything else.
+     *
+     * <p>Public and separate from {@link #tick()} because the key suppression runs on
+     * the input thread's event, not on the client tick, and needs the same answer.
+     */
+    public static boolean isDrivingElectricTrain() {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.options == null || mc.options.hideGui || mc.player == null || mc.level == null)
+            return false;
+        if (mc.gameMode == null || mc.gameMode.getPlayerMode() == GameType.SPECTATOR)
+            return false;
+        if (mc.screen != null)
+            return false;   // a menu is open: its keys are not ours to take
+        Train train = drivenTrain();
+        return train != null && TrainHudData.leverDriven(train.id);
+    }
+
+    /**
      * Called every client tick. Reads the keys, and sends anything that changed.
      *
      * <p>Nothing is sent while the lever is not moving, so a train standing at a
      * platform with a driver aboard generates no traffic at all.
      */
     public static void tick() {
-        Minecraft mc = Minecraft.getInstance();
-        boolean driving = canDrive(mc);
-        if (!driving) {
+        if (!isDrivingElectricTrain()) {
             // Drop the edge state so the first press after getting back in the cab is
             // treated as a fresh press even if the key was down the whole time.
             upWasDown = downWasDown = confirmWasDown = emergencyWasDown = false;
@@ -98,17 +129,6 @@ public final class TrainControlInput {
         if (next == gear.gear())
             return;
         send(SetTrainGearPacket.gear(train.id, values[next]));
-    }
-
-    private static boolean canDrive(Minecraft mc) {
-        if (mc.options.hideGui || mc.player == null || mc.level == null)
-            return false;
-        if (mc.gameMode == null || mc.gameMode.getPlayerMode() == GameType.SPECTATOR)
-            return false;
-        if (mc.screen != null)
-            return false;   // a menu is open: the arrow keys belong to it
-        Train train = drivenTrain();
-        return train != null && TrainHudData.leverDriven(train.id);
     }
 
     private static Train drivenTrain() {

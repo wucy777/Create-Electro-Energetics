@@ -11,6 +11,7 @@
     "ControlsMovementBehaviourMixin",
     "HumanoidModelMixin",
     "ItemInHandRendererMixin",
+    "KeyboardHandlerMixin",
     "LevelRendererAccessor",
     "MouseHandlerMixin",
     "MultiPlayerGameModeMixin",
