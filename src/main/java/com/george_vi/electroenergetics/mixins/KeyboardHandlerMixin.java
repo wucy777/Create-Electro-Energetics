@@ -34,7 +34,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 @Mixin(KeyboardHandler.class)
 public class KeyboardHandlerMixin {
 
-    @Inject(method = "keyPress", at = @At("HEAD"), cancellable = true)
+    @Inject(method = "keyPress", at = @At("HEAD"), cancellable = true, remap = false)
     private void electroEnergetics$consumeCabKeys(long windowPointer, int key, int scanCode,
                                                   int action, int modifiers, CallbackInfo ci) {
         // Only on press and auto-repeat. The release must still get through, or a
