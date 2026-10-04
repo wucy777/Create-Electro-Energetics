@@ -77,8 +77,9 @@ public class TrainControlHud implements LayeredDraw.Layer {
         graphics.renderOutline(x, y, TrainControlLayout.PANEL_W, TrainControlLayout.TOTAL_H, BORDER);
         graphics.drawString(font, "Traction", x + 4, y + 3, TEXT_DIM, false);
 
-        boolean reverseSelected = gear.gear() == TrainGear.REVERSE.ordinal();
-        boolean emergencyVisible = reverseSelected;
+        // The emergency button only exists in reverse, which is the position where
+        // it means anything: it is the "stop, I am not shunting" action.
+        boolean emergencyVisible = gear.gear() == TrainGear.REVERSE.ordinal();
 
         double mouseX = mc.mouseHandler.xpos() * w / mc.getWindow().getWidth();
         double mouseY = mc.mouseHandler.ypos() * h / mc.getWindow().getHeight();
