@@ -26,15 +26,7 @@ import net.neoforged.api.distmarker.OnlyIn;
 @OnlyIn(Dist.CLIENT)
 public final class TrainControlInput {
 
-    /** Set while the cursor is over the panel, so the renderer can suppress the crosshair. */
-    private static boolean hovering;
-
     private TrainControlInput() {}
-
-    /** Whether the cursor was over the panel on the last frame. */
-    public static boolean isHovering() {
-        return hovering;
-    }
 
     /** Latest lever sample for the train the player drives, or {@code null}. */
     private static TrainHudData.GearState gearState(Train train) {
@@ -107,29 +99,5 @@ public final class TrainControlInput {
 
     private static void send(SetTrainGearPacket packet) {
         CatnipServices.NETWORK.sendToServer(packet);
-    }
-
-    /**
-     * Refresh the hover flag. Called once per client tick rather than per frame,
-     * since it only gates the crosshair and the button highlight.
-     */
-    public static void tick() {
-        Minecraft mc = Minecraft.getInstance();
-        hovering = false;
-        if (mc.options.hideGui || mc.player == null || mc.level == null)
-            return;
-        if (mc.gameMode == null || mc.gameMode.getPlayerMode() == GameType.SPECTATOR)
-            return;
-        Train train = drivenTrain();
-        if (train == null || gearState(train) == null)
-            return;
-
-        int w = mc.getWindow().getGuiScaledWidth();
-        int h = mc.getWindow().getGuiScaledHeight();
-        int px = TrainControlLayout.panelX(w);
-        int py = TrainControlLayout.panelY(h);
-        double mouseX = mc.mouseHandler.xpos() * w / mc.getWindow().getGuiScaledWidth();
-        double mouseY = mc.mouseHandler.ypos() * h / mc.getWindow().getGuiScaledHeight();
-        hovering = TrainControlLayout.inside(px, py, mouseX, mouseY);
     }
 }
