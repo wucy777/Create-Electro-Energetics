@@ -12,12 +12,12 @@ public class CEEWireTypes {
     /**
      * Nominal ampacity of the copper conductor every copper wire shares.
      *
-     * <p>This is the full {@link WireType#HEATING_CURRENT_CAP}: copper is the
-     * reference metal, and the heater cannot tell anything above 1000 A apart from
-     * it anyway. The trip temperature is derived from this figure, so the wire
-     * breaks at its rating and the item tooltip reads exactly 1000 A.
+     * <p>This is the full {@link WireType#WIRE_RATING_LIMIT}: copper is the reference
+     * metal and the highest-rated conductor in the mod. The trip temperature is
+     * derived from this figure, so the wire breaks at its rating and the item tooltip
+     * reads exactly 1000 A.
      */
-    private static final double COPPER_AMPACITY = WireType.HEATING_CURRENT_CAP;
+    private static final double COPPER_AMPACITY = WireType.WIRE_RATING_LIMIT;
 
     private static final double COPPER_AMPACITY_TEMPERATURE =
             WireType.temperatureForAmpacity(COPPER_AMPACITY);

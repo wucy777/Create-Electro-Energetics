@@ -19,6 +19,14 @@ import java.util.Map;
 
 public class WireLifetimeModule {
 
+    /**
+     * Purely numeric ceiling on the current fed to the temperature integrator, to
+     * keep the float arithmetic finite. It is not an electrical rating and no wire
+     * is defined in terms of it; it is far above any current a circuit here
+     * produces, so it never affects real behaviour.
+     */
+    private static final double HEATING_ARITHMETIC_GUARD = 1e6;
+
     final InfrastructureSavedData sd;
     final ServerLevel level;
     final WireSimulationState wireSimulationState;
@@ -64,14 +72,23 @@ public class WireLifetimeModule {
             }
 
             float temp = connectionData.wireData.temperature;
-            // The heater reacts to current only up to a fixed cap; nothing above it
-            // is distinguishable from it. At equilibrium
-            // T = 1000*(min(I, cap)/33.3 - 1), so this bounds every wire's usable
-            // rating - see WireType.HEATING_CURRENT_CAP, which also derives the trip
-            // temperature for a wire rated at exactly the cap.
-            float newTemp = (float) Math.min(current, WireType.HEATING_CURRENT_CAP);
+            // The heater sees the current as it really is, so an overload burns in
+            // proportion to how far over the rating it is. Clamping this to the
+            // rating would make the model blind above it, and every short circuit -
+            // however violent - would take exactly as long to melt a wire as a
+            // current sitting right on the limit.
+            //
+            // The guard below is only numeric: at absurd currents the heat addition
+            // would overflow float and turn the temperature into NaN/infinity, which
+            // would then persist forever. 1e6 A is far beyond anything a circuit in
+            // this mod produces, so it never changes real behaviour.
+            float newTemp = (float) Math.min(current, HEATING_ARITHMETIC_GUARD);
             newTemp *= Math.min(temp < 0 ? 0 : 1 / (1 + (temp / 1000)), 1);
             newTemp = Math.max(temp - 33.3f + newTemp, 0);
+            // A non-finite temperature would latch: every later tick would recompute
+            // it as non-finite again and the wire would neither cool nor break.
+            if (!Float.isFinite(newTemp))
+                newTemp = 0;
             connectionData.wireData.temperature = newTemp;
             boolean increase = newTemp > temp;
 

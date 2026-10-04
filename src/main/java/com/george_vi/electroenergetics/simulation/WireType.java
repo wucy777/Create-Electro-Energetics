@@ -27,57 +27,37 @@ public class WireType {
     private static final double HEATING_HALF_POINT = 1000d;
 
     /**
-     * The largest current, in Amps, the heating model reacts to: {@code
-     * WireLifetimeModule} feeds the heater {@code min(I, this)}.
-     *
-     * <p>This is a hard ceiling on every conductor in the mod, and it is not a
-     * property of any metal - it is where the model stops looking. Nothing above it
-     * is distinguishable from it, so no wire is ever rated above it.
+     * The highest ampacity any wire in the mod is given, in Amps. This is a design
+     * limit on the ratings, not on the physics: no conductor is defined above it, so
+     * the whole set stays comparable and the tooltips stay meaningful.
      */
-    public static final double HEATING_CURRENT_CAP = 1000d;
+    public static final double WIRE_RATING_LIMIT = 1000d;
 
     /**
-     * Trip temperature used for a wire rated at the full {@link #HEATING_CURRENT_CAP}.
+     * The trip temperature for a wire rated for the given current, in the heater's
+     * abstract units.
      *
-     * <p>The equilibrium current {@code HEATING_CURRENT_CAP} corresponds to is
-     * {@code 1000*(1000/33.3 - 1)}, i.e. about 29030.03. A wire sitting exactly on
-     * that value approaches it without ever arriving, so it would never break at
-     * all. This stays a little under the asymptote, which is reached after about
-     * 4.5 minutes at the full 1000 A - and, because the input is clamped, after the
-     * same 4.5 minutes at any current above that.
-     */
-    private static final double CAP_TRIP_TEMPERATURE = 29000d;
-
-    /**
-     * The temperature a wire rated for the given current settles at, in the
-     * heater's abstract units.
+     * <p>The heater settles at {@code T = 1000 * (I / 33.3 - 1)} for a current
+     * {@code I}, and a wire breaks once its temperature passes this value. So a wire
+     * rated {@code R} gets exactly the settling temperature of {@code R}: it holds
+     * steady at its rating and breaks for any current above it, sooner the further
+     * over it goes.
      *
-     * <p>Inverts the settling condition of {@code WireLifetimeModule}: equilibrium
-     * is where the cooling term equals the self-limited input, i.e.
-     * {@code 33.3 = I / (1 + T/1000)}, which rearranges to the expression below.
-     * Pass the result to {@code maxTemperature} to get a wire that burns at
-     * {@code amps}.
-     *
-     * <p>Ratings are clamped to {@link #HEATING_CURRENT_CAP}: a heavy conductor
-     * whose cross-section would allow more still stops at the cap, and gets
-     * {@link #CAP_TRIP_TEMPERATURE} rather than an unreachable number. Such a
-     * conductor is not pointless - its lower resistance still means lower losses.
+     * <p>Ratings are clamped to {@link #WIRE_RATING_LIMIT}: a heavy conductor whose
+     * cross-section would allow more is still rated at the limit. Such a conductor is
+     * not pointless - its lower resistance still means lower losses.
      */
     public static double temperatureForAmpacity(double amps) {
-        if (amps >= HEATING_CURRENT_CAP)
-            return CAP_TRIP_TEMPERATURE;
-        return HEATING_HALF_POINT * (amps / HEATING_COOLING_PER_TICK - 1d);
+        double rated = Math.min(amps, WIRE_RATING_LIMIT);
+        return HEATING_HALF_POINT * (rated / HEATING_COOLING_PER_TICK - 1d);
     }
 
     /**
-     * The current a wire with the given {@code maxTemperature} burns at, in amps -
-     * the number the item tooltips show. Exact inverse of
-     * {@link #temperatureForAmpacity}, saturating at {@link #HEATING_CURRENT_CAP}
-     * over the same boundary, so a tooltip and the heater cannot disagree.
+     * The current a wire with the given {@code maxTemperature} is rated for, in amps -
+     * the number the item tooltips show. The exact inverse of
+     * {@link #temperatureForAmpacity}, so a tooltip and the heater cannot disagree.
      */
     public static double ampacityForTemperature(double maxTemperature) {
-        if (maxTemperature >= CAP_TRIP_TEMPERATURE)
-            return HEATING_CURRENT_CAP;
         return HEATING_COOLING_PER_TICK * (1d + maxTemperature / HEATING_HALF_POINT);
     }
 
@@ -95,7 +75,9 @@ public class WireType {
      * When a current is going through a wire, it raises temperature. It eventually settles into a temperature,
      * the temperature that it stops heating up is dependent on the current.
      * these are temperature values, that the wire settles into, and the currents needed for that.
-     * The current is capped to {@link #HEATING_CURRENT_CAP} (1000A). Here are a few samples from the function.
+     * The heater sees the real current - there is no clamp on it - so an overload
+     * burns faster the further over the rating it is. Here are a few samples from the
+     * settling function.
      * 14000 -> ~ 500A
      * 10000 -> ~ 366A
      * 7500  -> ~ 280A
