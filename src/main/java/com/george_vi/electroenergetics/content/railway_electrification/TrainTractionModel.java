@@ -262,25 +262,6 @@ public final class TrainTractionModel {
         return Math.max(1, carriages) * 2_000d;
     }
 
-    /**
-     * Retarding acceleration with the motors off and no brakes applied [m/s²].
-     *
-     * <p>This is what a train coasts down at: running resistance alone, divided
-     * by the effective mass. It is what makes coasting and braking different
-     * things. At 100 m/s a single carriage sheds about 0.16 m/s² and needs
-     * roughly ten minutes to coast to a stand, which is why a real train coasts
-     * for kilometres and why the driver uses the brake to stop at all.
-     */
-    public static double coastDeceleration(double speedMs, double grade, int carriages) {
-        double v = Math.abs(speedMs);
-        double resisting = runningResistance(v, carriages) + gradeResistance(grade, carriages);
-        if (resisting <= 0d)
-            return 0d;
-        double gamma = CEEConfigs.server().resistanceValues.electricTrainRotatingMassFactor.get();
-        double a = resisting / ((1d + gamma) * totalMass(carriages));
-        return Double.isFinite(a) && a > 0d ? a : 0d;
-    }
-
     // ------------------------------------------------------------------
     // Cruise (the 匀速 running position)
     // ------------------------------------------------------------------
@@ -330,87 +311,9 @@ public final class TrainTractionModel {
         return needed > deliverable ? CruiseState.POWER_LIMITED : CruiseState.HOLDING;
     }
 
-    /**
-     * Braking deceleration cruise needs to hold the speed on a descent [m/s²].
-     *
-     * <p>Only the part gravity contributes beyond what drag already absorbs has
-     * to be braked away; on a shallow descent that is nothing.
-     */
-    public static double cruiseBrakeDeceleration(double speedMs, double grade, int carriages) {
-        double v = Math.abs(speedMs);
-        double needed = runningResistance(v, carriages) + gradeResistance(grade, carriages);
-        if (needed >= 0d)
-            return 0d;
-        double gamma = CEEConfigs.server().resistanceValues.electricTrainRotatingMassFactor.get();
-        double a = -needed / ((1d + gamma) * totalMass(carriages));
-        return Double.isFinite(a) && a > 0d ? a : 0d;
-    }
-
     // ------------------------------------------------------------------
     // Longitudinal motion (gear-driven driving)
     // ------------------------------------------------------------------
-
-    /**
-     * Net acceleration along the direction of travel [m/s²], positive meaning
-     * faster. Signed and deliberately unclamped, unlike
-     * {@link #availableAcceleration}: on a climb too steep for the rating this
-     * returns a negative number, which is the train genuinely losing speed.
-     * Clamping it to zero was what made a stalled train look like a held one.
-     *
-     * <p>Drag and gravity are always included, so a train with the traction off
-     * ({@code tractionScale = 0}) rolls on a gradient exactly as it should.
-     *
-     * @param tractionScale fraction of the available effort to apply, 0-1
-     */
-    public static double netAcceleration(double speedMs, double grade, int carriages,
-                                         double powerScale, double tractionScale) {
-        double v = Math.abs(speedMs);
-        double gamma = CEEConfigs.server().resistanceValues.electricTrainRotatingMassFactor.get();
-        double force = -runningResistance(v, carriages) - gradeResistance(grade, carriages);
-        if (tractionScale > 0d)
-            force += availableEffort(v, carriages, powerScale) * Math.min(tractionScale, 1d);
-        double a = force / ((1d + gamma) * totalMass(carriages));
-        return Double.isFinite(a) ? a : 0d;
-    }
-
-    /**
-     * Traction share that would exactly hold the current speed on this gradient.
-     *
-     * <p>This is the cruise position expressed as a fraction rather than a power:
-     * it asks the motors for precisely the force that cancels drag and gravity, so
-     * the train neither gains nor loses speed. Returning a fraction rather than a
-     * wattage keeps it in the same units as the rest of the envelope, and means
-     * cruise cannot ask for more than the motors have - if the share would exceed
-     * 1, the caller runs at full power instead and the train slows.
-     */
-    public static double holdTractionScale(double speedMs, double grade, int carriages, double powerScale) {
-        double v = Math.abs(speedMs);
-        double needed = runningResistance(v, carriages) + gradeResistance(grade, carriages);
-        if (needed <= 0d)
-            return 0d;
-        double deliverable = availableEffort(v, carriages, powerScale);
-        if (deliverable <= 0d)
-            return 1d;
-        return Math.min(needed / deliverable, 1d);
-    }
-
-    /**
-     * Electrical power to hold the current speed [W], for the readout.
-     *
-     * <p>{@code P = v · F} with {@code F} the force cruise is actually applying,
-     * which is the quantity the driver asked to see.
-     */
-    public static double cruisePower(double speedMs, double grade, int carriages, double powerScale) {
-        double v = Math.abs(speedMs);
-        if (v < CRUISE_MIN_SPEED)
-            return auxiliaryPower(carriages);
-        double scale = holdTractionScale(v, grade, carriages, powerScale);
-        double force = availableEffort(v, carriages, powerScale) * scale;
-        double traction = force * v / (driveEfficiency() * Math.max(
-                CEEConfigs.server().resistanceValues.electricTrainAuxiliaryLoadFactor.get(), 1e-4d));
-        double total = traction + auxiliaryPower(carriages);
-        return Double.isFinite(total) && total > 0d ? total : MIN_DEMAND;
-    }
 
     // ------------------------------------------------------------------
     // Gear-driven motion
@@ -768,13 +671,13 @@ public final class TrainTractionModel {
      * electricity through the motors and the converter; the rest is friction
      * (brake pads blending in) and losses. {@code regenFraction} is that share.
      *
-     * <p>It fades out below {@code regenMinSpeed}. This is not a convenience: a
-     * motor's back-EMF is proportional to speed, so as the train slows there is
-     * progressively less voltage to push current against, and at a standstill
-     * there is none at all - a real train finishes the stop on friction alone.
-     * Modelling that also stops this from claiming recovery during the last few
-     * metres of every stop, where the power would be significant while the
-     * physics says it cannot happen.
+     * <p>There is no speed fade in this conversion. Recovery does fall away as the
+     * train slows, but that already lives in {@link #dynamicBrakeFade}: a motor's
+     * back-EMF is proportional to speed, so the electric brake itself fades out and
+     * a real train finishes every stop on friction. Fading a second time here would
+     * square the effect and kill recovery far sooner than a real train's does,
+     * which is why the caller passes only the motor share that was actually
+     * applied rather than a nominal rate.
      *
      * @param speedMs        current speed [m/s]; sign is ignored
      * @param electricDecelerationMs2 deceleration contributed by the MOTOR brake
