@@ -8,39 +8,59 @@ import net.minecraft.world.level.BlockAndTintGetter;
 import net.minecraft.world.level.block.state.BlockState;
 
 /**
- * Draws the clear-glass frame only where the glass faces open space.
+ * Draws a window frame wherever a pane of clear glass ends.
  *
- * <p>Create's default rule is {@code state.getBlock() == other.getBlock()}, where
- * {@code other} comes from {@code BlockState.getAppearance}. For a copycat that
- * resolves to the <em>material</em>, so the default rule means "connect only to
- * another pane of the same material". Every other neighbour - a different
- * copycat material, a stone block, a wall - breaks the connection and therefore
- * gets a frame segment drawn on that side.
+ * <p>The frame is a ring drawn on the border of each face's texture, so a border
+ * segment is drawn on a side unless the neighbour on that side is more clear
+ * glass. The connection test therefore has to answer exactly one question - "is
+ * the neighbour more of the same glass?" - and treat everything else as
+ * unconnected, because everything else is where the glass stops and a frame
+ * belongs.
  *
- * <p>That is the right rule for a texture whose pattern should tile across a
- * single material, but wrong for a window frame: a glass sheet set into a wall,
- * or a run of glass broken by a pillar, ends up with a border line around every
- * seam and crossing right through the middle of the assembly. The frame the
- * player actually wants traces the <em>silhouette</em> of the glass, so the only
- * thing that should break it is open space.
+ * <p>So the rule is {@code other.getBlock() == state.getBlock()}, and not
+ * "connect to anything that is not air". The latter reads as the friendlier rule
+ * but it suppresses the frame along every boundary the glass shares with an
+ * occupied block, and those boundaries are real edges of the glass:
  *
- * <p>Hence the override: any occupied neighbour counts as connected. Air is what
- * produces the outer perimeter, and everything else is swallowed, leaving one
- * continuous outline around the outside of the whole glass structure.
+ * <ul>
+ *   <li>A pane resting on the ground has ground under it, so the bottom border of
+ *       its four side faces was dropped - the block looked framed along the top
+ *       and the vertical edges but bare along the bottom.</li>
+ *   <li>Wherever a sheet of glass meets a wall, a pillar or a different copycat
+ *       material the frame stopped dead at the seam, leaving a stepped notch in
+ *       what should be one continuous outline.</li>
+ * </ul>
  *
- * <p>Note this deliberately does NOT connect to everything - air must still
- * count as unconnected, or every cell would select the fully-surrounded tile and
- * no frame would be drawn at all.
+ * <p>{@code other} is whatever {@code BlockState.getAppearance} resolves the
+ * neighbour to, and for a copycat panel that is the panel's <em>material</em>. A
+ * copycat carrying clear glass therefore reports the clear glass block and joins
+ * seamlessly to a real clear glass block, while a copycat carrying stone reports
+ * stone and correctly gets a frame.
  *
- * <p>The neighbour test uses the material's own shape, because {@code other} is
- * the material state rather than the copycat's. A thin copycat panel with a
- * stone material therefore reads as a full cube for this test, which is what we
- * want: it should hide the seam behind it.
+ * <p>The shape test in {@code isBeingBlocked} is deliberately not wanted here: a
+ * wire or a sign hanging beside the pane does not change where the glass ends, so
+ * the override answers directly instead of asking a full block behind it for
+ * permission.
  */
 public class ClearGlassCTBehaviour extends SimpleCTBehaviour {
 
     public ClearGlassCTBehaviour(CTSpriteShiftEntry shift) {
         super(shift);
+    }
+
+    /**
+     * A face pressed against a solid block is not visible, and connected-texture
+     * data is normally not gathered for such a face. The ring on that face cannot
+     * be seen either way, so this changes nothing on its own; it is here for
+     * parity with Create's own glass panes ({@code GlassPaneCTBehaviour}), which
+     * ask for the same thing. It keeps the frame correct if a resource pack or a
+     * future render type ever makes an occluded face visible, and the cost is one
+     * extra neighbour probe per occluded face, gathered with the rest of the model
+     * data and cached until a neighbouring block changes.
+     */
+    @Override
+    public boolean buildContextForOccludedDirections() {
+        return true;
     }
 
     /**
@@ -52,6 +72,6 @@ public class ClearGlassCTBehaviour extends SimpleCTBehaviour {
     @Override
     public boolean connectsTo(BlockState state, BlockState other, BlockAndTintGetter reader,
                               BlockPos pos, BlockPos otherPos, Direction face) {
-        return !other.isAir();
+        return other.getBlock() == state.getBlock();
     }
 }

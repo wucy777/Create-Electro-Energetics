@@ -223,7 +223,14 @@ public class SimulationResults {
      */
     public int getNodeID(Node node, int hint) {
         List<SimulationNode> allIndexedNodes = circuitBuilder.allIndexedNodes;
-        if (hint >= 0 && hint < allIndexedNodes.size())
+        // The hint is an ordinal into allIndexedNodes, and those ordinals are
+        // rebuilt from a HashMap whenever any node in the world changes. A hint
+        // that was valid last tick can therefore point at a completely unrelated
+        // node this tick, so it has to be checked against the node it claims to
+        // be before it is trusted. Returning it unchecked hands callers the
+        // voltage of a stranger, which for the wire heater means a whole line
+        // voltage where a small drop was expected.
+        if (hint >= 0 && hint < allIndexedNodes.size() && allIndexedNodes.get(hint).node.equals(node))
             return hint;
         return circuitBuilder.nodeIndexes.getInt(node);
     }
