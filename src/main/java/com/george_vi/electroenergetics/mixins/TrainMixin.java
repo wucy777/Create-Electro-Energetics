@@ -150,8 +150,14 @@ public class TrainMixin implements ICEETrainExtension {
         ElectricTrainData electricTrainData = electroenergetics$electricTrainData;
 
         if (electricTrainData.isPowered) {
-            // Blocks/Second² -> Blocks/Tick²
-            return CEEConfigs.server().trainValues.electricTrainBrakeDeceleration.getF() / 400f;
+            // Blocks/Second² -> Blocks/Tick². This method takes no speed argument, so
+            // it cannot apply the electric brake's low-speed fade and reports the
+            // blended rate at full effect (friction + electric). That is the figure
+            // Create's stopping-distance maths wants, since it is judging an approach
+            // from line speed. The speed-dependent blend is applied in
+            // approachTargetSpeed, which does know the speed.
+            return (float) ((TrainTractionModel.frictionBrake()
+                    + TrainTractionModel.dynamicBrake()) / 400d);
         }
         return original.call();
     }
@@ -221,9 +227,9 @@ public class TrainMixin implements ICEETrainExtension {
         double a = TrainTractionModel.gearAcceleration(
                 signedSpeedMs, gradeToPlusX, carriages, data.powerScale,
                 st.gear, st.cruiseSpeed,
-                CEEConfigs.server().trainValues.electricTrainBrakeDeceleration.getF(),
+                TrainTractionModel.frictionBrake(),
                 st.emergencyTicks > 0 && st.emergencyArmed,
-                st.emergencyPenalty);
+                st.emergencyPenalty, data.gearStep);
 
         // m/s² -> Blocks/Tick². 1 block = 1 m, so only the tick conversion is needed.
         double next = self.speed + a / 400d;
@@ -302,17 +308,18 @@ public class TrainMixin implements ICEETrainExtension {
 
         if (self.speed < actualTarget) {
             data.braking = false;
+            data.gearStep.dynamicBrake = 0d;
             self.speed = Math.min(self.speed + up * accelerationMod, actualTarget);
         } else {
-            // The brake is a NET rate, not an added force: it is what the train
-            // does while the brake is held, on any gradient. That is what lets a
-            // train be stopped and held on Create's steepest track - a 1-in-3
-            // slope pulls at g*slope = 3.27 m/s^2, so the configured figure (3.5
-            // by default) has to exceed it on its own rather than being an extra
-            // term added to gravity. It also means the stopping distance is the
-            // same uphill, downhill and on the level, which is how a driver
-            // expects a brake to behave.
-            double down = CEEConfigs.server().trainValues.electricTrainBrakeDeceleration.getF() / 400d;
+            // A scheduled train brakes at the blended service rate for its current
+            // speed: friction plus whatever the motor brake can still absorb. The
+            // electric part is reported back so the circuit build can regenerate it,
+            // which is the same route the gear-driven path uses.
+            double speedMs = Math.abs(self.speed) * 20d;
+            double electric = TrainTractionModel.dynamicBrake()
+                    * TrainTractionModel.dynamicBrakeFade(speedMs);
+            data.gearStep.dynamicBrake = electric;
+            double down = TrainTractionModel.serviceBrakeDeceleration(speedMs) / 400d;
             data.braking = true;
             self.speed = Math.max(self.speed - down * accelerationMod, actualTarget);
         }

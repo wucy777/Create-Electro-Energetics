@@ -239,17 +239,18 @@ public class CatenaryModule {
             var trainCfg = CEEConfigs.server().trainValues;
             double regenPower = 0d;
             if (trainData.braking && trainCfg.electricTrainRegenerativeBraking.get()) {
-                // The brake's own contribution, not the whole deceleration: part of
-                // the slowdown on a gradient is gravity and running resistance, and
-                // the motors can only recover from the force the brake applies. On
-                // a steep descent that difference can be zero or negative, in which
-                // case the train is gravity-driven and there is nothing to recover.
-                double coast = TrainTractionModel.coastDeceleration(trainSpeedMs, grade, carriages);
-                double brakeOnly = Math.max(trainCfg.electricTrainBrakeDeceleration.get() - coast, 0d);
+                // Only the MOTOR brake's share can come back. The pads dissipate
+                // their energy as heat and recover nothing, so using the total
+                // braking rate here would claim recovery from friction. The gear law
+                // reports the share it actually applied, which is the only place
+                // that knows: it depends on the gear, the gradient and what the
+                // supply could deliver. The electric brake's own low-speed fade is
+                // already inside that figure; it is not applied again here, or the
+                // two would multiply and recovery would collapse far sooner than a
+                // real train's.
                 regenPower = TrainTractionModel.regenerativePower(
-                        trainSpeedMs, brakeOnly, carriages,
-                        trainCfg.electricTrainRegenerativeFraction.get(),
-                        trainCfg.electricTrainRegenMinSpeed.get());
+                        trainSpeedMs, trainData.gearStep.dynamicBrake, carriages,
+                        trainCfg.electricTrainRegenerativeFraction.get());
             }
             trainData.regenPower = regenPower;
 

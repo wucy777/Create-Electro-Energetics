@@ -416,9 +416,6 @@ public final class TrainTractionModel {
     // Gear-driven motion
     // ------------------------------------------------------------------
 
-    /** Emergency brake rate [m/s²]. Well above service braking, and briefly applied. */
-    public static final double EMERGENCY_BRAKE = 6.0d;
-
     /** Speed band around the cruise setting where neither traction nor brake is applied [m/s]. */
     private static final double CRUISE_DEADBAND = 0.5d;
 
@@ -430,6 +427,101 @@ public final class TrainTractionModel {
      * next station call. This is the cost of using it.
      */
     public static final double PENALTY_SPEED = 40d / 3.6d;   // 40 km/h
+
+    /**
+     * How much more adhesion the emergency brake can find than the service brake.
+     *
+     * <p>Emergency braking is not a different mechanism, it is the same friction
+     * brake run at the limit of adhesion with sanding, so the extra is a modest
+     * factor rather than the order-of-magnitude jump a separate "emergency rate"
+     * would imply. Real figures are around 1.3-1.5x the service rate.
+     */
+    public static final double EMERGENCY_ADHESION_FACTOR = 1.5d;
+
+    // ------------------------------------------------------------------
+    // Braking: friction and electric, blended
+    // ------------------------------------------------------------------
+    //
+    // A real EMU has two brakes and they do not fade out together:
+    //
+    //   * Friction (pads on discs, or tread brakes). Roughly 0.8-1.0 m/s² in
+    //     service, and it is the ONLY one that works at a standstill, because it
+    //     needs no speed to generate its force.
+    //   * Electric (motors driven as generators, sometimes called dynamic or
+    //     rheostatic braking). Worth 2-3 m/s² at line speed, and it collapses to
+    //     nothing as the train slows: the motors' back-EMF falls with speed, so
+    //     there is progressively less to push current against and at a standstill
+    //     there is none at all. A real train therefore always finishes a stop on
+    //     friction alone.
+    //
+    // Blending them is what makes the model both realistic and honest. The two
+    // agree with practice at speed - around 3.5 m/s² combined - while the rate
+    // that remains at walking pace is the friction figure alone. That last point
+    // is the one that decides whether a train can be held on a gradient, and it
+    // cannot be talked around: an electric brake cannot hold a stationary train.
+    //
+    // Consequence, stated plainly: a consist holds on grades up to
+    // frictionBrake()/g. At the realistic default of 1.0 that is about 10%, well
+    // short of the 1-in-3 (18.43°, 3.27 m/s²) that Create can lay. On anything
+    // steeper than 10% the train will creep away with the brake held, which is
+    // exactly what a real train does. Raise electricTrainBrakeDeceleration if
+    // steep grades matter more than realism.
+
+    /** Friction (adhesion) service braking rate [m/s²]. The only part that holds at rest. */
+    public static double frictionBrake() {
+        return Math.max(CEEConfigs.server().trainValues.electricTrainBrakeDeceleration.get(), 0d);
+    }
+
+    /** Electric braking rate at full effect [m/s²], before the low-speed fade. */
+    public static double dynamicBrake() {
+        return Math.max(CEEConfigs.server().trainValues.electricTrainDynamicBrakeDeceleration.get(), 0d);
+    }
+
+    /** Speed at which the electric brake reaches full effect [m/s]. */
+    public static double dynamicBrakeMinSpeed() {
+        return Math.max(CEEConfigs.server().trainValues.electricTrainDynamicBrakeMinSpeed.get(), 0d);
+    }
+
+    /**
+     * How much of the electric brake is available at this speed, 0 to 1.
+     *
+     * <p>Linear in speed, which is the shape the physics gives: the retarding
+     * force is proportional to the current the motors can be made to carry, and
+     * that falls off with the back-EMF.
+     */
+    public static double dynamicBrakeFade(double speedMs) {
+        double v = Math.abs(speedMs);
+        double min = dynamicBrakeMinSpeed();
+        if (min <= 0d)
+            return v > 0d ? 1d : 0d;
+        return Math.min(v / min, 1d);
+    }
+
+    /** Total service braking rate at this speed [m/s²]: friction plus electric. */
+    public static double serviceBrakeDeceleration(double speedMs) {
+        return frictionBrake() + dynamicBrake() * dynamicBrakeFade(speedMs);
+    }
+
+    /**
+     * Total emergency braking rate at this speed [m/s²]: maximum adhesion plus the
+     * electric brake.
+     */
+    public static double emergencyBrakeDeceleration(double speedMs) {
+        return frictionBrake() * EMERGENCY_ADHESION_FACTOR
+                + dynamicBrake() * dynamicBrakeFade(speedMs);
+    }
+
+    /**
+     * Braking rate that is still available at a standstill [m/s²].
+     *
+     * <p>Friction only, and this is the figure that decides whether a held brake
+     * pins a train on a slope. Kept as its own method so the holding test cannot
+     * accidentally be written against the blended rate, which would let a train
+     * appear to hold on a gradient it would really slide down.
+     */
+    public static double holdingBrakeDeceleration() {
+        return frictionBrake();
+    }
 
     /**
      * Acceleration in world coordinates (+x) for the current lever position
@@ -455,13 +547,21 @@ public final class TrainTractionModel {
      * @param gradeToPlusX rise over run towards +x; positive is uphill towards +x
      * @param powerScale    fraction of the rating the supply can deliver
      * @param cruiseSpeedMs speed the cruise position holds, as a magnitude
-     * @param brakeMs2      configured service braking rate
+     * @param brakeMs2      configured FRICTION service braking rate
      * @param emergency     whether the emergency brake is being applied
      * @param penalty       whether the post-emergency speed cap is in force
+     * @param out           filled with the acceleration and the motor-brake share;
+     *                      pass {@code null} when only the acceleration is wanted.
+     *                      The share is reported rather than recomputed by the
+     *                      caller because it depends on the gear, the gradient and
+     *                      what the supply could deliver, all decided here.
      */
     public static double gearAcceleration(double signedSpeedMs, double gradeToPlusX, int carriages,
                                           double powerScale, TrainGear gear, double cruiseSpeedMs,
-                                          double brakeMs2, boolean emergency, boolean penalty) {
+                                          double brakeMs2, boolean emergency, boolean penalty,
+                                          GearStep out) {
+        if (out != null)
+            out.clear();
         double v = signedSpeedMs;
         double speed = Math.abs(v);
         double gamma = CEEConfigs.server().resistanceValues.electricTrainRotatingMassFactor.get();
@@ -487,6 +587,17 @@ public final class TrainTractionModel {
         // only to aim traction and the brake; gravity never needs it.
         double heading = speed < 1e-6d ? 1d : Math.signum(v);
 
+        // Braking is blended rather than a single number, and the blend depends on
+        // speed: the electric part fades out as the train slows, the friction part
+        // does not. `brakeMs2` is the caller's friction setting, which is what the
+        // config means; the electric contribution is added on top. See the block
+        // comment above serviceBrakeDeceleration for why this is not one figure.
+        double dynamicPart = dynamicBrake() * dynamicBrakeFade(speed);
+        double brakeTotal = brakeMs2 + dynamicPart;
+        // Accumulated as the motor brake is applied, so the caller knows how much
+        // of the stop the motors are doing and can regenerate only that share.
+        double dynamicApplied = 0d;
+
         switch (gear) {
             case ACCELERATE -> {
                 if (speed < ceiling)
@@ -505,7 +616,8 @@ public final class TrainTractionModel {
                     if (speed < ceiling)
                         force += heading * effort;
                 } else if (speed > target + CRUISE_DEADBAND) {
-                    force -= heading * brakeMs2 * mass;
+                    force -= heading * brakeTotal * mass;
+                    dynamicApplied = dynamicPart;
                 } else {
                     // Hold the setting exactly. The world-frame force needed to
                     // cancel drag and gravity is
@@ -513,52 +625,90 @@ public final class TrainTractionModel {
                     // which is positive on a climb and negative on a descent steep
                     // enough to overcome drag. Positive is met by the motors, up to
                     // their limit; a negative result means the brake has to take up
-                    // the surplus, first regeneratively then with friction. That is
-                    // the whole "hold the set speed, climbing at full power and
-                    // braking on the way down" behaviour.
+                    // the surplus. That surplus is met by the motors in reverse
+                    // first - regeneration, which costs nothing and recovers energy -
+                    // and only then by friction. That is the "climbing at full power
+                    // and braking on the way down" behaviour, and it is also why the
+                    // descent case draws no power rather than feeding the line hard.
                     double needed = Math.signum(v) * runningResistance(speed, carriages)
                             + mass * G * gradeToPlusX;
                     if (needed >= 0d) {
                         force += Math.min(needed, effort);
                     } else {
                         double brakeNeed = -needed;
-                        double fromMotors = Math.min(brakeNeed, effort);
+                        // The electric brake is capped by both what it can absorb at
+                        // this speed and what the motors are rated for; the pads make
+                        // up whatever is left.
+                        double dynamicAvail = Math.min(dynamicPart * mass, effort);
+                        double fromMotors = Math.min(brakeNeed, dynamicAvail);
                         double fromFriction = Math.min(brakeNeed - fromMotors, brakeMs2 * mass);
                         force -= fromMotors + fromFriction;
+                        dynamicApplied = fromMotors / mass;
                     }
                 }
             }
             case COAST -> {
                 // Nothing but drag and gravity, which is the point of the position:
                 // it rolls on a slope and holds nothing, including at a standstill.
+                // Note the electric brake is NOT applied here: cutting the power
+                // means cutting it, and this is the position that is meant to roll.
             }
-            case BRAKE -> force -= heading * brakeMs2 * mass;
+            case BRAKE -> {
+                force -= heading * brakeTotal * mass;
+                dynamicApplied = dynamicPart;
+            }
         }
 
         // On top of whatever the lever is doing, and enough to stop the train from
-        // line speed by itself.
-        if (emergency && speed > 1e-6d)
-            force -= Math.signum(v) * EMERGENCY_BRAKE * mass;
+        // line speed by itself. The adhesion factor raises only the friction part;
+        // the motors are already at their limit.
+        if (emergency && speed > 1e-6d) {
+            force -= Math.signum(v) * emergencyBrakeDeceleration(speed) * mass;
+            dynamicApplied = Math.max(dynamicApplied, dynamicPart);
+        }
 
         double a = force / mass;
 
         // At a standstill, a brake that can cover the slope pins the train instead
-        // of leaving a residual creep from the gravity term. If it cannot cover
-        // the slope the value is left alone and the train slides, which is honest
-        // and is exactly why the default exceeds Create's steepest grade.
+        // of leaving a residual creep from the gravity term. If it cannot cover the
+        // slope the value is left alone and the train slides, which is honest and
+        // is the whole reason the friction figure matters so much here.
+        //
+        // Only the FRICTION part counts: the electric brake has already faded to
+        // zero by the time the train is stopped, so crediting its full rate here
+        // would let a train appear to hold on a grade it would really roll down.
         if (speed < 1e-6d && a != 0d) {
             boolean braked = gear == TrainGear.BRAKE || emergency;
             if (braked) {
                 double pull = Math.abs(G * gradeToPlusX);
-                double hold = gear == TrainGear.BRAKE ? brakeMs2 : 0d;
+                double hold = gear == TrainGear.BRAKE ? holdingBrakeDeceleration() : 0d;
                 if (emergency)
-                    hold = Math.max(hold, EMERGENCY_BRAKE);
-                if (hold >= pull)
+                    hold = Math.max(hold, holdingBrakeDeceleration() * EMERGENCY_ADHESION_FACTOR);
+                if (hold >= pull) {
+                    if (out != null)
+                        out.dynamicBrake = 0d;   // stopped: no electric brake, by definition
                     return 0d;
+                }
             }
         }
 
+        if (out != null) {
+            out.acceleration = Double.isFinite(a) ? a : 0d;
+            out.dynamicBrake = dynamicApplied;
+        }
         return Double.isFinite(a) ? a : 0d;
+    }
+
+    /**
+     * Convenience form for callers that only want the acceleration and not the
+     * motor-brake share. The full form taking a {@link GearStep} is what the
+     * driving path uses, because regeneration has to know that share.
+     */
+    public static double gearAcceleration(double signedSpeedMs, double gradeToPlusX, int carriages,
+                                          double powerScale, TrainGear gear, double cruiseSpeedMs,
+                                          double brakeMs2, boolean emergency, boolean penalty) {
+        return gearAcceleration(signedSpeedMs, gradeToPlusX, carriages, powerScale, gear,
+                cruiseSpeedMs, brakeMs2, emergency, penalty, null);
     }
 
     /**
@@ -579,34 +729,38 @@ public final class TrainTractionModel {
      * physics says it cannot happen.
      *
      * @param speedMs        current speed [m/s]; sign is ignored
-     * @param decelerationMs2 braking rate actually being applied [m/s²], positive
-     * @param regenFraction  share of the braking power the motors recover, 0-1
-     * @param regenMinSpeed  speed below which recovery fades to nothing [m/s]
+     * @param electricDecelerationMs2 deceleration contributed by the MOTOR brake
+     *                      alone [m/s²], positive. Friction must not be included:
+     *                      brake pads dissipate their energy as heat and recover
+     *                      nothing, so only the motors' share can come back.
+     * @param regenFraction  share of that power the motors recover, 0-1; the rest
+     *                      is motor, converter and gear loss
      * @return recoverable power [W], zero when not braking meaningfully
      */
-    public static double regenerativePower(double speedMs, double decelerationMs2, int carriages,
-                                           double regenFraction, double regenMinSpeed) {
+    public static double regenerativePower(double speedMs, double electricDecelerationMs2,
+                                           int carriages, double regenFraction) {
         double v = Math.abs(speedMs);
-        if (v <= 0d || decelerationMs2 <= 0d || regenFraction <= 0d)
+        if (v <= 0d || electricDecelerationMs2 <= 0d || regenFraction <= 0d)
             return 0d;
 
-        // Linear fade over the last stretch before regenMinSpeed, so the power
-        // falls away smoothly instead of switching off at a threshold.
-        double fade = regenMinSpeed <= 0d ? 1d : Math.min(v / regenMinSpeed, 1d);
-
-        double retardingForce = inertiaForce(decelerationMs2, carriages);
+        // No speed fade here. The electric brake already fades with speed in
+        // dynamicBrakeFade, because that is where the physics lives - a motor's
+        // back-EMF collapses as it slows. Fading a second time in this conversion
+        // would square the effect and make recovery fall away far faster than a
+        // real train's does.
+        double retardingForce = inertiaForce(electricDecelerationMs2, carriages);
         double mechanical = retardingForce * v;
 
         // The motors cannot absorb more than they are rated for. Without this cap
         // a single carriage braking from 100 m/s would report ~18 MW against a
-        // 1.375 MW rating, because the retarding force needed for a 3.5 m/s^2 stop
-        // at that speed is far beyond what the motors can convert. Real trains
-        // blend in the friction brakes for exactly this reason: the motors take
-        // what they can and the pads dissipate the rest, which is also why
-        // recovery is poor during hard stops from high speed.
+        // 1.375 MW rating, because the retarding force needed for a hard stop at
+        // that speed is far beyond what the motors can convert. Real trains blend
+        // in the friction brakes for exactly this reason: the motors take what they
+        // can and the pads dissipate the rest, which is also why recovery is poor
+        // during hard stops from high speed.
         double rated = ratedElectricalPower(carriages);
 
-        double power = Math.min(mechanical * Math.min(regenFraction, 1d), rated) * fade;
+        double power = Math.min(mechanical * Math.min(regenFraction, 1d), rated);
         return Double.isFinite(power) && power > 0d ? power : 0d;
     }
 }

@@ -28,17 +28,20 @@ public class CTrains extends ConfigBase {
     public final ConfigBool electricTrainManualFullSpeed = b(true, "electricTrainManualFullSpeed",
             "Let a manually driven electric train reach the speed its own traction model allows. Create drives manual trains to maxSpeed() * manualTrainSpeedModifier (0.75 by default), a handicap meant for fuel trains; with this on, an electric train ignores that factor so the configured electricTrainMaxSpeed is actually reachable. Scheduled trains are unaffected.");
 
-    public final ConfigFloat electricTrainBrakeDeceleration = f(3.5f, 0.05f, "electricTrainBrakeDeceleration",
-            "Service braking deceleration, as a NET rate: it is what the train actually does while the brake is held, on any gradient. Must exceed gravity's component along the steepest track Create can lay, or a train could not be held stationary on it and would slide. Create's steepest straight slope is 1 in 3 (TrackPlacement caps minHDistance at max(ascend*3, 6)), i.e. 18.43 degrees, whose along-slope pull is g*slope = 3.27 Blocks/Second². Hence the 3.5 default, which leaves a small margin. NOTE this is far above real railway practice (0.8-1.0) and is forced by that slope: real adhesion railways never exceed about a 10% grade. Lowering it below ~3.3 makes steep slopes unholdable; raising it shortens every stopping distance, e.g. 300 km/h takes ~0.9 km at 3.5 versus ~3.4 km at a realistic 1.0. [in Blocks / Second²]");
+    public final ConfigFloat electricTrainBrakeDeceleration = f(1.0f, 0.05f, "electricTrainBrakeDeceleration",
+            "FRICTION (adhesion) service braking, the pads on the discs. This is deliberately the realistic 0.8-1.0 range and NOT the total braking rate: while the train is moving, the motor brake below is added on top. This is the only part that still works at a standstill, so it alone decides the steepest grade a held brake can hold, namely this/g. At 1.0 that is about 10%, well short of the 1 in 3 (18.43 degrees, 3.27 Blocks/Second² along the slope) that Create's TrackPlacement can lay - so on anything steeper than ~10% a braked train creeps away, exactly as a real train would. Raise this if steep grades matter more than realism. [in Blocks / Second²]");
+
+    public final ConfigFloat electricTrainDynamicBrakeDeceleration = f(2.5f, 0f, "electricTrainDynamicBrakeDeceleration",
+            "ELECTRIC (motor) braking at full effect, the motors driven as generators. Added on top of the friction figure above whenever the brake is applied, so the two together give roughly 3.5 Blocks/Second² at speed, which is the braking a real EMU is capable of. It fades out linearly below the minimum speed below, because a motor's back-EMF collapses as it slows and there is eventually nothing left to push current against; that is why no train finishes a stop on the motor brake and why this figure does NOT count toward holding a train on a grade. Setting this to 0 makes every stop purely friction. [in Blocks / Second²]");
+
+    public final ConfigFloat electricTrainDynamicBrakeMinSpeed = f(5f, 0f, "electricTrainDynamicBrakeMinSpeed",
+            "Speed at which the motor brake reaches full effect, and below which it fades linearly to nothing. Real trains blend the friction brake in over roughly the last 20 km/h of a stop for this reason. [in Blocks / Second]");
 
     public final ConfigBool electricTrainRegenerativeBraking = b(true, "electricTrainRegenerativeBraking",
             "Motors act as generators while braking and push power back into the catenary, the way a real EMU does. The recovered power shows up as a negative draw, so the amps fall and the line is fed rather than loaded. Turn off to make every stop purely friction, with no feed back.");
 
     public final ConfigFloat electricTrainRegenerativeFraction = f(0.7f, 0f, 1f, "electricTrainRegenerativeFraction",
-            "Share of the braking power the motors can recover. The rest is friction and is lost. Real EMUs recover roughly 60-80% of the energy of a stop, the loss being motor, converter and gear losses plus the friction blend at low speed. [0-1]");
-
-    public final ConfigFloat electricTrainRegenMinSpeed = f(3f, 0f, "electricTrainRegenMinSpeed",
-            "Below this speed regenerative braking fades out and friction takes over. A real train does this because a motor's EMF collapses as it slows, so there is nothing left to push against. Prevents the model from claiming recovery while crawling. [in Blocks / Second]");
+            "Share of the motor brake's mechanical power the motors actually recover. The rest is motor, converter and gear loss. Real EMUs recover roughly 60-80% of the energy of a stop, and only from the motor brake: the friction pads make heat and recover nothing, which is why the low-speed fade of the motor brake directly sets how much of a stop can be recovered. [0-1]");
 
     public final ConfigBool electricTrainGradeResistance = b(true, "electricTrainGradeResistance",
             "Apply gradient resistance. Uphill raises the force needed and lowers the sustainable speed; downhill lets gravity assist so less power is drawn.");

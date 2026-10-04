@@ -65,6 +65,12 @@ public class ElectricTrainData {
     // resistance already has.
     public double powerScale = 1d;
 
+    // Scratch space for the gear law's result, reused every tick so the driving path
+    // allocates nothing. Read by the circuit build on the following tick to work out
+    // how much of the braking the motors are doing and therefore what can be
+    // regenerated; pads make heat and recover nothing.
+    public final GearStep gearStep = new GearStep();
+
     // Packet throttling for gauge data sync
     public double lastSyncedVoltage = 0;
     public double lastSyncedCurrent = 0;
