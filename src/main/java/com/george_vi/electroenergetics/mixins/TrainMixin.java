@@ -220,6 +220,22 @@ public class TrainMixin implements ICEETrainExtension {
         int carriages = Math.max(1, self.carriages.size());
         double signedSpeedMs = self.speed * 20d;
 
+        // Release the station before commanding traction.
+        //
+        // Create does this inside approachTargetSpeed (if (manualTick)
+        // leaveStation()), and that is exactly the method this mode bypasses for a
+        // driven electric train - so without this the station would never be
+        // released. The train would sit at the platform with currentStation set
+        // forever, and because the driver-state tick drops the lever to the brake
+        // while a station is held, a reversing train would additionally be stuck
+        // unable to select any gear. A hard softlock rather than a cosmetic bug.
+        //
+        // Only for a gear that commands movement: selecting the brake or cutting the
+        // power at a platform should leave the train checked in, which is what lets
+        // the schedule resume and what makes the arrival look like an arrival.
+        if (st.gear.appliesTraction() && self.getCurrentStation() != null)
+            self.leaveStation();
+
         // trainGrade is a rise-over-run along the consist, which for a train
         // moving in -x is the grade towards -x, so it is mirrored into +x.
         double gradeToPlusX = self.speed < 0 ? -data.trackGrade : data.trackGrade;

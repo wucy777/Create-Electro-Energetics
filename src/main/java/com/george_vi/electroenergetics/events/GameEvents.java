@@ -36,7 +36,6 @@ import com.george_vi.electroenergetics.simulation.infrastructure.InfrastructureS
 import com.simibubi.create.AllSoundEvents;
 import com.george_vi.electroenergetics.content.railway_electrification.ElectricTrainData;
 import com.george_vi.electroenergetics.content.railway_electrification.TrainDriverState;
-import com.george_vi.electroenergetics.content.railway_electrification.TrainGear;
 import com.george_vi.electroenergetics.mixin_interfaces.ICEETrainExtension;
 import net.minecraft.server.MinecraftServer;
 import com.simibubi.create.Create;
@@ -230,10 +229,15 @@ public class GameEvents {
             if (driver.emergencyPenalty && train.getCurrentStation() != null)
                 driver.clearPenalty();
 
-            // A station always releases the lever from reverse, so a train cannot be
-            // left set to shunt away the moment it is dispatched.
-            if (train.getCurrentStation() != null && driver.gear == TrainGear.REVERSE)
-                driver.gear = TrainGear.BRAKE;
+            // The lever is deliberately NOT forced to the brake while a station is
+            // held. An earlier version did that to stop a train being dispatched
+            // still set to shunt, but it deadlocked instead: it fought the depart
+            // path in the gear law, which releases the station only for a gear that
+            // commands traction, so a train whose lever was pinned back to the brake
+            // every tick could never leave the platform at all - and shunting at a
+            // station, which is the one place a driver actually needs reverse, became
+            // impossible. Leaving the lever alone is also harmless: reverse is capped
+            // at a walking pace and takes an explicit selection.
         }
     }
 
