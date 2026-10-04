@@ -56,7 +56,7 @@ public class TrainHUDMixin {
      * electric train's throttle field is never written and no traffic is spent on
      * it.
      */
-    @Inject(method = "onScroll", at = @At("HEAD"), cancellable = true)
+    @Inject(method = "onScroll", at = @At("HEAD"), cancellable = true, remap = false)
     private static void electroEnergetics$noSpeedWheelOnElectricTrains(double delta,
                                                                         CallbackInfoReturnable<Boolean> cir) {
         Train train = drivenTrain();

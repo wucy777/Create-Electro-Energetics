@@ -32,7 +32,7 @@ import java.util.Collection;
 @Mixin(CarriageContraptionEntity.class)
 public class CarriageContraptionEntityControlMixin {
 
-    @Inject(method = "control", at = @At("HEAD"))
+    @Inject(method = "control", at = @At("HEAD"), remap = false)
     private void electroEnergetics$markDriverPresent(net.minecraft.core.BlockPos controlsLocalPos,
                                                      Collection<Integer> heldControls,
                                                      net.minecraft.world.entity.player.Player player,
