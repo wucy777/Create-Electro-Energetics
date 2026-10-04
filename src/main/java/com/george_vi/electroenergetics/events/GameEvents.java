@@ -34,6 +34,13 @@ import com.george_vi.electroenergetics.foundation.nodes.InWorldNode;
 import com.george_vi.electroenergetics.simulation.infrastructure.InWorldNodeData;
 import com.george_vi.electroenergetics.simulation.infrastructure.InfrastructureSavedData;
 import com.simibubi.create.AllSoundEvents;
+import com.george_vi.electroenergetics.content.railway_electrification.ElectricTrainData;
+import com.george_vi.electroenergetics.content.railway_electrification.TrainDriverState;
+import com.george_vi.electroenergetics.content.railway_electrification.TrainGear;
+import com.george_vi.electroenergetics.mixin_interfaces.ICEETrainExtension;
+import net.minecraft.server.MinecraftServer;
+import com.simibubi.create.Create;
+import com.simibubi.create.content.trains.entity.Train;
 import dev.engine_room.flywheel.api.event.ReloadLevelRendererEvent;
 import net.createmod.catnip.platform.CatnipServices;
 import net.minecraft.client.Minecraft;
@@ -168,6 +175,66 @@ public class GameEvents {
                 InfrastructureSavedData sd = InfrastructureSavedData.load(level);
                 sd.wireSimulationState.onReloadConfigs();
             }
+
+        tickDriverState(event.getServer());
+    }
+
+    /**
+     * Advance every electric train's driver state, once per tick.
+     *
+     * <p>Deliberately here rather than in {@code CatenaryModule.finishSimulation},
+     * which is the natural home for per-train work but runs once per LEVEL per
+     * tick. Everything in this method is a wall-clock countdown - the 30-second
+     * vigilance prompt, the emergency brake's release, the penalty - so running it
+     * once per dimension would make all of them fire at a multiple of their
+     * intended rate. A server tick event fires exactly once, which is what a
+     * countdown in ticks needs.
+     *
+     * <p>Cost is one pass over the train map with no allocation and no work for a
+     * train nobody is driving, so it is a handful of integer decrements per tick.
+     */
+    private static void tickDriverState(MinecraftServer server) {
+        if (Create.RAILWAYS.trains.isEmpty())
+            return;
+
+        for (Train train : Create.RAILWAYS.trains.values()) {
+            ElectricTrainData data = ((ICEETrainExtension) train).getElectricTrainData();
+            TrainDriverState driver = data.driver;
+
+            driver.tickDriverPresence();
+
+            // Vigilance: a prompt every CONFIRM_INTERVAL, and the lever drops to the
+            // brake if it goes unanswered for CONFIRM_GRACE. Only while actually
+            // driven: an unmanned train is already parked in some lever position and
+            // nagging about it would be pointless.
+            if (driver.isDriven()) {
+                if (driver.confirmWaiting >= 0) {
+                    driver.confirmWaiting++;
+                    if (driver.confirmWaiting > TrainDriverState.CONFIRM_GRACE_TICKS)
+                        driver.failSafe();
+                } else if (driver.confirmTimer > 0) {
+                    driver.confirmTimer--;
+                } else {
+                    driver.confirmWaiting = 0;
+                    driver.confirmTimer = TrainDriverState.CONFIRM_INTERVAL_TICKS;
+                }
+            } else {
+                driver.confirmWaiting = -1;
+                driver.confirmTimer = TrainDriverState.CONFIRM_INTERVAL_TICKS;
+            }
+
+            // Emergency brake application, and the speed cap it leaves behind until
+            // the next station call.
+            if (driver.emergencyTicks > 0)
+                driver.emergencyTicks--;
+            if (driver.emergencyPenalty && train.getCurrentStation() != null)
+                driver.clearPenalty();
+
+            // A station always releases the lever from reverse, so a train cannot be
+            // left set to shunt away the moment it is dispatched.
+            if (train.getCurrentStation() != null && driver.gear == TrainGear.REVERSE)
+                driver.gear = TrainGear.BRAKE;
+        }
     }
 
     @SubscribeEvent

@@ -469,43 +469,15 @@ public class CatenaryModule {
             trainData.cruiseState = TrainTractionModel.cruiseState(
                     trainSpeedMs, grade, carriages, powerScale);
 
-            // Driver state timers, advanced in this same per-train pass rather than
-            // in a loop of their own: the module already visits every train once a
-            // tick, and adding a second sweep over all trains would double that
-            // cost for no benefit.
+            // NOTE: the driver state timers (vigilance countdown, emergency brake
+            // release, penalty clearing) are deliberately NOT advanced here. This
+            // method runs once per LEVEL per tick, so a train whose
+            // connectedWireState is null - an accumulator-only set - passes the
+            // dimension guard above in every level and would have its timers
+            // stepped once per dimension. A 30-second vigilance interval would then
+            // fire in 10 seconds in a three-dimension world. They live in
+            // GameEvents.serverTickEvent instead, which runs exactly once per tick.
             TrainDriverState driver = trainData.driver;
-            driver.tickDriverPresence();
-
-            // Vigilance: a prompt every CONFIRM_INTERVAL, and the lever drops to the
-            // brake if it goes unanswered for CONFIRM_GRACE. Only while actually
-            // driven - an unmanned train is already in some lever position and
-            // nagging about it would be pointless.
-            if (driver.isDriven()) {
-                if (driver.confirmWaiting >= 0) {
-                    driver.confirmWaiting++;
-                    if (driver.confirmWaiting > TrainDriverState.CONFIRM_GRACE_TICKS)
-                        driver.failSafe();
-                } else if (driver.confirmTimer > 0) {
-                    driver.confirmTimer--;
-                } else {
-                    driver.confirmWaiting = 0;
-                    driver.confirmTimer = TrainDriverState.CONFIRM_INTERVAL_TICKS;
-                }
-            } else {
-                driver.confirmWaiting = -1;
-                driver.confirmTimer = TrainDriverState.CONFIRM_INTERVAL_TICKS;
-            }
-
-            // Emergency brake application, and the speed cap it leaves behind.
-            if (driver.emergencyTicks > 0)
-                driver.emergencyTicks--;
-            if (driver.emergencyPenalty && train.getCurrentStation() != null)
-                driver.clearPenalty();
-
-            // A station call always releases the lever from reverse, so a train
-            // cannot be left set to shunt away the moment it is dispatched.
-            if (train.getCurrentStation() != null && driver.gear == TrainGear.REVERSE)
-                driver.gear = TrainGear.BRAKE;
 
             if (active) {
                 // Speed the traction can sustain against resistance and gradient.
