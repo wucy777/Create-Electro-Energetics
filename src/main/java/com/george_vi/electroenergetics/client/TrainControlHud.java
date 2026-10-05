@@ -56,6 +56,10 @@ public class TrainControlHud implements LayeredDraw.Layer {
     private static final int ACTIVE_TEXT = 0xFFFFFFFF;
 
     private static final int ACCENT = 0xFF4FB3FF;      // selection
+    /** A handle moved but not yet engaged, and the row the train is really in. */
+    private static final int PENDING = 0xFFFFC24B;
+    private static final int ENGAGED_MARK = 0xFF8FB6D9;
+    private static final int ENGAGED_MARK_TEXT = 0xFFAFC2D4;
     private static final int WARN = 0xFFFFB454;
     private static final int DANGER = 0xFFFF6B5E;
     private static final int REGEN = 0xFF7EE787;
@@ -113,8 +117,24 @@ public class TrainControlHud implements LayeredDraw.Layer {
         boolean valid = current >= 0 && current < gears.length;
         TrainGear selected = valid ? gears[current] : TrainGear.BRAKE;
 
-        // Header: the selected position, which is the first thing read.
-        graphics.drawString(font, label(selected), x + 5, y + 4, ACTIVE_TEXT, false);
+        // Where the train actually is, which differs from the handle while a selection
+        // is pending. Both are marked on the scale so the driver can see the lever has
+        // been moved somewhere and the train has not followed yet.
+        int engaged = TrainControlInput.engagedGear(serverGear);
+        boolean pending = TrainControlInput.hasPendingSelection();
+
+        // Header: the handle's position, with a cue when it is not yet engaged. This
+        // is the one thing that must not be ambiguous, because moving the handle
+        // changes nothing on its own.
+        String header = label(selected);
+        graphics.drawString(font, header, x + 5, y + 4, ACTIVE_TEXT, false);
+        if (pending) {
+            // An asterisk rather than a word: it fits the 12px header, is understood
+            // in every language, and matches the hollow handle below, which is the
+            // same statement made spatially.
+            int hw2 = font.width(header);
+            graphics.drawString(font, "*", x + 7 + hw2, y + 4, PENDING, false);
+        }
 
         int cx = TrainControlLayout.slotCenterX(x);
         int railTop = TrainControlLayout.slotTopY(y);
@@ -126,32 +146,50 @@ public class TrainControlHud implements LayeredDraw.Layer {
         graphics.fill(cx - 2, railTop, cx - 1, railBottom, RAIL_EDGE);
         graphics.fill(cx + 1, railTop, cx + 2, railBottom, RAIL_EDGE);
 
-        // Detents and their labels. The selected row gets the accent colour and a
-        // brighter tick, so the eye lands on it.
+        // Detents and their labels. Three states, which is what the two-step lever
+        // needs to be readable: the handle's position (accent), the position the train
+        // is actually in (a bright tick, hollow ring when it is the handle's row too),
+        // and everything else (dim).
         for (int i = 0; i < gears.length; i++) {
             int my = TrainControlLayout.handleCenterY(y, i);
             boolean isCurrent = i == current;
-            int tick = isCurrent ? ACCENT : DETENT_MARK;
+            boolean isEngaged = i == engaged;
+            int tick = isCurrent ? ACCENT : (isEngaged ? ENGAGED_MARK : DETENT_MARK);
             graphics.fill(cx - 4, my, cx + 4, my + 1, tick);
+            // A second tick just under the engaged row, so "the train is here" stays
+            // visible even when the handle has been moved away from it.
+            if (isEngaged && !isCurrent)
+                graphics.fill(cx + 2, my + 2, cx + 5, my + 3, ENGAGED_MARK);
+            int textColour = isCurrent ? ACTIVE_TEXT
+                    : (isEngaged ? ENGAGED_MARK_TEXT : TEXT_DIM);
             graphics.drawString(font, label(gears[i]), x + 5,
-                    TrainControlLayout.detentLabelY(y, i),
-                    isCurrent ? ACTIVE_TEXT : TEXT_DIM, false);
+                    TrainControlLayout.detentLabelY(y, i), textColour, false);
         }
 
         // The handle: a rounded bar with an edge and a grip line, so it reads as a
         // physical handle rather than a blip on the scale.
+        //
+        // Drawn HOLLOW when the position is selected but not engaged. That is the
+        // clearest possible statement of the two-step model - a solid handle is a
+        // lever that has taken effect, an outline is one that has not - and it needs
+        // no text at all.
         int hy = TrainControlLayout.handleCenterY(y, valid ? current : 0);
         int hw = TrainControlLayout.HANDLE_W;
         int hh = TrainControlLayout.HANDLE_H;
         int hx = cx - hw / 2;
         int hTop = hy - hh / 2;
-        graphics.fill(hx, hTop, hx + hw, hTop + hh, HANDLE_BODY);
-        graphics.fill(hx + 1, hTop, hx + hw - 1, hTop + 1, HANDLE_GRIP);
-        graphics.fill(hx + 1, hTop + hh - 1, hx + hw - 1, hTop + hh, HANDLE_GRIP);
-        graphics.fill(hx + 4, hy - 1, hx + hw - 4, hy + 1, HANDLE_GRIP);
-        graphics.renderOutline(hx, hTop, hw, hh, HANDLE_EDGE);
-        // Accent cap on the selected side, tying the handle to the highlighted row.
-        graphics.fill(hx - 2, hTop + 2, hx, hTop + hh - 2, ACCENT);
+        if (pending) {
+            graphics.renderOutline(hx, hTop, hw, hh, PENDING);
+            graphics.fill(hx + 4, hy - 1, hx + hw - 4, hy + 1, PENDING);
+        } else {
+            graphics.fill(hx, hTop, hx + hw, hTop + hh, HANDLE_BODY);
+            graphics.fill(hx + 1, hTop, hx + hw - 1, hTop + 1, HANDLE_GRIP);
+            graphics.fill(hx + 1, hTop + hh - 1, hx + hw - 1, hTop + hh, HANDLE_GRIP);
+            graphics.fill(hx + 4, hy - 1, hx + hw - 4, hy + 1, HANDLE_GRIP);
+            graphics.renderOutline(hx, hTop, hw, hh, HANDLE_EDGE);
+        }
+        // Accent cap on the handle's side, tying it to the highlighted row.
+        graphics.fill(hx - 2, hTop + 2, hx, hTop + hh - 2, pending ? PENDING : ACCENT);
 
         // Footer: key hints, then the one thing worth saying.
         int fy = y + ph - TrainControlLayout.FOOTER_H + 3;
@@ -176,13 +214,17 @@ public class TrainControlHud implements LayeredDraw.Layer {
      * The key hints, built from the live bindings.
      *
      * <p>Read from the KeyMappings rather than written out, so a player who rebinds
-     * sees their own keys here instead of the defaults. The separators are translated
-     * too, because "lever up" is a phrase and its shape differs between languages.
+     * sees their own keys here instead of the defaults. The gap between the lever
+     * keys and the engage key is wider than the rest, because those two are one
+     * gesture - move the handle, then engage it - and running all five together would
+     * read as five unrelated keys.
      */
     private static String hintText() {
         return key(TrainControlKeys.LEVER_UP) + "\u2191" + key(TrainControlKeys.LEVER_DOWN)
+                + "  " + key(TrainControlKeys.ENGAGE)
+                + tr("electroenergetics.train.hint.engage")
                 + "   " + key(TrainControlKeys.CONFIRM)
-                + Component.translatable("electroenergetics.train.hint.confirm").getString();
+                + "\u786e\u8ba4";
     }
 
     /** A binding's key name, in the player's language. */
@@ -234,6 +276,11 @@ public class TrainControlHud implements LayeredDraw.Layer {
             case BRAKE -> "electroenergetics.train.gear.brake";
             case REVERSE -> "electroenergetics.train.gear.reverse";
         };
+        return Component.translatable(key).getString();
+    }
+
+    /** A translated string, so both panels read in the player's own language. */
+    private static String tr(String key) {
         return Component.translatable(key).getString();
     }
 

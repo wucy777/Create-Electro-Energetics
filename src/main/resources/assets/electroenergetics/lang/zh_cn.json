@@ -556,5 +556,11 @@
   "electroenergetics.train.grade.downhill": "下坡",
   "electroenergetics.train.value.regen": "再生",
   "electroenergetics.train.value.unpowered": "(无电)",
-  "electroenergetics.train.value.motorised": "节带电机"
+  "electroenergetics.train.value.motorised": "节带电机",
+  "key.electroenergetics.train_engage": "列车操纵杆：挂入所选挡位",
+  "electroenergetics.train.hint.engage": " 挂入",
+  "electroenergetics.train.lamp.vigilance": "确认",
+  "electroenergetics.train.lamp.emergency": "紧急",
+  "electroenergetics.train.lamp.limit": "限速",
+  "electroenergetics.train.lamp.regen": "再生"
 }

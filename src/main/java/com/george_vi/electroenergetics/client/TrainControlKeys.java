@@ -55,12 +55,25 @@ public final class TrainControlKeys {
             "key.electroenergetics.train_confirm",
             InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_J, CATEGORY);
 
+    /**
+     * Engage the selected lever position.
+     *
+     * <p>The lever is two-step: the arrow keys move the handle, and nothing happens
+     * to the train until this is pressed. That is how a real lever works - you are
+     * able to move it through positions without the train responding to each one as
+     * you pass - and it also means a stray arrow key cannot change what the train is
+     * doing.
+     */
+    public static final KeyMapping ENGAGE = new KeyMapping(
+            "key.electroenergetics.train_engage",
+            InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_ENTER, CATEGORY);
+
     /** Emergency brake. */
     public static final KeyMapping EMERGENCY = new KeyMapping(
             "key.electroenergetics.train_emergency",
             InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_K, CATEGORY);
 
-    private static final KeyMapping[] ALL = {LEVER_UP, LEVER_DOWN, CONFIRM, EMERGENCY};
+    private static final KeyMapping[] ALL = {LEVER_UP, LEVER_DOWN, CONFIRM, ENGAGE, EMERGENCY};
 
     private TrainControlKeys() {}
 

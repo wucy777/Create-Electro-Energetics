@@ -77,23 +77,37 @@ public class TrainHUDMixin {
     }
 
     /**
-     * Makes the experience-bar direction arrow follow the lever instead of S.
+     * Makes the experience-bar direction arrow follow the train, not the S key.
      *
      * <p>Create decides that arrow with {@code reversing =
      * ControlsHandler.currentlyPressed.contains(1)}, and 1 is the S key. On an
      * electric train S does nothing, so the arrow flipped whenever the driver
      * happened to press S - an indicator pointing backwards while the train was
-     * plainly going forwards, which is the "arrow in the middle of the experience
-     * bar" that gives the game away.
+     * plainly going forwards.
+     *
+     * <p>What it follows instead, in order:
+     * <ol>
+     *   <li>the direction the train is actually moving, so a braked train rolling
+     *       backwards on a descent shows that rather than the lever's position;</li>
+     *   <li>failing that - at a standstill - the reverse position of the lever, which
+     *       is the only lever position that commands the opposite direction.</li>
+     * </ol>
+     * The first point is what makes the arrow trustworthy: it reports travel, and the
+     * brake having no direction of its own is exactly why reading the lever for it was
+     * wrong.
+     *
+     * <p>{@code train.speed} is used rather than anything this mod syncs, because
+     * Create already replicates it - see Create's Train#write/read and the fact that
+     * the speed readout on the same HUD uses it. So the direction costs no extra
+     * traffic, which rule 0 asks about.
      *
      * <p>The field is read three times in that method (lines 190, 192, 193) and only
      * the first is the direction test, so the injection is pinned by ORDINAL 0 rather
-     * than by target alone. Without that it would also rewrite the steering-key reads
-     * that follow, and hitching the arrow to the lever would break the steering
-     * indication on the same HUD.
+     * than by target alone. That leaves the two steering reads alone, which is what
+     * keeps the A/D slant - the junction indication the driver needs - working
+     * untouched.
      *
-     * <p>Only for electric trains: a fuel train's arrow keeps following its own keys,
-     * and its Motion-based handle is untouched.
+     * <p>Only for electric trains: a fuel train's arrow keeps following its own keys.
      */
     @ModifyExpressionValue(
             method = "renderOverlay",
@@ -105,23 +119,54 @@ public class TrainHUDMixin {
         Train train = drivenTrain();
         if (train == null || !TrainHudData.leverDriven(train.id))
             return original;
+        return reversingView(original, isReversing(train));
+    }
+
+    /**
+     * Whether the cab should be shown as travelling in reverse.
+     *
+     * <p>Motion wins over the lever, and the lever only speaks once the train has
+     * stopped. A train sliding backwards under the brake is genuinely moving
+     * backwards and the arrow should say so; conversely the brake and coast
+     * positions command no direction at all, so at rest they must not claim one.
+     *
+     * <p>The deadband is Create's own scale: {@code train.speed} is a fraction of
+     * line speed, so this is a small slice of a block per tick and only exists to
+     * stop the arrow flickering as the train creeps to a halt.
+     */
+    static boolean isReversing(Train train) {
+        if (train.speed > SPEED_DEADBAND)
+            return false;
+        if (train.speed < -SPEED_DEADBAND)
+            return true;
         TrainHudData.GearState gear = TrainHudData.gear(train.id);
-        if (gear == null)
-            return original;
-        // Hand Create a view that reports "reversing" exactly when the lever does,
-        // leaving everything else in the collection alone.
-        boolean reversing = gear.gear() == TrainGear.REVERSE.ordinal();
-        if (!reversing) {
-            if (!original.contains(1))
-                return original;
-            return original.stream().filter(i -> i != 1).toList();
-        }
-        if (original.contains(1))
-            return original;
-        List<Integer> withReverse = new java.util.ArrayList<>(original);
-        withReverse.add(1);
+        // At a standstill only REVERSE commands a direction, and it commands reverse.
+        return gear != null && gear.gear() == TrainGear.REVERSE.ordinal();
+    }
+
+    /** {@code train.speed} is a fraction of top speed; this is a slow creep. */
+    private static final double SPEED_DEADBAND = 1e-4d;
+
+    /**
+     * A view of {@code current} that reports "reversing" (key index 1) exactly when
+     * asked to, leaving every other entry - the steering keys - alone.
+     */
+    private static Collection<Integer> reversingView(Collection<Integer> current, boolean reversing) {
+        boolean saysReversing = current.contains(REVERSE_KEY_INDEX);
+        if (reversing == saysReversing)
+            return current;
+        if (!reversing)
+            return current.stream().filter(i -> i != REVERSE_KEY_INDEX).toList();
+        List<Integer> withReverse = new java.util.ArrayList<>(current);
+        withReverse.add(REVERSE_KEY_INDEX);
         return withReverse;
     }
+
+    /**
+     * Index of the S key in Create's control list, which is what the direction arrow
+     * tests. See {@code ControlsUtil.getControls}: W, S, A, D, jump, shift.
+     */
+    private static final int REVERSE_KEY_INDEX = 1;
 
     /** The train whose controls the local player holds, or {@code null}. */
     private static Train drivenTrain() {

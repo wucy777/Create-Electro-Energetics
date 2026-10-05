@@ -181,6 +181,24 @@ public class ElectricTrainHud implements LayeredDraw.Layer {
         // can be sanity-checked at a glance.
         drawRow(graphics, font, x, y, 5, label, tr("electroenergetics.train.row.cars"), value, textCars);
 
+        // Warning lamps, as a strip above the rows.
+        //
+        // Above rather than beside, because the values column is at a fixed offset and
+        // its text is the widest thing here ("350 / 350 m/s"), so a side strip would
+        // sit on top of it. Above is empty space and always will be, since the panel
+        // grows downwards from a fixed top edge.
+        //
+        // The vigilance lamp is the one that matters: the prompt is the only thing that
+        // will drop the lever on its own, it is easy to miss as a line of text, and
+        // missing it costs the driver the train's speed. So it BLINKS, which is what an
+        // attention lamp is for and what colour alone cannot achieve. All four are
+        // always drawn, lit or not, so a driver can see the panel is alive.
+        //
+        // Laid out left to right from each caption's measured width, rather than at
+        // fixed offsets, because the captions are translated and a fixed pitch would
+        // overlap in one language and gap in another. fill/outline only.
+        drawLamps(graphics, font, x, y - LAMP_STRIP_GAP - LAMP_H);
+
         // Status line under the block. This is where the things a driver has to act
         // on go, in priority order: the vigilance prompt first, because ignoring it
         // drops the lever to the brake; then the emergency-brake penalty, so a
@@ -190,6 +208,76 @@ public class ElectricTrainHud implements LayeredDraw.Layer {
         if (!status.isEmpty())
             graphics.drawString(font, status, x, y + LINE_HEIGHT * 6 + 2, statusColor(), true);
     }
+
+    /**
+     * The four warning lamps, left to right.
+     *
+     * <p>A dark lamp is an outline rather than a dim fill, so an unlit lamp reads as a
+     * lamp that exists and is off - which is what tells a driver the panel is working
+     * - instead of as a smudge.
+     */
+    private void drawLamps(GuiGraphics graphics, Font font, int x, int y) {
+        TrainHudData.GearState gear = gearState;
+        boolean blink = blinkOn();
+        int lx = x;
+
+        lx = drawLamp(graphics, font, lx, y,
+                tr("electroenergetics.train.lamp.vigilance"), LAMP_RED,
+                gear != null && gear.confirmDue(), blink);
+        lx = drawLamp(graphics, font, lx, y,
+                tr("electroenergetics.train.lamp.emergency"), LAMP_AMBER,
+                gear != null && gear.emergencyArmed(), false);
+        lx = drawLamp(graphics, font, lx, y,
+                tr("electroenergetics.train.lamp.limit"), LAMP_AMBER,
+                gear != null && gear.emergencyPenalty(), false);
+        drawLamp(graphics, font, lx, y,
+                tr("electroenergetics.train.lamp.regen"), LAMP_GREEN,
+                gear != null && gear.regen(), false);
+    }
+
+    /**
+     * One lamp and its caption. Returns the x for the next lamp.
+     *
+     * <p>{@code blink} is the current blink phase; the lamp lights only when lit AND
+     * that phase is on, so the caller advances the phase once per frame rather than
+     * each lamp computing its own.
+     */
+    private int drawLamp(GuiGraphics graphics, Font font, int x, int y,
+                         String caption, int colour, boolean lit, boolean blink) {
+        if (lit && blink) {
+            graphics.fill(x, y, x + LAMP_W, y + LAMP_H, colour);
+        } else {
+            graphics.renderOutline(x, y, LAMP_W, LAMP_H, lit ? colour : LAMP_OFF);
+        }
+        int textColour = lit ? colour : LAMP_OFF_TEXT;
+        graphics.drawString(font, caption, x + LAMP_W + 2, y - 1, textColour, false);
+        return x + LAMP_W + 2 + font.width(caption) + LAMP_GAP;
+    }
+
+    /**
+     * Blink phase, from the world clock so there is no per-HUD timer to keep and the
+     * two panels cannot drift apart.
+     */
+    private static boolean blinkOn() {
+        var level = Minecraft.getInstance().level;
+        return level != null && (level.getGameTime() / BLINK_TICKS) % 2L == 0L;
+    }
+
+    /** Half a second on, half a second off. */
+    private static final int BLINK_TICKS = 10;
+
+    private static final int LAMP_W = 5;
+    private static final int LAMP_H = 5;
+    /** Gap between one lamp's caption and the next lamp. */
+    private static final int LAMP_GAP = 6;
+    /** Distance from the strip to the first row of figures. */
+    private static final int LAMP_STRIP_GAP = 3;
+
+    private static final int LAMP_RED = 0xFFFF4C4C;
+    private static final int LAMP_AMBER = 0xFFFFB454;
+    private static final int LAMP_GREEN = 0xFF5CD65C;
+    private static final int LAMP_OFF = 0xFF3A4048;
+    private static final int LAMP_OFF_TEXT = 0xFF6B7280;
 
     /** The single most important thing to tell the driver right now, or "". */
     private String statusLine() {

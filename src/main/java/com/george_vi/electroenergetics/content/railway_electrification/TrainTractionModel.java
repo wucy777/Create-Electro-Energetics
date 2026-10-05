@@ -739,8 +739,23 @@ public final class TrainTractionModel {
                 hold = frictionBrake();
                 braked = true;
             } else if (gear == TrainGear.REVERSE) {
-                hold = frictionBrake() + motorReverseBrake(0d, carriages, powerScale);
-                braked = true;
+                // Only when REVERSE is acting as a BRAKE, which it is only if the
+                // train is stopped with a downhill tendency - the spec's
+                // "停止但有下坡前溜趋势时挂入就是制动 + 发动机反向制动". Otherwise REVERSE is a
+                // reverse GEAR, and a gear drives; it does not hold.
+                //
+                // Crediting the hold unconditionally was a bug that made reverse
+                // completely unusable from rest on level ground: pull is zero there,
+                // so "hold >= pull" was trivially true, the method returned 0 before
+                // the reverse branch could apply any effort, and the train stayed
+                // pinned forever. Reproduced in _cache/verify_reported_bugs.py. On a
+                // descent the test still fires exactly as before, because that is the
+                // case where REVERSE really is holding the train.
+                boolean gravityPullsForward = -gradeResistance(gradeToPlusX, carriages) > 0d;
+                if (gravityPullsForward) {
+                    hold = frictionBrake() + motorReverseBrake(0d, carriages, powerScale);
+                    braked = true;
+                }
             }
             if (emergency) {
                 hold = Math.max(hold, frictionBrake() * EMERGENCY_ADHESION_FACTOR);

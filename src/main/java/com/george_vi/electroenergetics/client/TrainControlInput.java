@@ -31,11 +31,25 @@ public final class TrainControlInput {
     private static boolean upWasDown;
     private static boolean downWasDown;
     private static boolean confirmWasDown;
+    private static boolean engageWasDown;
     private static boolean emergencyWasDown;
 
     /**
-     * The last lever position this client SENT, or {@code null} when it is not
-     * predicting.
+     * The position the driver has moved the handle to but NOT yet engaged.
+     *
+     * <p>The lever is two-step, like a real one: the arrow keys move the handle over
+     * the detents, and the train does nothing until the handle is engaged. So this is
+     * not a prediction of the server's state - it is the handle's own position, which
+     * the server knows nothing about until {@link #ENGAGE} is pressed.
+     *
+     * <p>{@code null} means the handle is resting on the engaged position, i.e. there
+     * is nothing pending to show.
+     */
+    private static TrainGear selectedGear;
+
+    /**
+     * The engaged lever position as last commanded by this client, or {@code null}
+     * when it is not waiting on a command.
      *
      * <p>This is the fix for the lever appearing to jump positions. The next position
      * used to be computed from {@link TrainHudData}, which is the server's last synced
@@ -92,7 +106,8 @@ public final class TrainControlInput {
         if (!isDrivingElectricTrain()) {
             // Drop the edge state so the first press after getting back in the cab is
             // treated as a fresh press even if the key was down the whole time.
-            upWasDown = downWasDown = confirmWasDown = emergencyWasDown = false;
+            upWasDown = downWasDown = confirmWasDown = engageWasDown = emergencyWasDown = false;
+            selectedGear = null;
             predictedGear = null;
             predictedTicks = 0;
             return;
@@ -103,7 +118,7 @@ public final class TrainControlInput {
         if (gear == null)
             return;
 
-        // Reconcile the local prediction with what the server reports.
+        // Reconcile the engaged position with what the server reports.
         int serverGear = gear.gear();
         if (predictedGear != null) {
             if (predictedGear.ordinal() == serverGear) {
@@ -112,27 +127,43 @@ public final class TrainControlInput {
             } else if (++predictedTicks > PREDICTION_TIMEOUT) {
                 // The command was refused or overtaken (a vigilance fail-safe drops
                 // the lever to the brake, for instance). Believe the server rather
-                // than fighting it for the rest of the journey.
+                // than fighting it for the rest of the journey. A pending selection
+                // is dropped with it, so the handle cannot be left showing a position
+                // the train has since been forced away from - the driver selects
+                // again from wherever the lever actually is now.
                 predictedGear = null;
                 predictedTicks = 0;
+                selectedGear = null;
             }
         }
 
-        // What the next press moves from: the driver's own last command if there is
-        // one, otherwise the server's value.
-        int current = predictedGear != null ? predictedGear.ordinal() : serverGear;
+        // Where the handle currently rests: a pending selection if the driver has
+        // moved it, otherwise the engaged position.
+        int handle = selectedGear != null ? selectedGear.ordinal()
+                : (predictedGear != null ? predictedGear.ordinal() : serverGear);
 
         boolean up = TrainControlKeys.isDown(TrainControlKeys.LEVER_UP);
         boolean down = TrainControlKeys.isDown(TrainControlKeys.LEVER_DOWN);
         boolean confirm = TrainControlKeys.isDown(TrainControlKeys.CONFIRM);
+        boolean engage = TrainControlKeys.isDown(TrainControlKeys.ENGAGE);
         boolean emergency = TrainControlKeys.isDown(TrainControlKeys.EMERGENCY);
 
         // Up notches towards ACCELERATE, down towards REVERSE. The lever is ordered
         // accelerate-first in the enum, so "up" is a lower index.
+        //
+        // Moving the handle sends NOTHING. This is the whole difference from the
+        // previous version: the handle is the driver's intention, and the train only
+        // learns about it when the handle is engaged. It also means a stray arrow key
+        // - and the arrow keys are easy to catch while looking around - cannot change
+        // what the train is doing.
         if (up && !upWasDown)
-            current = notch(train, current, -NOTCHES_PER_PRESS);
+            handle = moveHandle(handle, -NOTCHES_PER_PRESS);
         if (down && !downWasDown)
-            current = notch(train, current, +NOTCHES_PER_PRESS);
+            handle = moveHandle(handle, +NOTCHES_PER_PRESS);
+
+        // Engage: commit the handle's position to the train.
+        if (engage && !engageWasDown && handle != engagedPosition(serverGear))
+            engage(train, handle);
 
         if (confirm && !confirmWasDown)
             send(SetTrainGearPacket.confirm(train.id));
@@ -140,49 +171,86 @@ public final class TrainControlInput {
         // Emergency is only offered by the server's own rule (reverse, while moving);
         // sending it otherwise is harmless because the handler ignores it, but this
         // avoids the packet entirely.
-        if (emergency && !emergencyWasDown && current == TrainGear.REVERSE.ordinal())
+        if (emergency && !emergencyWasDown && handle == TrainGear.REVERSE.ordinal())
             send(SetTrainGearPacket.emergency(train.id));
 
         upWasDown = up;
         downWasDown = down;
         confirmWasDown = confirm;
+        engageWasDown = engage;
         emergencyWasDown = emergency;
     }
 
+    /** The position the train is believed to be actually in. */
+    private static int engagedPosition(int serverGear) {
+        return predictedGear != null ? predictedGear.ordinal() : serverGear;
+    }
+
     /**
-     * Move the lever by {@code delta} positions from {@code from}, clamped, and tell
-     * the server. Returns the position now selected, which becomes the prediction.
+     * Move the handle by {@code delta} detents, clamped, recording it as a pending
+     * selection. Deliberately does not talk to the server.
+     *
+     * <p>If the handle comes back to rest on the engaged position the selection is
+     * cleared, so there is no pending state to show and the display stops hinting at
+     * anything.
      */
-    private static int notch(Train train, int from, int delta) {
+    private static int moveHandle(int from, int delta) {
         TrainGear[] values = TrainGear.values();
         int next = from + delta;
         if (next < 0 || next >= values.length)
             return from;   // already at an end of the lever; a detent does not wrap
-        if (next == from)
-            return from;
-        send(SetTrainGearPacket.gear(train.id, values[next]));
-        predictedGear = values[next];
-        predictedTicks = 0;
+        selectedGear = values[next];
         return next;
     }
 
-    /**
-     * The lever position to display, which is the driver's own last command while it
-     * is still waiting for the server to confirm it.
-     *
-     * <p>The renderer uses this so the handle moves on the key press rather than a few
-     * ticks later. Without it the lever would feel laggy and, when several presses
-     * were queued, would appear to jump: the handle stayed still through the presses
-     * and then travelled the whole distance at once when the packets landed.
-     *
-     * @param serverGear what the server last reported
-     * @return the position to draw
-     */
-    public static int displayGear(int serverGear) {
-        return predictedGear != null ? predictedGear.ordinal() : serverGear;
+    /** Commit the handle's position: this is what moves the train. */
+    private static void engage(Train train, int handle) {
+        TrainGear[] values = TrainGear.values();
+        if (handle < 0 || handle >= values.length)
+            return;
+        send(SetTrainGearPacket.gear(train.id, values[handle]));
+        predictedGear = values[handle];
+        predictedTicks = 0;
+        // The handle now rests on what was just engaged, so there is nothing pending.
+        selectedGear = null;
     }
 
-    /** Move the lever by {@code delta} positions, clamped, and tell the server. */
+    /**
+     * The position the HANDLE is drawn at.
+     *
+     * <p>This is the driver's own pending selection if they have moved the handle,
+     * otherwise the engaged position - with the local command preferred over the
+     * server's value for the few ticks it takes to be confirmed. Without the last
+     * part the handle would lag the engage key and, when several commands were
+     * outstanding, would appear to jump.
+     *
+     * @param serverGear what the server last reported
+     * @return the position to draw the handle at
+     */
+    public static int displayGear(int serverGear) {
+        if (selectedGear != null)
+            return selectedGear.ordinal();
+        return engagedPosition(serverGear);
+    }
+
+    /**
+     * The position the train is actually in, for the readout that reports state rather
+     * than the handle.
+     *
+     * <p>Kept separate from {@link #displayGear} so the two questions - "where is the
+     * handle" and "what is the train doing" - can be answered differently, which is the
+     * whole point of a two-step lever: they are genuinely different while a selection
+     * is pending.
+     */
+    public static int engagedGear(int serverGear) {
+        return engagedPosition(serverGear);
+    }
+
+    /** Whether a selection is pending, i.e. the handle is off the engaged position. */
+    public static boolean hasPendingSelection() {
+        return selectedGear != null;
+    }
+
     private static Train drivenTrain() {
         if (!(ControlsHandler.getContraption() instanceof CarriageContraptionEntity cce))
             return null;
