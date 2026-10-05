@@ -267,7 +267,11 @@ public class GameEvents {
             // forever: a previous version of this file did exactly that and made it
             // impossible to reverse away from a buffer stop, which is the one place a
             // driver needs reverse.
-            boolean outOfTrack = train.speed == 0d && isBlocked(train);
+            // A tolerance rather than an exact zero: Create sets speed = 0 outright when
+            // a carriage is blocked, but other tick handlers run between that and here,
+            // and a float equality test on a value several systems write is a bug
+            // waiting for a rounding difference.
+            boolean outOfTrack = Math.abs(train.speed) < 1e-6d && isBlocked(train);
             if (outOfTrack && !driver.blockedParked) {
                 driver.failSafe();
                 driver.blockedParked = true;
