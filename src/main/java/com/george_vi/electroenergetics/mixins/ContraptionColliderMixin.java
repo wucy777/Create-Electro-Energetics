@@ -86,8 +86,17 @@ public class ContraptionColliderMixin {
     @ModifyReturnValue(method = "handleDamageFromTrain", at = @At("RETURN"), remap = false)
     private static Vec3 electroEnergetics$noLaunchWhenAboard(
             Vec3 original,
-            @Local(argsOnly = true) AbstractContraptionEntity contraptionEntity,
-            @Local(argsOnly = true) Entity entity) {
+            // Pinned by INDEX, not by type. Matching on type alone would be ambiguous:
+            // the target's argument list is (Level, AbstractContraptionEntity, Vec3,
+            // Entity, Vec3, PlayerType), and AbstractContraptionEntity IS an Entity, so
+            // a type-only Entity parameter could bind to either argument 1 or 3. Getting
+            // the contraption where the entity was expected compiles, applies, and then
+            // misbehaves - or throws during class load, which is how the last mixin
+            // mistake took the game down. The indices are exact under either reading of
+            // @Local's index (parameter number, or LVT slot - identical for a static
+            // method), so there is nothing left to infer.
+            @Local(argsOnly = true, index = 1) AbstractContraptionEntity contraptionEntity,
+            @Local(argsOnly = true, index = 3) Entity entity) {
         if (original == null || entity == null || contraptionEntity == null)
             return original;
         if (!isAboard(contraptionEntity, entity))
