@@ -53,6 +53,29 @@ public final class TrainTractionModel {
         return Math.max(CEEConfigs.server().trainValues.electricTrainMaxSpeed.get(), 0.1d);
     }
 
+    /**
+     * Whether a train at this speed has arrived at the ceiling it is allowed, so
+     * ACCELERATE should hand over to CRUISE.
+     *
+     * <p>A small tolerance below the ceiling rather than an exact equality, because the
+     * speed approaches the ceiling asymptotically as drag eats the remaining thrust and
+     * will never equal it exactly. Too tight and the lever never moves; too loose and
+     * ACCELERATE gives up early. 0.5 m/s below 100 is half a percent, reached within a
+     * few ticks of the ceiling and far below anything a driver could notice.
+     *
+     * <p>Penalty-aware: with the emergency cap in force the ceiling is 40 km/h, and
+     * ACCELERATE has to hand over there rather than at the design speed. Handing over at
+     * the wrong one would leave the lever in ACCELERATE above a cap it can never pull
+     * past, which is the same oscillation the handover exists to remove.
+     */
+    public static boolean atDesignCeiling(double speedMs, int carriages, boolean penalty) {
+        double ceiling = penalty ? Math.min(designMaxSpeed(), PENALTY_SPEED) : designMaxSpeed();
+        return speedMs >= ceiling - CEILING_HANDOVER_BAND;
+    }
+
+    /** How far below the design ceiling still counts as having reached it [m/s]. */
+    private static final double CEILING_HANDOVER_BAND = 0.5d;
+
     /** Peak tractive effort in the constant-effort region [N]. */
     public static double startingEffort(int carriages) {
         return startingEffort(carriages, 1d);
@@ -329,6 +352,17 @@ public final class TrainTractionModel {
     public static final double PENALTY_SPEED = 40d / 3.6d;   // 40 km/h
 
     /**
+     * Hysteresis band above the penalty cap before the brake is applied again [m/s].
+     *
+     * <p>Without it the penalty would enforce itself by braking, then stop braking the
+     * instant the train dropped under the cap, then brake again - the same
+     * accelerate/brake oscillation the ceiling used to cause, just at 40 km/h instead
+     * of at top speed. One metre per second is well under the 0.8 m/s^2 the brake can
+     * remove in a tick, so the band is closed within a tick or two and cannot be felt.
+     */
+    private static final double CAP_MARGIN = 1d;
+
+    /**
      * How much more adhesion the emergency brake can find than the service brake.
      *
      * <p>Emergency braking is not a different mechanism, it is the same friction
@@ -591,17 +625,27 @@ public final class TrainTractionModel {
                 if (!tractionCut) {
                     if (speed < ceiling) {
                         force += effort;
-                    } else if (speed > ceiling) {
-                        // Over the ceiling the motors contribute nothing, so the
-                        // penalty has to be enforced with the brake or a descent
-                        // would simply ignore it. Doing it this way rather than
-                        // clamping train.speed keeps it physical: the train is
-                        // genuinely slowed, and a clamp would be a teleport the
-                        // physics never agreed to.
-                        leverBrakeForce -= brakeHeading * brakeTotal * mass;
-                        force += leverBrakeForce;
-                        dynamicApplied = dynamicPart;
                     }
+                    // At or above the ceiling: NO traction and NO brake, which is what
+                    // "accelerate to top speed and then hold it" means.
+                    //
+                    // This used to apply the service brake above the ceiling, to stop a
+                    // descent ignoring the emergency speed cap. That fixed the cap and
+                    // broke the top of the speed range: from about 70 m/s the remaining
+                    // net thrust is small but positive, so the train overshot 100 m/s by
+                    // a hair, the brake slammed on at 0.8 m/s^2, it fell back below the
+                    // ceiling and accelerated again. The driver saw the train
+                    // oscillating between accelerating and braking - "蹦迪" - and every
+                    // overshoot wasted the acceleration it had just spent.
+                    //
+                    // The cap is still enforced, just without the oscillation: drag
+                    // alone holds the train at the ceiling, because the ceiling is
+                    // derived from the same drag. Overshoot is bounded by one tick of
+                    // motion rather than being fought, and nothing brakes a train that
+                    // is merely at its design speed. A train already ABOVE the cap (an
+                    // emergency penalty applied while running fast) is caught below,
+                    // where a speed over the ceiling does still brake - the case the
+                    // old code was written for and the only one that needs it.
                 }
             }
             case REVERSE -> {
@@ -623,11 +667,31 @@ public final class TrainTractionModel {
                 boolean forwardTendency = v > 1e-6d
                         || (speed < 1e-6d && gravityTowardForward > 0d);
                 if (forwardTendency) {
-                    double motorBrake = motorReverseBrake(speed, carriages, powerScale);
-                    // brakeHeading opposes the motion when rolling, and opposes the
-                    // direction gravity would take it when stopped.
-                    leverBrakeForce = -brakeHeading * (brakeMs2 + motorBrake) * mass;
-                    force += leverBrakeForce;
+                    if (speed > 1e-6d) {
+                        // MOVING: the motors are being back-driven by the train, so they
+                        // generate. Same blended friction-plus-motor brake as the BRAKE
+                        // position, and the motor share is fed back to the line.
+                        //
+                        // This used to drive the motors against the motion instead, which
+                        // is the physical opposite: a back-driven machine is a generator,
+                        // and forcing current through it to oppose its own rotation draws
+                        // full power from the catenary while recovering nothing. The
+                        // driver reported exactly that - the reverse position stopping the
+                        // train with the traction at full draw and no regeneration.
+                        leverBrakeForce = -brakeHeading * brakeTotal * mass;
+                        force += leverBrakeForce;
+                        dynamicApplied = dynamicPart;
+                    } else {
+                        // STOPPED with a downhill tendency: now the motor really is
+                        // POWERED and holding torque, which is the one case that cannot
+                        // regenerate - a stationary machine has no back-EMF to work
+                        // against, so holding costs line current. This is what makes
+                        // REVERSE the strongest hold on the train, and it is the only
+                        // case where drawing power to stand still is correct.
+                        double motorHold = motorReverseBrake(0d, carriages, powerScale);
+                        leverBrakeForce = -brakeHeading * (brakeMs2 + motorHold) * mass;
+                        force += leverBrakeForce;
+                    }
                 } else if (!tractionCut && speed < Math.min(ceiling, reverseMaxSpeed())) {
                     force -= effort;
                 }
@@ -687,6 +751,35 @@ public final class TrainTractionModel {
             }
             case BRAKE -> {
                 leverBrakeForce = -brakeHeading * brakeTotal * mass;
+                force += leverBrakeForce;
+                dynamicApplied = dynamicPart;
+            }
+        }
+
+        // The emergency speed cap, enforced on its own terms rather than by braking at
+        // the design ceiling.
+        //
+        // Only a train that is ALREADY above the cap is braked, and only until it is
+        // back under it. That distinction is what separates "the penalty is in force"
+        // from "the train has reached its design speed": at the design ceiling the
+        // remaining thrust is a fraction of a m/s^2, so a brake there fights a train
+        // that is doing nothing wrong and produces the accelerate/brake oscillation
+        // described above. A train above the cap genuinely needs slowing, and braking
+        // it is the only way the cap is honoured on a descent, where the motors are not
+        // what is pushing it.
+        //
+        // The margin is hysteresis, so a train sitting exactly on the cap is not braked
+        // and released one tick at a time. PENALTY_SPEED is 40 km/h, a lower ceiling
+        // than the design one, so this can only ever be the penalty.
+        //
+        // Skipped when the lever is already braking at least this hard: in that case
+        // the driver's own brake is doing the work, and replacing it would throw away
+        // the motor share and with it the regeneration.
+        if (penalty && !emergency && speed > PENALTY_SPEED + CAP_MARGIN) {
+            double penaltyBrakeForce = brakeTotal * mass;
+            if (Math.abs(leverBrakeForce) < penaltyBrakeForce) {
+                force -= leverBrakeForce;                 // drop whatever the lever applied
+                leverBrakeForce = -brakeHeading * penaltyBrakeForce;
                 force += leverBrakeForce;
                 dynamicApplied = dynamicPart;
             }

@@ -292,6 +292,37 @@ public class TrainMixin implements ICEETrainExtension {
         // m/s² -> Blocks/Tick². 1 block = 1 m, so only the tick conversion is needed.
         double next = self.speed + a / 400d;
 
+        // ACCELERATE hands over to CRUISE once the train is at its design speed.
+        //
+        // This is the behaviour that was asked for and that the ACCELERATE branch alone
+        // cannot express: there, reaching the ceiling must mean "stop pulling" and not
+        // "apply the brake", because the remaining thrust at the top of the range is a
+        // fraction of a m/s^2 and a brake there fights a train that is doing nothing
+        // wrong. That produced a visible accelerate/brake oscillation near 100 m/s.
+        //
+        // Handing over to CRUISE is what makes the top of the range stable and is also
+        // what the position means to a driver: accelerate until you are at speed, then
+        // hold it. CRUISE already holds a speed with traction, coasts within its
+        // deadband, and brakes on a descent, which is exactly the right behaviour once
+        // the train has arrived at the ceiling - so nothing new has to be written, the
+        // lever just moves to the position that already does it.
+        //
+        // Checked against the speed just written, so the switch happens on the tick the
+        // ceiling is reached rather than a tick late. The lever position is written
+        // directly rather than sent as a packet: this is the server's own decision about
+        // its own train, and the client learns of it on the next gear sync. The driver
+        // sees the handle move to CRUISE, which is the honest report of what the train
+        // is now doing.
+        if (st.gear == TrainGear.ACCELERATE && !st.vigilanceTripped
+                && TrainTractionModel.atDesignCeiling(Math.abs(next) * 20d, carriages,
+                        st.emergencyPenalty)) {
+            st.gear = TrainGear.CRUISE;
+            // Cruise holds the speed it is engaged at, which is where the train just
+            // arrived. Captured here because this lever move did not come from a packet,
+            // and CRUISE with a stale or zero target would command the wrong speed.
+            st.cruiseSpeed = Math.abs(next) * 20d;
+        }
+
         // Bring a stop to rest instead of through it.
         //
         // Any deceleration applied to a speed that is nearly zero steps past it and
