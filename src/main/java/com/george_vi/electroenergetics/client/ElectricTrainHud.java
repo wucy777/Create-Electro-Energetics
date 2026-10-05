@@ -171,15 +171,15 @@ public class ElectricTrainHud implements LayeredDraw.Layer {
                     sample.powerPerCarriage());
         }
 
-        drawRow(graphics, font, x, y, 0, label, "Speed", value, textSpeed);
-        drawRow(graphics, font, x, y, 1, label, "Gear", value, textGear);
-        drawRow(graphics, font, x, y, 2, label, "Gradient",
+        drawRow(graphics, font, x, y, 0, label, tr("electroenergetics.train.row.speed"), value, textSpeed);
+        drawRow(graphics, font, x, y, 1, label, tr("electroenergetics.train.row.gear"), value, textGear);
+        drawRow(graphics, font, x, y, 2, label, tr("electroenergetics.train.row.gradient"),
                 gradeColor(sample.grade()), textGrade);
-        drawRow(graphics, font, x, y, 3, label, "Power", value, textPower);
-        drawRow(graphics, font, x, y, 4, label, "Catenary", value, textCatenary);
+        drawRow(graphics, font, x, y, 3, label, tr("electroenergetics.train.row.power"), value, textPower);
+        drawRow(graphics, font, x, y, 4, label, tr("electroenergetics.train.row.catenary"), value, textCatenary);
         // Carriage count and how many of them actually pull, so the rating above
         // can be sanity-checked at a glance.
-        drawRow(graphics, font, x, y, 5, label, "Cars", value, textCars);
+        drawRow(graphics, font, x, y, 5, label, tr("electroenergetics.train.row.cars"), value, textCars);
 
         // Status line under the block. This is where the things a driver has to act
         // on go, in priority order: the vigilance prompt first, because ignoring it
@@ -197,22 +197,27 @@ public class ElectricTrainHud implements LayeredDraw.Layer {
         if (gear == null)
             return "";
         if (gear.confirmDue())
-            return "PRESS ACKNOWLEDGE";
+            return tr("electroenergetics.train.status.confirm");
         if (gear.emergencyPenalty())
-            return "EMERGENCY USED - LIMITED TO 40 km/h";
+            return tr("electroenergetics.train.status.penalty");
         if (gear.emergencyArmed())
-            return "emergency brake armed";
+            return tr("electroenergetics.train.status.armed");
         if (gear.regen())
-            return "regenerating into the line";
+            return tr("electroenergetics.train.status.regen");
         if (gear.gear() == TrainGear.CRUISE.ordinal()) {
             return switch (gear.cruiseState()) {
-                case 0 -> "holding the set speed";
-                case 1 -> "power limited - slowing on the climb";
-                case 2 -> "braking to hold on the descent";
-                default -> "stopped";
+                case 0 -> tr("electroenergetics.train.status.holding");
+                case 1 -> tr("electroenergetics.train.status.limited");
+                case 2 -> tr("electroenergetics.train.status.braking");
+                default -> tr("electroenergetics.train.status.stopped");
             };
         }
         return "";
+    }
+
+    /** A translated string, so the readout is in the player's own language. */
+    private static String tr(String key) {
+        return net.minecraft.network.chat.Component.translatable(key).getString();
     }
 
     private int statusColor() {
@@ -240,7 +245,7 @@ public class ElectricTrainHud implements LayeredDraw.Layer {
                 : speed + " m/s";
         textGear = gear < 0 || gear >= TrainGear.values().length
                 ? "--"
-                : TrainControlHud.shortLabel(TrainGear.values()[gear]);
+                : TrainControlHud.label(TrainGear.values()[gear]);
         textGrade = describeGrade(grade);
         // Rating is per carriage, so show the consist's rating against what it is
         // actually drawing; that is the comparison that shows whether the set is
@@ -250,13 +255,13 @@ public class ElectricTrainHud implements LayeredDraw.Layer {
         if (!powered)
             textPower = "--";
         else if (powerKw < 0)
-            textPower = "regen " + formatPowerKw(-powerKw);
+            textPower = tr("electroenergetics.train.value.regen") + " " + formatPowerKw(-powerKw);
         else
             textPower = formatPowerKw(powerKw) + " / "
                     + String.format("%.2f", cars * perCarriage / 1e6) + " MW";
         textCatenary = String.format("%.1f", deciVolt / 10d) + " kV"
-                + (powered ? "" : " (unpowered)");
-        textCars = cars + "  (" + motors + " motorised)";
+                + (powered ? "" : " " + tr("electroenergetics.train.value.unpowered"));
+        textCars = cars + "  (" + motors + " " + tr("electroenergetics.train.value.motorised") + ")";
     }
 
     /**
@@ -284,9 +289,11 @@ public class ElectricTrainHud implements LayeredDraw.Layer {
     /** Uphill reads as a positive grade, which is what the model uses. */
     private static String describeGrade(double grade) {
         if (Math.abs(grade) < 0.0005d)
-            return "level";
+            return tr("electroenergetics.train.grade.level");
         double percent = grade * 100d;
-        return String.format("%+.2f%% %s", percent, grade > 0 ? "uphill" : "downhill");
+        return String.format("%+.2f%% %s", percent,
+                tr(grade > 0 ? "electroenergetics.train.grade.uphill"
+                             : "electroenergetics.train.grade.downhill"));
     }
 
     private static int gradeColor(double grade) {

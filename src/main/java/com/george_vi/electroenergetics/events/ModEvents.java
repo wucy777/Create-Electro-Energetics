@@ -45,6 +45,7 @@ import net.neoforged.fml.event.lifecycle.FMLClientSetupEvent;
 import net.neoforged.neoforge.capabilities.RegisterCapabilitiesEvent;
 import net.neoforged.neoforge.client.event.ModelEvent;
 import net.neoforged.neoforge.client.event.RegisterGuiLayersEvent;
+import net.neoforged.neoforge.client.event.RegisterKeyMappingsEvent;
 import net.neoforged.neoforge.client.extensions.common.RegisterClientExtensionsEvent;
 import net.neoforged.neoforge.client.gui.VanillaGuiLayers;
 import net.neoforged.neoforge.data.event.GatherDataEvent;
@@ -111,6 +112,22 @@ public class ModEvents {
     public static void onModelRegistry(ModelEvent.RegisterAdditional event) {
         // required so that it loads the model for concrete pole struts
         event.register(ModelResourceLocation.standalone(CreateElectroEnergetics.rl("block/strut/concrete_pole")));
+    }
+
+    /**
+     * Register the cab's key bindings, so the driver can move them.
+     *
+     * <p>Real {@link net.minecraft.client.KeyMapping}s rather than raw key codes: this
+     * is a mod-heavy pack where most convenient keys are already taken, and the
+     * answer is to let the driver pick a free key rather than to seize a vanilla key.
+     * They appear under Options - Controls with their own category.
+     */
+    @OnlyIn(Dist.CLIENT)
+    @SubscribeEvent
+    public static void registerKeyMappings(RegisterKeyMappingsEvent event) {
+        for (net.minecraft.client.KeyMapping mapping
+                : com.george_vi.electroenergetics.client.TrainControlKeys.all())
+            event.register(mapping);
     }
 
     @OnlyIn(Dist.CLIENT)

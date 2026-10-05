@@ -1,20 +1,16 @@
 {
   "itemGroup.electroenergetics": "Create: Electro Energetics",
-
   "electroenergetics.wire_spool.too_far_away": "Too far away!",
   "electroenergetics.wire_spool.cancelled_connection": "Selection Cleared",
   "electroenergetics.wire_spool.invalid_connection": "Invalid connection!",
   "electroenergetics.bundled_wire_spool.incompatible_types": "Incompatiblye wire conductor number!",
-
   "electroenergetics.clamp_meter.current": "Current:",
   "electroenergetics.fuse.set_amperage": "Fuse Amperage:",
   "electroenergetics.fuse.hold_to_configure": "Hold Left Alt and Scroll to configure",
   "electroenergetics.analog_lever.strength": "Strength:",
   "electroenergetics.hint.placeable_in_electrical_panel": "§8§oPlaceable in electrical panel",
-
   "electroenergetics.action_bar.wire_too_long": "Wire too long!",
   "electroenergetics.action_bar.wire_too_short": "Wire too short!",
-
   "electroenergetics.gui.transformer": "Configure Transformer Windings",
   "electroenergetics.gui.transformer.primary_turns": "Primary Turns",
   "electroenergetics.gui.transformer.secondary_turns": "Secondary Turns",
@@ -49,7 +45,6 @@
   "electroenergetics.gui.goggles.rpm_equivalent": "RPM equivalent:",
   "electroenergetics.gui.goggles.state_of_charge": "State of Charge:",
   "electroenergetics.gui.goggles.frequency": "Frequency:",
-
   "electroenergetics.tooltip.energy_meter.owner": "Owner: %1$s",
   "electroenergetics.tooltip.energy_meter.energy": "Total Energy: %1$s",
   "electroenergetics.tooltip.fuse.set_amperage": "Set Amperage: %1$s",
@@ -59,7 +54,6 @@
   "electroenergetics.tooltip.resistance": "Resistance:",
   "electroenergetics.tooltip.power": "Power:",
   "electroenergetics.tooltip.max_power": "Max Power:",
-
   "electroenergetics.nodes.node": "Node",
   "electroenergetics.nodes.feed": "Feed",
   "electroenergetics.nodes.load": "Load",
@@ -91,7 +85,6 @@
   "electroenergetics.nodes.vcc": "Vcc",
   "electroenergetics.nodes.carry_in": "Carry In",
   "electroenergetics.nodes.carry_out": "Carry Out",
-
   "electroenergetics.generic.voltage": "Voltage",
   "electroenergetics.generic.current": "Current",
   "electroenergetics.generic.wattage": "Wattage",
@@ -122,14 +115,12 @@
   "electroenergetics.generic.microhenry": "μH",
   "electroenergetics.generic.nanohenry": "nH",
   "electroenergetics.generic.hertz": "Hz",
-
   "electroenergetics.subtitle.hum": "Hum",
   "electroenergetics.subtitle.arcing": "Arcing",
   "electroenergetics.subtitle.electric_train": "Electric Train Sounds",
   "electroenergetics.subtitle.buzzer": "Buzzer Buzzes",
   "electroenergetics.subtitle.voltage_regulator": "Voltage Regulator Steps",
   "electroenergetics.subtitle.sulfur_hexafluoride_breaker_trip": "Sulfur Hexafluoride Breaker Trips",
-
   "electroenergetics.transformer.ratio": "Primary to Secondary Ratio",
   "electroenergetics.transformer.ratio_symbol": "÷",
   "electroenergetics.transformer.turns": "Turns",
@@ -171,10 +162,8 @@
   "electroenergetics.electrical_panel_linking.return_to_zero": "Return to zero",
   "electroenergetics.electrical_panel_linking.frequency_slot_0": "Freq. #1",
   "electroenergetics.electrical_panel_linking.frequency_slot_1": "Freq. #2",
-
   "electroenergetics.hint.synchroscope_misconfigured": "It appears this _Synchroscope_ has not been wired correctly. Ensure the _phases_ are connected in a consistent order.",
   "electroenergetics.hint.synchroscope_misconfigured.title": "Misconfigured",
-
   "block.electroenergetics.emergency_stop_button.tooltip.summary": "A _Big Red Button_ useful in _emergencies_.",
   "block.electroenergetics.emergency_stop_button.tooltip.condition1": "When R-Clicked",
   "block.electroenergetics.emergency_stop_button.tooltip.behaviour1": "Changes state into _Engaged_, and opens its _Internal Switch_.",
@@ -203,25 +192,51 @@
   "item.electroenergetics.broken_fuse.tooltip.condition1": "Configuring",
   "item.electroenergetics.broken_fuse.tooltip.behaviour1": "Ctrl-Scroll to adjust the max _amperage_",
   "item.electroenergetics.wire_damper.tooltip.summary": "Just a decorative _wire attachment_",
-
-
   "death.attack.electroenergetics.electrocution": "%1$s was electrocuted",
   "death.attack.electroenergetics.electrocution.player": "%1$s was electrocuted by %2$s",
   "death.attack.electroenergetics.hv_electrocution": "%1$s wasn't careful around High Voltage",
   "death.attack.electroenergetics.hv_electrocution.player": "%1$s was thrown into a High Voltage wire by %2$s",
-
   "electroenergetics.display_source.energy_meter": "Total Energy",
   "electroenergetics.display_source.wattmeter": "Active Power",
   "electroenergetics.display_source.voltage": "Voltage",
   "electroenergetics.display_source.amperage": "Amperage",
-
   "effect.electroenergetics.dielectric": "Dielectric",
-
   "electroenergetics.electric_train_sound.modern": "Modern",
   "electroenergetics.electric_train_sound.dc": "Old DC",
   "electroenergetics.subtitle.train_relay": "Train Relay",
   "electroenergetics.subtitle.mcb_close": "Miniature Circuit Breaker Closes",
   "electroenergetics.subtitle.mcb_trip": "Miniature Circuit Breaker Trips",
   "electroenergetics.subtitle.contact_close": "Contact Closes",
-  "electroenergetics.subtitle.contact_open": "Contact Opens"
+  "electroenergetics.subtitle.contact_open": "Contact Opens",
+  "key.categories.electroenergetics": "Electro Energetics",
+  "key.electroenergetics.train_lever_up": "Train lever: notch to Accelerate",
+  "key.electroenergetics.train_lever_down": "Train lever: notch to Reverse",
+  "key.electroenergetics.train_confirm": "Train: acknowledge vigilance",
+  "key.electroenergetics.train_emergency": "Train: emergency brake",
+  "electroenergetics.train.gear.accelerate": "Accelerate",
+  "electroenergetics.train.gear.cruise": "Hold Speed",
+  "electroenergetics.train.gear.coast": "Power Off",
+  "electroenergetics.train.gear.brake": "Brake",
+  "electroenergetics.train.gear.reverse": "Reverse",
+  "electroenergetics.train.hint.confirm": " ack",
+  "electroenergetics.train.status.confirm": "PRESS ACKNOWLEDGE",
+  "electroenergetics.train.status.penalty": "LIMITED 40 km/h",
+  "electroenergetics.train.status.armed": "emergency armed",
+  "electroenergetics.train.status.regen": "regenerating",
+  "electroenergetics.train.status.holding": "holding speed",
+  "electroenergetics.train.status.limited": "power limited",
+  "electroenergetics.train.status.braking": "braking downhill",
+  "electroenergetics.train.status.stopped": "stopped",
+  "electroenergetics.train.row.speed": "Speed",
+  "electroenergetics.train.row.gear": "Lever",
+  "electroenergetics.train.row.gradient": "Gradient",
+  "electroenergetics.train.row.power": "Power",
+  "electroenergetics.train.row.catenary": "Catenary",
+  "electroenergetics.train.row.cars": "Cars",
+  "electroenergetics.train.grade.level": "level",
+  "electroenergetics.train.grade.uphill": "uphill",
+  "electroenergetics.train.grade.downhill": "downhill",
+  "electroenergetics.train.value.regen": "regen",
+  "electroenergetics.train.value.unpowered": "(unpowered)",
+  "electroenergetics.train.value.motorised": "motorised"
 }

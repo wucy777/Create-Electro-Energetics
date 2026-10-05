@@ -1,6 +1,7 @@
 package com.george_vi.electroenergetics.mixins;
 
 import com.george_vi.electroenergetics.client.TrainControlInput;
+import com.george_vi.electroenergetics.client.TrainControlKeys;
 import net.minecraft.client.KeyboardHandler;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
@@ -42,7 +43,7 @@ public class KeyboardHandlerMixin {
         // would think the player is still holding whatever the cab key was bound to.
         if (action == org.lwjgl.glfw.GLFW.GLFW_RELEASE)
             return;
-        if (!TrainControlInput.isCabKey(key))
+        if (!TrainControlKeys.isCabKey(key))
             return;
         if (!TrainControlInput.isDrivingElectricTrain())
             return;
