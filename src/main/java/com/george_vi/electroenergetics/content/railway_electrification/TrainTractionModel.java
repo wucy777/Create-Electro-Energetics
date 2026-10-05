@@ -54,6 +54,44 @@ public final class TrainTractionModel {
     }
 
     /**
+     * Fastest a train may take a curve of this radius without tipping its passengers
+     * over, from the balance of centripetal and gravitational acceleration [m/s].
+     *
+     * <p>{@code v = sqrt(g · r · tan(θ))}, the standard cant-deficiency formula, with
+     * {@code θ} a permitted UNCOMPENSATED lateral acceleration rather than a real
+     * track cant - Minecraft has no cant, so this is the whole of the allowance. At
+     * 0.65 m/s² - about the comfortable limit for standing passengers, and roughly what
+     * a real railway allows before it starts tilting bodies or slowing trains down -
+     * the figures are:
+     *
+     * <pre>
+     *   radius  20 m (a tight Create curve)  ->  11.3 m/s  (41 km/h)
+     *   radius 50 m                          ->  17.9 m/s  (64 km/h)
+     *   radius 100 m                         ->  25.0 m/s  (90 km/h)
+     *   radius 300 m                         ->  43.3 m/s (156 km/h)
+     *   radius 1000 m                        ->  79.1 m/s (285 km/h)
+     * </pre>
+     *
+     * <p>This exists because the mod previously removed Create's curve limit outright
+     * ({@code Train.maxTurnSpeed} returns a flat 14-20 m/s for its own trains, and the
+     * electric override replaced that with the design ceiling). That was reported as a
+     * bug in its own right: people standing on a train were thrown out of it, and the
+     * cause is that Create carries a rider by their contact point, whose per-tick
+     * displacement on a curve scales with the YAW RATE - which a train taking a tight
+     * curve at 100 m/s makes enormous. A curve limit is therefore not a Create
+     * formality to be discarded; it is the thing that keeps a rider on the train.
+     *
+     * <p>Returned in Blocks/Second, like every other speed in this model.
+     */
+    public static double curveSpeedLimit(double radiusBlocks) {
+        if (!(radiusBlocks > 0d) || !Double.isFinite(radiusBlocks))
+            return Double.MAX_VALUE;
+        double lateral = Math.max(
+                CEEConfigs.server().trainValues.electricTrainCurveLateralLimit.get(), 1e-3d);
+        return Math.sqrt(G * radiusBlocks * lateral);
+    }
+
+    /**
      * Whether a train at this speed has arrived at the ceiling it is allowed, so
      * ACCELERATE should hand over to CRUISE.
      *
@@ -703,7 +741,34 @@ public final class TrainTractionModel {
                 // this the penalty would be honoured going uphill and quietly ignored
                 // on a descent, where the set speed exceeds it.
                 double target = Math.min(Math.max(cruiseSpeedMs, 0d), ceiling);
-                if (speed < target - CRUISE_DEADBAND) {
+                // Commanded to STOP, which is how an automatic arrival at a station
+                // finishes: Create's navigation zeroes its target speed once the train is
+                // inside the braking distance.
+                //
+                // This has to be handled as its own case rather than left to the
+                // deadband below, because the deadband is a BAND and the hold branch
+                // inside it applies whatever force equals drag - so a target of zero
+                // would have the motors hold the train at the edge of the band, creeping
+                // towards the platform at a walking pace and never arriving. Braking to a
+                // genuine stand and then holding it is what an approach needs, and it is
+                // also what the driver expects of a lever set to hold zero.
+                if (target < CRUISE_DEADBAND) {
+                    if (speed > 1e-6d) {
+                        leverBrakeForce = -brakeHeading * brakeTotal * mass;
+                        force += leverBrakeForce;
+                        dynamicApplied = dynamicPart;
+                    } else {
+                        // At a stand. Friction only, aimed by brakeHeading exactly as the
+                        // BRAKE position aims it: on the level brakeHeading is zero and
+                        // NOTHING is applied, so a train held at zero has no force on it
+                        // and cannot be walked off by a rounding error; on a gradient it
+                        // pushes against the fall, which is what actually keeps a stopped
+                        // train stopped. No motors here, because a stationary machine has
+                        // no back-EMF and holding with one would draw line current to
+                        // stand still.
+                        force -= brakeHeading * frictionBrake() * mass;
+                    }
+                } else if (speed < target - CRUISE_DEADBAND) {
                     // Holding a speed takes traction; an emergency brake takes that
                     // away and lets the brake do the work instead, exactly as it does
                     // in the other positions.

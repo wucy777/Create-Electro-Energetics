@@ -544,7 +544,8 @@ public class CatenaryModule {
                                         driver.warningStage(),
                                         driver.emergencyArmed, driver.emergencyPenalty,
                                         trainData.cruiseState.ordinal(),
-                                        trainData.regenPower > 0d)
+                                        trainData.regenPower > 0d,
+                                        driver.autoArrive, driver.unmanned)
                         );
                         trainData.lastSyncedVoltage = voltage;
                         trainData.lastSyncedCurrent = totalCurrent;

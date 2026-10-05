@@ -73,5 +73,18 @@ public class CarriageContraptionEntityMixin {
         if (data == null || !data.hasTractionMotors)
             return;
         data.driver.setDriverCabInverted(CabOrientation.isInverted(self, controlsLocalPos));
+
+        // Track the space key for automatic station arrival.
+        //
+        // Recorded here because this is the only place that sees the held keys, and it
+        // is refreshed every tick the driver holds anything at all. Index 4 is jump,
+        // which the controls block reads as "take me to the next station" - the button
+        // Create's own HUD calls the automatic arrival control.
+        //
+        // A countdown rather than a flag: Create stops calling this method entirely once
+        // no key is held, so the release of space is only ever visible as the absence of
+        // further reports, and there is no event to catch. See TrainDriverState.tickSpace.
+        if (heldControls.contains(4))
+            data.driver.setSpaceHeld();
     }
 }

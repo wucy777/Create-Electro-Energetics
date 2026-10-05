@@ -246,5 +246,7 @@
   "electroenergetics.train.lamp.limit": "40",
   "electroenergetics.train.lamp.regen": "REGEN",
   "electroenergetics.train.status.warn": "ACKNOWLEDGE SOON",
-  "electroenergetics.train.status.overdue": "ACKNOWLEDGE NOW - BRAKE APPLIES"
+  "electroenergetics.train.status.overdue": "ACKNOWLEDGE NOW - BRAKE APPLIES",
+  "electroenergetics.train.status.arriving": "arriving at station",
+  "electroenergetics.train.status.unmanned": "NO DRIVER - confirm or take over"
 }

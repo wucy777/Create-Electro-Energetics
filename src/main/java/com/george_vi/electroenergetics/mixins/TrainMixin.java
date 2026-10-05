@@ -13,7 +13,9 @@ import com.george_vi.electroenergetics.content.railway_electrification.sound_eff
 import com.george_vi.electroenergetics.mixin_interfaces.ICEETrainExtension;
 import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
+import com.simibubi.create.content.trains.entity.Carriage;
 import com.simibubi.create.content.trains.entity.Train;
+import com.simibubi.create.content.trains.entity.TravellingPoint;
 import com.simibubi.create.content.trains.graph.DimensionPalette;
 import com.simibubi.create.content.trains.graph.TrackGraph;
 import net.minecraft.core.HolderLookup;
@@ -25,6 +27,7 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
 
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -128,12 +131,72 @@ public class TrainMixin implements ICEETrainExtension {
     public float electroEnergetics$maxTurnSpeed(Operation<Float> original) {
         ElectricTrainData electricTrainData = electroenergetics$electricTrainData;
 
-        // Curves impose no limit in this model, so a turning train is allowed the
-        // same speed as on straight track.
-        if (electricTrainData.isPowered)
-            return electricTrainData.maxSpeed / 20f;
+        if (!electricTrainData.isPowered)
+            return original.call();
 
-        return original.call();
+        // A curve limits speed by PHYSICS, not by Create's flat figure.
+        //
+        // Create returns one constant (14-20 m/s) for every curve in the world, which is
+        // wrong in both directions: a broad sweeping curve is safe far above it, and a
+        // tight one is not safe at 100 m/s. So a radius-based limit is used instead -
+        // v = sqrt(g * r * lateralLimit) - which is the cant-deficiency formula and
+        // needs nothing but the curve's own radius.
+        //
+        // This method used to return the design ceiling outright, on the reasoning that
+        // "curves impose no limit in this model". That was a mistake, and it showed up
+        // as a bug in its own right: people standing on a train were thrown out of it on
+        // curves at speed. Create carries a standing rider by their CONTACT POINT, whose
+        // per-tick displacement scales with the yaw rate - so removing the curve limit
+        // removes the very thing that keeps a rider aboard. A curve limit is not
+        // paperwork to be discarded; it is what makes the ride survivable.
+        //
+        // Falls back to Create's own figure when the radius cannot be read, which is the
+        // conservative direction: an unknown curve is treated as a tight one.
+        Train self = (Train) (Object) this;
+        double radius = leadingCurveRadius(self);
+        if (!(radius > 0d))
+            return original.call();
+
+        double limit = TrainTractionModel.curveSpeedLimit(radius);
+        // Create returns Blocks/Tick here (its constants are m/s divided by 20).
+        return (float) Math.min(limit / 20d, electricTrainData.maxSpeed / 20f);
+    }
+
+    /**
+     * Radius of the curve the train is entering or on, or {@code 0} when it is on
+     * straight track or the geometry cannot be read.
+     *
+     * <p>Both ends are checked, not just the leading one: a train's rear carriage is
+     * still on a curve after its nose has straightened out, and at these speeds the
+     * difference is most of the consist. A limit that only looked ahead would let a long
+     * train straighten up while its tail was still swinging.
+     *
+     * <p>Read from the track edge, which is where Create keeps the data
+     * ({@code TrackEdge.getTurn()} returns the {@code BezierConnection}, whose
+     * {@code getRadius()} is the figure wanted). Guarded throughout, because this runs
+     * on the train's tick and a partially loaded graph is a normal state, not an error -
+     * failing to Create's own limit is always safe.
+     */
+    private static double leadingCurveRadius(Train train) {
+        try {
+            if (train.carriages.isEmpty())
+                return 0d;
+            double smallest = 0d;
+            for (Carriage carriage : List.of(train.carriages.get(0),
+                    train.carriages.get(train.carriages.size() - 1))) {
+                for (TravellingPoint point : List.of(carriage.getLeadingPoint(),
+                        carriage.getTrailingPoint())) {
+                    if (point.edge == null || !point.edge.isTurn())
+                        continue;
+                    double r = point.edge.getTurn().getRadius();
+                    if (r > 0d && (smallest == 0d || r < smallest))
+                        smallest = r;
+                }
+            }
+            return smallest;
+        } catch (Throwable ignored) {
+            return 0d;
+        }
     }
 
     /**
@@ -197,7 +260,16 @@ public class TrainMixin implements ICEETrainExtension {
         // control() and from Navigation at points that do not line up with the
         // train's own tick, so integrating there as well would double-apply the
         // law and make the train accelerate at twice the rate.
-        if (data.hasTractionMotors && data.driver.isDriven()) {
+        //
+        // underGearControl() rather than isDriven(): a train whose driver has walked
+        // away stays with this mode, running the lever position that was left set.
+        // Handing it back to Create here is what used to brake a driverless electric
+        // train to a halt at once - Create's passive slowdown doesn't know about the
+        // catenary, so it recovered nothing and stopped the train for no reason a
+        // driver would recognise. The vigilance clock still runs while unmanned and
+        // still brakes the train at TRIP_TICKS, so this defers the stop, it does not
+        // remove it.
+        if (data.hasTractionMotors && data.driver.underGearControl()) {
             applyGearLaw(self, data);
             return;
         }
@@ -232,6 +304,32 @@ public class TrainMixin implements ICEETrainExtension {
         // the alarm is cancelled.
         TrainGear effectiveGear = st.vigilanceTripped ? TrainGear.BRAKE : st.gear;
 
+        // AUTOMATIC ARRIVAL: Create's navigation commands the speed, not the lever.
+        //
+        // While the driver holds space with a destination set, Create's Navigation runs
+        // its own braking curve - it decides a target speed from the remaining distance
+        // and the braking distance, and stops the train exactly at the platform. The
+        // lever must NOT also be obeyed during that, or an ACCELERATE position would
+        // command traction straight through the station.
+        //
+        // It is routed through CRUISE rather than given its own branch because CRUISE
+        // already IS an approach controller: hold the commanded speed with traction up
+        // to the motors' limit, coast inside the deadband, brake above it, and recover
+        // energy on the way down. Feeding it Navigation's target each tick means the
+        // arrival inherits the real power-limited acceleration and the regenerative
+        // brake instead of Create's flat friction stop, with no second law to maintain.
+        //
+        // The command is taken as a MAGNITUDE and the direction is left to the existing
+        // heading logic. Navigation's targetSpeed is signed (speedMod), but a train on
+        // an approach is already travelling the way it intends to arrive, and feeding a
+        // negative magnitude into a mirror-symmetric law would cancel the mirror rather
+        // than reverse the train - the mirror already carries "which way is forward".
+        double cruiseCommand = st.cruiseSpeed;
+        if (st.autoArrive && !st.vigilanceTripped) {
+            effectiveGear = TrainGear.CRUISE;
+            cruiseCommand = Math.abs(self.targetSpeed);
+        }
+
         // Release the station before commanding traction.
         //
         // Create does this inside approachTargetSpeed (if (manualTick)
@@ -243,7 +341,11 @@ public class TrainMixin implements ICEETrainExtension {
         // Only for a gear that commands movement: selecting the brake or cutting the
         // power at a platform should leave the train checked in, which is what lets
         // the schedule resume and what makes the arrival look like an arrival.
-        if (effectiveGear.appliesTraction() && self.getCurrentStation() != null)
+        //
+        // Never while arriving automatically: releasing the station there would undo
+        // the arrival the moment the train touched the platform, and the train would
+        // pull straight back out - a station the driver cannot actually stop at.
+        if (!st.autoArrive && effectiveGear.appliesTraction() && self.getCurrentStation() != null)
             self.leaveStation();
 
         // WHICH WAY THE DRIVING CAB FACES.
@@ -280,7 +382,7 @@ public class TrainMixin implements ICEETrainExtension {
 
         double a = TrainTractionModel.gearAcceleration(
                 signedSpeedMs, gradeToPlusX, carriages, data.powerScale,
-                effectiveGear, st.cruiseSpeed,
+                effectiveGear, cruiseCommand,
                 TrainTractionModel.frictionBrake(),
                 st.emergencyTicks > 0 && st.emergencyArmed,
                 st.emergencyPenalty, data.gearStep);
@@ -313,7 +415,7 @@ public class TrainMixin implements ICEETrainExtension {
         // its own train, and the client learns of it on the next gear sync. The driver
         // sees the handle move to CRUISE, which is the honest report of what the train
         // is now doing.
-        if (st.gear == TrainGear.ACCELERATE && !st.vigilanceTripped
+        if (st.gear == TrainGear.ACCELERATE && !st.vigilanceTripped && !st.autoArrive
                 && TrainTractionModel.atDesignCeiling(Math.abs(next) * 20d, carriages,
                         st.emergencyPenalty)) {
             st.gear = TrainGear.CRUISE;
@@ -378,7 +480,13 @@ public class TrainMixin implements ICEETrainExtension {
         // the regeneration report once every five ticks, so a braking train drew
         // its recovered power in a stutter. The gear law owns both the speed and
         // the flag for a driven train, so this method leaves both alone.
-        if (data.hasTractionMotors && data.driver.isDriven())
+        //
+        // underGearControl() and not isDriven(), for the same reason as the wrap above:
+        // an unmanned train's speed is written by the gear law, and if that method is
+        // allowed to run as well then BOTH write train.speed every tick and the train
+        // accelerates at twice the correct rate. This is the second half of the pair -
+        // missing it would have made the unmanned feature look like a physics bug.
+        if (data.hasTractionMotors && data.driver.underGearControl())
             return;
 
         // Cleared here, once, before any branch can return early. The flag is read

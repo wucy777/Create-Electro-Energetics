@@ -44,6 +44,8 @@ import java.util.UUID;
  * @param emergencyPenalty whether the post-emergency speed cap is in force
  * @param cruiseState      what cruise decided, as a {@code CruiseState} ordinal
  * @param regen            whether the motors are feeding the line right now
+ * @param autoArrive       Create's navigation is running an automatic station arrival
+ * @param unmanned         the driver has left the controls and the clock is running
  */
 public record SyncTrainGaugeDataPacket(UUID trainId, double voltage, double current,
                                        float maxSpeed, float power, double grade,
@@ -52,7 +54,7 @@ public record SyncTrainGaugeDataPacket(UUID trainId, double voltage, double curr
                                        int gear, boolean confirmDue, int vigilanceStage,
                                        boolean emergencyArmed,
                                        boolean emergencyPenalty, int cruiseState,
-                                       boolean regen)
+                                       boolean regen, boolean autoArrive, boolean unmanned)
         implements ClientboundPacketPayload {
 
     public static final StreamCodec<ByteBuf, SyncTrainGaugeDataPacket> STREAM_CODEC = new StreamCodec<>() {
@@ -70,10 +72,10 @@ public record SyncTrainGaugeDataPacket(UUID trainId, double voltage, double curr
             float powerPerCarriage = buffer.readFloat();
             boolean manualFullSpeed = buffer.readBoolean();
             int gear = buffer.readByte();
-            // Packed into one byte, and unchanged in size from before the vigilance
-            // escalation was added: the four flags keep bits 0-3 and the two-bit
-            // warning stage takes bits 4-5, which were unused. This rides a per-train
-            // broadcast, so not growing it is the point.
+            // Packed into one byte, and STILL unchanged in size: the four flags keep
+            // bits 0-3, the two-bit warning stage takes bits 4-5, and automatic arrival
+            // and unmanned take the last two. This rides a per-train broadcast, so not
+            // growing it is the point - and the byte was already being sent.
             int flags = buffer.readUnsignedByte();
             int cruiseState = buffer.readByte();
             boolean confirmDue = (flags & 1) != 0;
@@ -81,10 +83,12 @@ public record SyncTrainGaugeDataPacket(UUID trainId, double voltage, double curr
             boolean emergencyPenalty = (flags & 4) != 0;
             boolean regen = (flags & 8) != 0;
             int vigilanceStage = (flags >> 4) & 3;
+            boolean autoArrive = (flags & 64) != 0;
+            boolean unmanned = (flags & 128) != 0;
             return new SyncTrainGaugeDataPacket(trainId, voltage, current, maxSpeed, power,
                     grade, powered, carriages, motorCars, powerPerCarriage, manualFullSpeed,
                     gear, confirmDue, vigilanceStage, emergencyArmed, emergencyPenalty,
-                    cruiseState, regen);
+                    cruiseState, regen, autoArrive, unmanned);
         }
 
         @Override
@@ -103,7 +107,8 @@ public record SyncTrainGaugeDataPacket(UUID trainId, double voltage, double curr
             buffer.writeByte(p.gear);
             int flags = (p.confirmDue ? 1 : 0) | (p.emergencyArmed ? 2 : 0)
                     | (p.emergencyPenalty ? 4 : 0) | (p.regen ? 8 : 0)
-                    | ((p.vigilanceStage & 3) << 4);
+                    | ((p.vigilanceStage & 3) << 4)
+                    | (p.autoArrive ? 64 : 0) | (p.unmanned ? 128 : 0);
             buffer.writeByte(flags);
             buffer.writeByte(p.cruiseState);
         }
@@ -116,7 +121,7 @@ public record SyncTrainGaugeDataPacket(UUID trainId, double voltage, double curr
         TrainHudData.update(trainId, maxSpeed, power, (float) voltage, grade, powered,
                 carriages, motorCars, powerPerCarriage, manualFullSpeed);
         TrainHudData.updateGear(trainId, gear, confirmDue, vigilanceStage, emergencyArmed,
-                emergencyPenalty, cruiseState, regen);
+                emergencyPenalty, cruiseState, regen, autoArrive, unmanned);
     }
 
     @Override

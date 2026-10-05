@@ -59,10 +59,13 @@ public final class TrainHudData {
      * @param emergencyPenalty the speed cap from a previous emergency use is in force
      * @param cruiseState      what cruise is doing, a {@code CruiseState} ordinal
      * @param regen            the motors are feeding the line right now
+     * @param autoArrive       Create's navigation is running an automatic station arrival
+     * @param unmanned         the driver has left the controls and the clock is running
      */
     public record GearState(int gear, boolean confirmDue, int vigilanceStage,
                             boolean emergencyArmed, boolean emergencyPenalty,
-                            int cruiseState, boolean regen) {}
+                            int cruiseState, boolean regen,
+                            boolean autoArrive, boolean unmanned) {}
 
     private static final Map<UUID, GearState> GEARS = new ConcurrentHashMap<>();
 
@@ -77,9 +80,10 @@ public final class TrainHudData {
 
     public static void updateGear(UUID trainId, int gear, boolean confirmDue, int vigilanceStage,
                                   boolean emergencyArmed, boolean emergencyPenalty,
-                                  int cruiseState, boolean regen) {
+                                  int cruiseState, boolean regen,
+                                  boolean autoArrive, boolean unmanned) {
         GEARS.put(trainId, new GearState(gear, confirmDue, vigilanceStage, emergencyArmed,
-                emergencyPenalty, cruiseState, regen));
+                emergencyPenalty, cruiseState, regen, autoArrive, unmanned));
     }
 
     /** Lever state, or {@code null} when the server has not sent one. */

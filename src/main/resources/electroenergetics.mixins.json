@@ -22,12 +22,12 @@
     "defaultRequire": 1
   },
   "mixins": [
+    "AbstractContraptionEntityMixin",
     "BlockStateBaseMixin",
     "CarriageContraptionEntityMixin",
     "CarriageContraptionMixin",
     "CarriageMixin",
     "ComparatorBlockMixin",
-    "ContraptionColliderMixin",
     "FluidPropagatorMixin",
     "LevelChunkMixin",
     "LivingEntityMixin",

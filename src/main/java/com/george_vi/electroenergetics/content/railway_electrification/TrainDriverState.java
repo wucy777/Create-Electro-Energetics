@@ -67,24 +67,86 @@ public class TrainDriverState {
      */
     public int driverTicks = 0;
 
-    /** True while a driver is at the controls, i.e. the gear law owns the train. */
+    /** True while a driver is at the controls. */
     public boolean isDriven() {
         return driverTicks > 0;
+    }
+
+    /**
+     * True while a train whose driver has walked away is still run by the gear law.
+     *
+     * <p>This exists so that leaving the controls does not hand the train back to
+     * Create's control scheme. It used to: with no driver the gear law stopped running
+     * and Create's passive slowdown took the train, braking it to a halt immediately and
+     * with no regeneration, because that path is not an electric brake - it is a plain
+     * friction stop that knows nothing about the catenary. An electric train that has
+     * its own traction model should be driven by that model whether or not somebody is
+     * standing at the desk.
+     *
+     * <p>The behaviour while unmanned is exactly "the driver is still there but pressing
+     * nothing": the lever keeps the position it was left in, nothing new is commanded,
+     * and the only thing that changes is that the vigilance clock keeps running. When it
+     * reaches {@link #TRIP_TICKS} the train brakes to a stand and parks in the brake
+     * position, which is the fail-safe a real train has - and until then another driver
+     * can take the controls and carry on, which is the point of leaving the window open.
+     *
+     * <p>Only ever latched for a train that a player has actually driven (see
+     * {@link #wasDriven}), and released when automation takes the train over, so a
+     * scheduled train is never captured by this mode.
+     */
+    public boolean unmanned = false;
+
+    /**
+     * Whether a player has ever taken these controls, so that walking away should leave
+     * the train unmanned rather than handing it back to Create.
+     *
+     * <p>The distinguishing test matters: a train that nobody has ever driven - a
+     * schedule-driven one, or one placed on the track and left - must NOT become
+     * unmanned, or this mode would seize every automated train on the network and hold
+     * it in whatever lever position it happened to have.
+     */
+    public boolean wasDriven = false;
+
+    /**
+     * Whether the gear law owns this train's speed.
+     *
+     * <p>The single question every caller should ask, rather than {@link #isDriven}: a
+     * driverless electric train is still this mode's responsibility.
+     */
+    public boolean underGearControl() {
+        return isDriven() || unmanned;
+    }
+
+    /** Hand the train back to Create's automation, so this mode stops driving it. */
+    public void releaseUnmanned() {
+        unmanned = false;
     }
 
     /** Record who is driving, or {@code null} for nobody. Called once a tick. */
     public void setDriverPresent(java.util.UUID id) {
         driverId = id;
-        if (id != null)
+        if (id != null) {
             driverTicks = 5;
+            wasDriven = true;
+            // Somebody is at the controls again, whether or not it is the same person.
+            // Clearing here is what lets a second driver take over inside the window.
+            unmanned = false;
+        }
     }
 
     /** Called each train tick, before the motion is integrated. */
     public void tickDriverPresence() {
-        if (driverTicks > 0)
+        if (driverTicks > 0) {
             driverTicks--;
-        if (driverTicks == 0)
-            driverId = null;
+            if (driverTicks == 0) {
+                driverId = null;
+                // Only on the TRANSITION, not every tick the controls are empty:
+                // re-latching unconditionally would make releaseUnmanned a no-op and a
+                // scheduled train could never escape this mode.
+                if (wasDriven)
+                    unmanned = true;
+            }
+        }
     }
 
     /**
@@ -113,6 +175,52 @@ public class TrainDriverState {
     /** Whether this player is the one driving, so may command the lever. */
     public boolean isDriver(java.util.UUID id) {
         return id != null && id.equals(driverId);
+    }
+
+    // ------------------------------------------------------------------
+    // Automatic station arrival (Create's "hold space" mode)
+    // ------------------------------------------------------------------
+
+    /**
+     * Whether automatic arrival is in progress.
+     *
+     * <p>While this is set, Create's navigation owns the target speed instead of the
+     * lever, which is the whole point: the driver holds space, picks a station, and the
+     * train brakes at the right distance for it. The lever's position is remembered
+     * rather than obeyed, because obeying it is the bug this exists to avoid - an
+     * ACCELERATE lever would otherwise command traction against the approach and drive
+     * straight through the platform.
+     */
+    public boolean autoArrive = false;
+
+    /** The lever position to restore if the driver cancels before arriving. */
+    public TrainGear autoArriveGear = TrainGear.BRAKE;
+
+    /**
+     * Ticks since the controls last reported the space key held.
+     *
+     * <p>A countdown rather than a flag because Create stops calling
+     * {@code CarriageContraptionEntity.control} the moment no key is held at all - so
+     * there is no "space was released" event to listen for, only the absence of
+     * further reports. A short grace, the same idea as {@link #driverTicks}, keeps a
+     * dropped packet from cancelling an approach mid-brake.
+     */
+    public int spaceTicks = 0;
+
+    /** Record that the space key is held, refreshing the grace. Called from control(). */
+    public void setSpaceHeld() {
+        spaceTicks = 5;
+    }
+
+    /** Called each train tick, before the motion is integrated. */
+    public void tickSpace() {
+        if (spaceTicks > 0)
+            spaceTicks--;
+    }
+
+    /** Whether the driver appears to be holding space, within the grace period. */
+    public boolean isSpaceHeld() {
+        return spaceTicks > 0;
     }
 
     /** Speed cruise is holding, in Blocks/Second. Captured when cruise is selected. */

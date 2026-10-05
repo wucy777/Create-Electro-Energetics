@@ -209,6 +209,25 @@ public class GameEvents {
 
             driver.tickDriverPresence();
 
+            // A train under a running SCHEDULE is Create's to drive, not this mode's.
+            //
+            // Without this, a scheduled electric train would be captured the moment a
+            // player happened to touch its controls and then walked away: wasDriven is
+            // latched for life, so the train would stay "unmanned" and the gear law
+            // would own its speed for the rest of the save - obeying whatever lever
+            // position was left over instead of the schedule, and stopping itself every
+            // 36 seconds. That is exactly the automation this mode must leave alone.
+            //
+            // Checked every tick rather than latched, because a schedule can be started
+            // or paused at any time - a conductor boarding, a schedule item edit - and
+            // the moment one is running the train must go back to Create. That is also
+            // what makes handing a train over to automation work at all.
+            //
+            // paused == false means the schedule is running. A train with no schedule has
+            // a paused runtime, so an ordinary hand-driven train is unaffected.
+            if (train.runtime != null && !train.runtime.paused)
+                driver.releaseUnmanned();
+
             // Vigilance: one escalating clock, from zero since the last acknowledgement.
             //
             //   20 s  amber warning (the prompt is coming)
@@ -220,30 +239,64 @@ public class GameEvents {
             // warning - important, because the previous two-counter design had a
             // separate prompt timer that could disagree with the warning clock.
             //
-            // Only while actually driven: an unmanned train is already parked in some
-            // lever position and nagging about it would be pointless.
-            if (driver.isDriven()) {
-                // The trip brake stays on until the train is at a stand, so a train that
-                // cannot stop on its gradient keeps the brake applied rather than being
-                // released into a roll by a timer. The tick count is only a backstop.
-                if (driver.vigilanceTripped) {
-                    if (Math.abs(train.speed) < 1e-4d || ++driver.tripTicks > TrainDriverState.TRIP_BRAKE_TICKS) {
-                        driver.clearTrip();
-                        driver.tripTicks = 0;
-                    }
-                } else if (driver.confirmWaiting < TrainDriverState.TRIP_TICKS) {
+            // Run while underGearControl(), which includes an UNMANNED train. That is
+            // the whole point of leaving the clock running: a driver who walks away is
+            // exactly as unresponsive as one who fell asleep, and the safety device
+            // cannot tell the difference - so it must treat both the same and stop the
+            // train. Resetting on the driver's absence would defeat the device entirely.
+            //
+            // And only while the train is MOVING. A stationary train cannot be made
+            // safer by this device, so a stopped one stops counting - which is what a
+            // real vigilance device does, and it is what fixes the reported bug: a
+            // parked train ran the clock to 36 s, tripped, and because the trip clears
+            // on the next tick once the train is at a stand, the only visible effect was
+            // that the lever the driver had selected was silently overwritten with the
+            // brake - every 36 seconds, forever. Selecting REVERSE to shunt and then
+            // waiting at a signal lost the gear selection for no reason the driver could
+            // see. Counting only while moving also means the clock measures time spent
+            // RUNNING unattended, which is the hazard the device exists for.
+            //
+            // The threshold matches the "at a stand" tests used elsewhere (the trip
+            // release and the end-of-track park), so all three agree on what stopped
+            // means. A train creeping at the 1e-4 Blocks/tick the tests treat as rest is
+            // not a train that needs a vigilance alarm.
+            boolean moving = Math.abs(train.speed) > 1e-4d;
+            boolean owned = driver.underGearControl();
+
+            // Releasing a trip is NOT gated on moving: the trip's job is to stop the
+            // train, so once the train is at a stand the trip has succeeded and must be
+            // released. Gating this on `moving` would latch it on a stopped train
+            // forever - the trip forces the brake, so the train could never start moving
+            // again, and nothing could ever clear the condition that was holding it.
+            if (driver.vigilanceTripped && owned) {
+                // The backstop covers a train that somehow cannot reach a stand, so the
+                // brake is not held on forever by a gradient it cannot stop on.
+                if (!moving || ++driver.tripTicks > TrainDriverState.TRIP_BRAKE_TICKS) {
+                    driver.clearTrip();
+                    driver.tripTicks = 0;
+                }
+            } else if (owned && moving) {
+                if (driver.confirmWaiting < TrainDriverState.TRIP_TICKS) {
                     driver.confirmWaiting++;
                 } else {
                     driver.trip();
                     driver.tripTicks = 0;
                 }
-            } else {
-                // Nobody is driving: drop the clock and any trip. A train with no driver
-                // must not stay pinned by a warning that was raised for someone else.
+            } else if (!owned) {
+                // Genuinely nobody's train, and nobody ever drove it: a schedule-driven
+                // one, or one parked up. Drop the clock and any trip, because a train
+                // this mode does not own must not be pinned by a warning raised for
+                // somebody else - and must not trip itself every 36 seconds forever.
                 driver.confirmWaiting = 0;
                 driver.clearTrip();
                 driver.tripTicks = 0;
             }
+            // A stopped train this mode owns keeps its clock where it is rather than
+            // resetting it: standing at a platform for a minute should not hand the
+            // driver a fresh 36 seconds the moment they pull away again. Holding the
+            // value rather than clearing it is what keeps a long station dwell from
+            // being a free reset, and it is also what makes the device honest - it
+            // measures running time unattended, and the count carries over.
 
             // Emergency brake application, and the speed cap it leaves behind until
             // the next station call.
@@ -279,6 +332,45 @@ public class GameEvents {
                 driver.blockedParked = false;   // moved again: allow a future park
             }
 
+            // Automatic station arrival, the driver holding space with a destination.
+            //
+            // Create's Navigation runs the approach and stops the train at the platform;
+            // the gear law follows Navigation's commanded speed while this is set (see
+            // TrainMixin). Two transitions have to be handled here, because this is the
+            // once-per-tick hook that sees both the controls and the train's state:
+            //
+            //   ENTER  the driver holds space and Create has started a navigation
+            //   LEAVE  the space key is released, or the train has arrived
+            //
+            // On release before arrival the lever is restored, so the driver gets the
+            // train back exactly as they left it and can carry on - cancelling an
+            // approach should not also silently change the gear.
+            //
+            // On arrival the lever is dropped to the BRAKE and the train is parked,
+            // which is what stops the reported bug: with the lever left in ACCELERATE,
+            // releasing space at the platform pulled the train straight back out again,
+            // because the gear law saw a traction position and obeyed it. Parking in the
+            // brake means departure needs an explicit gear selection, which is also what
+            // a real train does.
+            driver.tickSpace();
+            boolean arriving = driver.isSpaceHeld() && arrivingAtStation(train);
+
+            if (arriving && !driver.autoArrive) {
+                driver.autoArrive = true;
+                // Remember what the driver had selected, so cancelling can restore it.
+                driver.autoArriveGear = driver.gear;
+            } else if (driver.autoArrive && !arriving) {
+                // Arrived, or cancelled. Distinguishing them decides whether the lever is
+                // restored or dropped: Create clears the destination on arrival, so a
+                // train now sitting at a station it was navigating to has arrived.
+                boolean arrived = train.getCurrentStation() != null;
+                driver.autoArrive = false;
+                if (arrived)
+                    driver.failSafe();
+                else
+                    driver.gear = driver.autoArriveGear;
+            }
+
             // The lever is deliberately NOT forced to the brake while a station is
             // held. An earlier version did that to stop a train being dispatched
             // still set to shunt, but it deadlocked instead: it fought the depart
@@ -289,6 +381,21 @@ public class GameEvents {
             // impossible. Leaving the lever alone is also harmless: reverse is capped
             // at a walking pace and takes an explicit selection.
         }
+    }
+
+    /**
+     * Whether Create is currently navigating this train to a station.
+     *
+     * <p>The test is simply "a destination is set". That is what the space key does
+     * when held away from a station - it starts a navigation to the nearest station the
+     * train can approach - and it is also the state the space key is obeyed in above,
+     * which is what keeps the two in step. A train already sitting at a station has no
+     * destination, so holding space there does not re-enter automatic arrival: that
+     * case is the "already arrived" prompt, and re-arming would restart a journey the
+     * driver has just completed.
+     */
+    private static boolean arrivingAtStation(Train train) {
+        return train.navigation != null && train.navigation.destination != null;
     }
 
     /**
