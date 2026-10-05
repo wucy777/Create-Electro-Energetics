@@ -39,6 +39,7 @@ import java.util.UUID;
  *                         {@code ElectricManualSpeed}).
  * @param gear             the lever position, as a {@code TrainGear} ordinal
  * @param confirmDue       whether the vigilance prompt is waiting for an answer
+ * @param vigilanceStage   how overdue that answer is: 0 none, 1 amber, 2 red
  * @param emergencyArmed   whether the emergency brake is available/armed
  * @param emergencyPenalty whether the post-emergency speed cap is in force
  * @param cruiseState      what cruise decided, as a {@code CruiseState} ordinal
@@ -48,7 +49,8 @@ public record SyncTrainGaugeDataPacket(UUID trainId, double voltage, double curr
                                        float maxSpeed, float power, double grade,
                                        boolean powered, int carriages, int motorCars,
                                        float powerPerCarriage, boolean manualFullSpeed,
-                                       int gear, boolean confirmDue, boolean emergencyArmed,
+                                       int gear, boolean confirmDue, int vigilanceStage,
+                                       boolean emergencyArmed,
                                        boolean emergencyPenalty, int cruiseState,
                                        boolean regen)
         implements ClientboundPacketPayload {
@@ -68,18 +70,21 @@ public record SyncTrainGaugeDataPacket(UUID trainId, double voltage, double curr
             float powerPerCarriage = buffer.readFloat();
             boolean manualFullSpeed = buffer.readBoolean();
             int gear = buffer.readByte();
-            // Packed into one byte: the lever state is four flags and a two-bit
-            // enum, and this rides a per-train broadcast, so it is worth keeping
-            // to a single byte rather than five.
+            // Packed into one byte, and unchanged in size from before the vigilance
+            // escalation was added: the four flags keep bits 0-3 and the two-bit
+            // warning stage takes bits 4-5, which were unused. This rides a per-train
+            // broadcast, so not growing it is the point.
             int flags = buffer.readUnsignedByte();
             int cruiseState = buffer.readByte();
             boolean confirmDue = (flags & 1) != 0;
             boolean emergencyArmed = (flags & 2) != 0;
             boolean emergencyPenalty = (flags & 4) != 0;
             boolean regen = (flags & 8) != 0;
+            int vigilanceStage = (flags >> 4) & 3;
             return new SyncTrainGaugeDataPacket(trainId, voltage, current, maxSpeed, power,
                     grade, powered, carriages, motorCars, powerPerCarriage, manualFullSpeed,
-                    gear, confirmDue, emergencyArmed, emergencyPenalty, cruiseState, regen);
+                    gear, confirmDue, vigilanceStage, emergencyArmed, emergencyPenalty,
+                    cruiseState, regen);
         }
 
         @Override
@@ -97,7 +102,8 @@ public record SyncTrainGaugeDataPacket(UUID trainId, double voltage, double curr
             buffer.writeBoolean(p.manualFullSpeed);
             buffer.writeByte(p.gear);
             int flags = (p.confirmDue ? 1 : 0) | (p.emergencyArmed ? 2 : 0)
-                    | (p.emergencyPenalty ? 4 : 0) | (p.regen ? 8 : 0);
+                    | (p.emergencyPenalty ? 4 : 0) | (p.regen ? 8 : 0)
+                    | ((p.vigilanceStage & 3) << 4);
             buffer.writeByte(flags);
             buffer.writeByte(p.cruiseState);
         }
@@ -109,7 +115,7 @@ public record SyncTrainGaugeDataPacket(UUID trainId, double voltage, double curr
         ClientTrainGaugeData.update(trainId, voltage, current);
         TrainHudData.update(trainId, maxSpeed, power, (float) voltage, grade, powered,
                 carriages, motorCars, powerPerCarriage, manualFullSpeed);
-        TrainHudData.updateGear(trainId, gear, confirmDue, emergencyArmed,
+        TrainHudData.updateGear(trainId, gear, confirmDue, vigilanceStage, emergencyArmed,
                 emergencyPenalty, cruiseState, regen);
     }
 

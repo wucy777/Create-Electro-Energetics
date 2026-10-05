@@ -540,7 +540,8 @@ public class CatenaryModule {
                                                 .electricTrainPowerPerCarriage.getF(),
                                         CEEConfigs.server().trainValues
                                                 .electricTrainManualFullSpeed.get(),
-                                        driver.gear.ordinal(), driver.confirmWaiting >= 0,
+                                        driver.gear.ordinal(), driver.warningStage() > 0,
+                                        driver.warningStage(),
                                         driver.emergencyArmed, driver.emergencyPenalty,
                                         trainData.cruiseState.ordinal(),
                                         trainData.regenPower > 0d)

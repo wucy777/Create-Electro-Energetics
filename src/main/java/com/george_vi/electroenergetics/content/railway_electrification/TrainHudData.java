@@ -50,13 +50,19 @@ public final class TrainHudData {
      *
      * @param gear             lever position, a {@code TrainGear} ordinal
      * @param confirmDue       the vigilance prompt is waiting; the driver must press
+     * @param vigilanceStage   0 none, 1 amber, 2 red - how overdue the acknowledgement
+     *                         is. Sent rather than derived from the other flags because
+     *                         the escalation is the whole point of the warning: an
+     *                         amber lamp and a red one mean different things and the
+     *                         client cannot work out which from a boolean.
      * @param emergencyArmed   the emergency brake is available
      * @param emergencyPenalty the speed cap from a previous emergency use is in force
      * @param cruiseState      what cruise is doing, a {@code CruiseState} ordinal
      * @param regen            the motors are feeding the line right now
      */
-    public record GearState(int gear, boolean confirmDue, boolean emergencyArmed,
-                            boolean emergencyPenalty, int cruiseState, boolean regen) {}
+    public record GearState(int gear, boolean confirmDue, int vigilanceStage,
+                            boolean emergencyArmed, boolean emergencyPenalty,
+                            int cruiseState, boolean regen) {}
 
     private static final Map<UUID, GearState> GEARS = new ConcurrentHashMap<>();
 
@@ -69,10 +75,10 @@ public final class TrainHudData {
                 carriages, motorCars, powerPerCarriage, manualFullSpeed));
     }
 
-    public static void updateGear(UUID trainId, int gear, boolean confirmDue,
+    public static void updateGear(UUID trainId, int gear, boolean confirmDue, int vigilanceStage,
                                   boolean emergencyArmed, boolean emergencyPenalty,
                                   int cruiseState, boolean regen) {
-        GEARS.put(trainId, new GearState(gear, confirmDue, emergencyArmed,
+        GEARS.put(trainId, new GearState(gear, confirmDue, vigilanceStage, emergencyArmed,
                 emergencyPenalty, cruiseState, regen));
     }
 

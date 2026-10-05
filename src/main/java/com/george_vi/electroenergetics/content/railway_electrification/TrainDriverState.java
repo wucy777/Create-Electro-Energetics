@@ -10,16 +10,40 @@ package com.george_vi.electroenergetics.content.railway_electrification;
  */
 public class TrainDriverState {
 
-    /** Seconds between driver-confirmation prompts, matching a real vigilance timer. */
+    /**
+     * Seconds between driver-confirmation prompts, matching a real vigilance timer.
+     *
+     * <p>This is the interval between prompts while the driver IS acknowledging. The
+     * warning escalation below starts partway through it rather than after it, which is
+     * what makes the timer a warning system rather than a trap: the driver is told the
+     * prompt is coming before it becomes overdue.
+     */
     public static final int CONFIRM_INTERVAL_TICKS = 30 * 20;
 
     /**
-     * How long a prompt may go unanswered before the lever drops to the brake.
-     * The prompt appears at the interval and the driver then has this long to
-     * acknowledge it; overshooting applies the brake, as a real vigilance device
-     * does, rather than simply nagging.
+     * When the amber warning comes on [ticks since the last acknowledgement].
+     *
+     * <p>The requested escalation: amber from 20 s, red from 30 s, trip at 36 s. The
+     * three figures are deliberately tight together - a real vigilance device gives the
+     * driver a few seconds of escalating alarm, not a minute - and the amber stage is
+     * the long one, which is where a driver who is paying attention notices and acts.
      */
-    public static final int CONFIRM_GRACE_TICKS = 10 * 20;
+    public static final int WARN_AMBER_TICKS = 20 * 20;
+
+    /** When the warning turns red: the prompt is now overdue [ticks]. */
+    public static final int WARN_RED_TICKS = 30 * 20;
+
+    /**
+     * When the vigilance device trips: it brakes the train to a stand and drops the
+     * lever to the brake [ticks].
+     *
+     * <p>Note this is a brake application, NOT the emergency brake. Chosen explicitly:
+     * a forgotten acknowledgement should stop the train, but it should not also cost
+     * the driver the 40 km/h penalty for the rest of the leg, which is what pressing
+     * the emergency brake does. Wanting the trip to be recoverable is the whole reason
+     * it is not wired to the emergency path.
+     */
+    public static final int TRIP_TICKS = 36 * 20;
 
     /** The lever. Defaults to the brake, which is where every failure lands. */
     public TrainGear gear = TrainGear.BRAKE;
@@ -63,6 +87,29 @@ public class TrainDriverState {
             driverId = null;
     }
 
+    /**
+     * Whether the cab the driver is standing at faces the opposite way along the
+     * consist, so its "forward" is the train's -x.
+     *
+     * <p>This exists because a train can have a cab at each end, and the two cabs
+     * command opposite directions. Create already handles this for its own controls
+     * - {@code CarriageContraptionEntity.control} computes {@code inverted} from the
+     * controls block's FACING against the contraption's initial orientation and then
+     * does {@code if (inverted) targetSpeed *= -1} - but the lever does not go through
+     * that code path at all, so without this the far cab's lever was mirrored and
+     * every position did the opposite of what it said.
+     *
+     * <p>Written once a tick from the carriage the driver is at the controls of, so it
+     * is the same authority as {@link #driverId}. Defaults to false, so a train with no
+     * driver - or one whose cab cannot be determined - behaves as it did before.
+     */
+    public boolean driverCabInverted = false;
+
+    /** Record which way the driving cab faces. Called once a tick with the driver. */
+    public void setDriverCabInverted(boolean inverted) {
+        driverCabInverted = inverted;
+    }
+
     /** Whether this player is the one driving, so may command the lever. */
     public boolean isDriver(java.util.UUID id) {
         return id != null && id.equals(driverId);
@@ -77,11 +124,46 @@ public class TrainDriverState {
     /** Whether the emergency brake has been fired. Locks out traction until the next station. */
     public boolean emergencyPenalty = false;
 
-    /** Ticks until the next confirmation prompt. */
-    public int confirmTimer = CONFIRM_INTERVAL_TICKS;
+    /**
+     * Ticks since the driver last acknowledged, counted up from zero.
+     *
+     * <p>One counter rather than the previous prompt-plus-grace pair, because the
+     * escalation is now purely a function of elapsed time: amber at 20 s, red at 30 s,
+     * trip at 36 s. Two counters made "how overdue is this" a question about which of
+     * them was active, and the whole point of the escalation is that it is one clock.
+     *
+     * <p>Acknowledgement resets it to zero, which is what makes pressing early reset
+     * the 30 s as well as clear the warning - there is no separate prompt timer left to
+     * disagree with it.
+     */
+    public int confirmWaiting = 0;
 
-    /** Ticks the current prompt has been waiting. Negative when no prompt is up. */
-    public int confirmWaiting = -1;
+    /** Whether the vigilance device has tripped and the train is being stopped. */
+    public boolean vigilanceTripped = false;
+
+    /** Ticks the trip brake has been applied, so it can be released if it cannot stop. */
+    public int tripTicks = 0;
+
+    /**
+     * Whether the lever has already been dropped to the brake because the train ran
+     * out of track, so it is not dropped again every tick.
+     *
+     * <p>This latch exists to avoid the bug that made an earlier version deadlock: a
+     * rule that re-asserts the brake every tick while blocked fights the driver
+     * forever, and the train can never be reversed off the buffer stop. Parking once
+     * and rearming only when the train actually moves leaves the driver free to select
+     * reverse and back away.
+     */
+    public boolean blockedParked = false;
+
+    /**
+     * The trip brake is applied for this long, or until the train is at a stand.
+     *
+     * <p>Longer than it needs to be to stop from line speed, because it is cleared by
+     * reaching a stand rather than by the clock running out - the timer is only a
+     * backstop for a train that somehow cannot stop. See {@code applyVigilanceTrip}.
+     */
+    public static final int TRIP_BRAKE_TICKS = 15 * 20;
 
     /** Ticks of emergency-brake application remaining, while it is slowing the train. */
     public int emergencyTicks = 0;
@@ -104,5 +186,34 @@ public class TrainDriverState {
     public void failSafe() {
         gear = TrainGear.BRAKE;
         emergencyArmed = false;
+    }
+
+    /**
+     * The vigilance device tripping: brake the train to a stand and drop the lever.
+     *
+     * <p>Deliberately not the emergency brake. A forgotten acknowledgement should stop
+     * the train, but it should not also cost the driver the 40 km/h penalty until the
+     * next station, which is what firing the emergency brake does. The trip is
+     * recoverable by design: acknowledge, re-engage a gear, carry on.
+     */
+    public void trip() {
+        failSafe();
+        vigilanceTripped = true;
+    }
+
+    /** Clear the trip, once the train is at a stand and the driver has acknowledged. */
+    public void clearTrip() {
+        vigilanceTripped = false;
+    }
+
+    /** How overdue the driver is, for the lamps: 0 none, 1 amber, 2 red. */
+    public int warningStage() {
+        if (vigilanceTripped)
+            return 2;
+        if (confirmWaiting < WARN_AMBER_TICKS)
+            return 0;
+        if (confirmWaiting < WARN_RED_TICKS)
+            return 1;
+        return 2;
     }
 }

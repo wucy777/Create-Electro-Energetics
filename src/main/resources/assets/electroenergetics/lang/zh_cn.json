@@ -562,5 +562,7 @@
   "electroenergetics.train.lamp.vigilance": "确认",
   "electroenergetics.train.lamp.emergency": "紧急",
   "electroenergetics.train.lamp.limit": "限速",
-  "electroenergetics.train.lamp.regen": "再生"
+  "electroenergetics.train.lamp.regen": "再生",
+  "electroenergetics.train.status.warn": "即将超时，请确认",
+  "electroenergetics.train.status.overdue": "已超时——即将制动"
 }

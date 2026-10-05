@@ -1,5 +1,6 @@
 package com.george_vi.electroenergetics.mixins;
 
+import com.george_vi.electroenergetics.content.railway_electrification.CabOrientation;
 import com.george_vi.electroenergetics.content.railway_electrification.ElectricManualSpeed;
 import com.george_vi.electroenergetics.content.railway_electrification.TrainGear;
 import com.george_vi.electroenergetics.content.railway_electrification.TrainHudData;
@@ -123,33 +124,50 @@ public class TrainHUDMixin {
     }
 
     /**
-     * Whether the cab should be shown as travelling in reverse.
+     * Whether the cab should be shown as travelling in reverse, which is relative to
+     * the CAB the driver is at, not to the train.
+     *
+     * <p>This is the same quantity Create's own arrow derives from the S key, so it has
+     * to be expressed the same way: "the train is going the way this cab does not
+     * face". For a double-ended train the two cabs face opposite ways, so the same
+     * motion is forwards at one and backwards at the other, and reading train.speed
+     * alone would point the arrow the wrong way at one end.
      *
      * <p>Motion wins over the lever, and the lever only speaks once the train has
-     * stopped. A train sliding backwards under the brake is genuinely moving
-     * backwards and the arrow should say so; conversely the brake and coast
-     * positions command no direction at all, so at rest they must not claim one.
-     *
-     * <p>The deadband is Create's own scale: {@code train.speed} is a fraction of
-     * line speed, so this is a small slice of a block per tick and only exists to
-     * stop the arrow flickering as the train creeps to a halt.
-     *
-     * <p>PRIVATE, and that is not a style choice. Mixin merges any method in a mixin
-     * class that is not private into the target, so a package-private helper is
-     * treated as something to inject and the transform fails. It fails at RUNTIME,
-     * on class load, not at compile time - so CI cannot see it, and this one shipped:
-     * declaring it package-private (to make it reachable from a test) crashed the
-     * game on startup with "contains non-private static method isReversing".
-     * See _cache/check_mixin_visibility.py, which now checks this locally.
+     * stopped. A train sliding backwards under the brake is genuinely moving backwards
+     * and the arrow should say so; conversely the brake and coast positions command no
+     * direction at all, so at rest they must not claim one.
      */
     private static boolean isReversing(Train train) {
-        if (train.speed > SPEED_DEADBAND)
-            return false;
-        if (train.speed < -SPEED_DEADBAND)
-            return true;
+        // Movement decides when there is any; the lever decides at a stand.
+        if (train.speed > SPEED_DEADBAND || train.speed < -SPEED_DEADBAND) {
+            boolean movingNegative = train.speed < -SPEED_DEADBAND;
+            // "reversing" means travelling against the way this cab faces, so it is
+            // true when the sign of the motion disagrees with the cab's forward sign.
+            return movingNegative != cabInverted();
+        }
         TrainHudData.GearState gear = TrainHudData.gear(train.id);
-        // At a standstill only REVERSE commands a direction, and it commands reverse.
+        // At a standstill only REVERSE commands a direction, and it commands the
+        // direction opposite the cab - which is what "backwards" means to the driver.
         return gear != null && gear.gear() == TrainGear.REVERSE.ordinal();
+    }
+
+    /**
+     * Whether the cab the local player holds faces against the contraption.
+     *
+     * <p>Worked out locally rather than synced: the client already knows which controls
+     * block its own player is holding - {@code ControlsHandler} keeps it for the input
+     * path - and that is exactly the cab this HUD belongs to. So the arrow needs no
+     * extra packet, and cannot be shown for a cab the player is not at.
+     */
+    private static boolean cabInverted() {
+        // Narrowed to OrientedContraptionEntity because that is where
+        // getInitialOrientation lives; a carriage contraption always is one, and any
+        // other kind is not a train cab at all, so falling back to false is right.
+        if (!(ControlsHandler.getContraption()
+                instanceof com.simibubi.create.content.contraptions.OrientedContraptionEntity oriented))
+            return false;
+        return CabOrientation.isInverted(oriented, ControlsHandler.getControlsPos());
     }
 
     /** {@code train.speed} is a fraction of top speed; this is a slow creep. */

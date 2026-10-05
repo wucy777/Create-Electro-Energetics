@@ -5,6 +5,7 @@ import com.george_vi.electroenergetics.CEERegistries;
 import com.george_vi.electroenergetics.config.CEEConfigs;
 import com.george_vi.electroenergetics.content.railway_electrification.ElectricTrainData;
 import com.george_vi.electroenergetics.content.railway_electrification.TrainDriverState;
+import com.george_vi.electroenergetics.content.railway_electrification.TrainGear;
 import com.george_vi.electroenergetics.content.railway_electrification.TrainHudData;
 import com.george_vi.electroenergetics.content.railway_electrification.TrainTractionModel;
 import com.george_vi.electroenergetics.content.railway_electrification.sound_effects.TrainSoundModifier;
@@ -219,7 +220,17 @@ public class TrainMixin implements ICEETrainExtension {
     private void applyGearLaw(Train self, ElectricTrainData data) {
         TrainDriverState st = data.driver;
         int carriages = Math.max(1, self.carriages.size());
-        double signedSpeedMs = self.speed * 20d;
+
+        // A TRIPPED vigilance device overrides the lever: the train is braked to a
+        // stand and stays that way until the driver acknowledges.
+        //
+        // The lever's own position is deliberately left alone rather than being forced
+        // back here, so the driver can see where they put the handle - and the red lamp
+        // and the stationary train are what tell them to acknowledge. Re-engaging a gear
+        // without acknowledging therefore does not restart the train, which is the
+        // behaviour a real vigilance device has: the handle moving does nothing until
+        // the alarm is cancelled.
+        TrainGear effectiveGear = st.vigilanceTripped ? TrainGear.BRAKE : st.gear;
 
         // Release the station before commanding traction.
         //
@@ -232,19 +243,51 @@ public class TrainMixin implements ICEETrainExtension {
         // Only for a gear that commands movement: selecting the brake or cutting the
         // power at a platform should leave the train checked in, which is what lets
         // the schedule resume and what makes the arrival look like an arrival.
-        if (st.gear.appliesTraction() && self.getCurrentStation() != null)
+        if (effectiveGear.appliesTraction() && self.getCurrentStation() != null)
             self.leaveStation();
 
+        // WHICH WAY THE DRIVING CAB FACES.
+        //
+        // A double-ended train has a cab at each end and the two command opposite
+        // directions. Create handles this for its own controls (CarriageContraptionEntity
+        // .control does `if (inverted) targetSpeed *= -1`) but the lever never goes
+        // through that method, so without this the far cab's lever is mirrored and every
+        // position does the opposite of what it says. Reported as: accelerate did
+        // nothing, reverse moved the train forwards, and accelerating from there moved
+        // it backwards - each one a sign flip of what was asked for.
+        //
+        // The whole system is mirrored about x for the duration of the calculation:
+        // speed, gradient and the resulting acceleration. Mirroring rather than
+        // negating the output is what keeps every position meaning the same thing in
+        // the driver's own frame - ACCELERATE accelerates the way the cab faces,
+        // REVERSE drives it the other way, and the brake still opposes motion - because
+        // "opposes motion" and "which way is forward" both survive a mirror. It is also
+        // exactly what Create's targetSpeed *= -1 amounts to.
+        boolean inverted = st.driverCabInverted;
+        double mirror = inverted ? -1d : 1d;
+
+        double signedSpeedMs = self.speed * 20d * mirror;
+
         // trainGrade is a rise-over-run along the consist, which for a train
-        // moving in -x is the grade towards -x, so it is mirrored into +x.
-        double gradeToPlusX = self.speed < 0 ? -data.trackGrade : data.trackGrade;
+        // moving in -x is the grade towards -x, so it is mirrored into +x. The sign is
+        // taken from the UNMIRRORED speed: this conversion is about the world, so it
+        // must not be done in the cab frame. Doing it after the mirror would reverse
+        // gravity at an inverted cab whenever the train was at rest - where the sign
+        // has to come from the consist rather than from the motion - and the train
+        // would roll uphill. Only then is the result rotated into the cab frame, where
+        // the law works and where the cab's +x is the world's mirror*x.
+        double gradeToPlusX = (self.speed < 0 ? -data.trackGrade : data.trackGrade) * mirror;
 
         double a = TrainTractionModel.gearAcceleration(
                 signedSpeedMs, gradeToPlusX, carriages, data.powerScale,
-                st.gear, st.cruiseSpeed,
+                effectiveGear, st.cruiseSpeed,
                 TrainTractionModel.frictionBrake(),
                 st.emergencyTicks > 0 && st.emergencyArmed,
                 st.emergencyPenalty, data.gearStep);
+
+        // Back out of the mirror: the law worked in the cab's frame, and the speed it
+        // writes is the train's own.
+        a *= mirror;
 
         // m/s² -> Blocks/Tick². 1 block = 1 m, so only the tick conversion is needed.
         double next = self.speed + a / 400d;

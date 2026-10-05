@@ -221,9 +221,16 @@ public class ElectricTrainHud implements LayeredDraw.Layer {
         boolean blink = blinkOn();
         int lx = x;
 
+        // The vigilance lamp ESCALATES, because the three stages mean different things:
+        //   1  amber  - the prompt is coming; the driver has time
+        //   2  red    - it is overdue; act now or the train stops itself
+        // Colour alone would not be enough to convey that reliably, so the red stage
+        // also blinks - which is what an attention lamp is for.
+        int stage = gear == null ? 0 : gear.vigilanceStage();
         lx = drawLamp(graphics, font, lx, y,
-                tr("electroenergetics.train.lamp.vigilance"), LAMP_RED,
-                gear != null && gear.confirmDue(), blink);
+                tr("electroenergetics.train.lamp.vigilance"),
+                stage >= 2 ? LAMP_RED : LAMP_AMBER,
+                stage >= 1, stage >= 2 ? blink : false);
         lx = drawLamp(graphics, font, lx, y,
                 tr("electroenergetics.train.lamp.emergency"), LAMP_AMBER,
                 gear != null && gear.emergencyArmed(), false);
@@ -284,6 +291,12 @@ public class ElectricTrainHud implements LayeredDraw.Layer {
         TrainHudData.GearState gear = gearState;
         if (gear == null)
             return "";
+        // Two distinct messages, because the two stages ask for different things: amber
+        // says the prompt is coming, red says the train is about to stop itself.
+        if (gear.vigilanceStage() >= 2)
+            return tr("electroenergetics.train.status.overdue");
+        if (gear.vigilanceStage() == 1)
+            return tr("electroenergetics.train.status.warn");
         if (gear.confirmDue())
             return tr("electroenergetics.train.status.confirm");
         if (gear.emergencyPenalty())
@@ -312,6 +325,10 @@ public class ElectricTrainHud implements LayeredDraw.Layer {
         TrainHudData.GearState gear = gearState;
         if (gear == null)
             return VALUE;
+        if (gear.vigilanceStage() >= 2)
+            return 0xFFFF6B5E;   // red: about to trip
+        if (gear.vigilanceStage() == 1)
+            return 0xFFFFB454;   // amber: the prompt is coming
         if (gear.confirmDue())
             return 0xFFFF6B5E;
         if (gear.emergencyPenalty())

@@ -88,8 +88,16 @@ public record SetTrainGearPacket(UUID trainId, int gearOrdinal, boolean confirm,
         }
 
         if (confirm) {
-            state.confirmWaiting = -1;
-            state.confirmTimer = TrainDriverState.CONFIRM_INTERVAL_TICKS;
+            // Acknowledge: reset the vigilance clock to zero. Pressing early therefore
+            // resets the full 30 s, not just the warning - there is only one clock.
+            state.confirmWaiting = 0;
+            // Acknowledging also releases a trip, so the driver can carry on rather than
+            // being stuck with a braked train. Recovering from a trip is the documented
+            // behaviour: the device stops the train, it does not end the journey.
+            if (state.vigilanceTripped && Math.abs(train.speed) < 1e-3d) {
+                state.clearTrip();
+                state.tripTicks = 0;
+            }
         }
 
         if (gearOrdinal >= 0 && gearOrdinal < TrainGear.values().length) {

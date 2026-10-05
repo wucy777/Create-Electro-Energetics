@@ -209,24 +209,40 @@ public class GameEvents {
 
             driver.tickDriverPresence();
 
-            // Vigilance: a prompt every CONFIRM_INTERVAL, and the lever drops to the
-            // brake if it goes unanswered for CONFIRM_GRACE. Only while actually
-            // driven: an unmanned train is already parked in some lever position and
-            // nagging about it would be pointless.
+            // Vigilance: one escalating clock, from zero since the last acknowledgement.
+            //
+            //   20 s  amber warning (the prompt is coming)
+            //   30 s  red warning (it is now overdue)
+            //   36 s  the device TRIPS: the train is braked to a stand
+            //
+            // Acknowledging at any point resets the clock to zero, which is what makes
+            // "press it early" also reset the 30 s rather than merely silencing the
+            // warning - important, because the previous two-counter design had a
+            // separate prompt timer that could disagree with the warning clock.
+            //
+            // Only while actually driven: an unmanned train is already parked in some
+            // lever position and nagging about it would be pointless.
             if (driver.isDriven()) {
-                if (driver.confirmWaiting >= 0) {
+                // The trip brake stays on until the train is at a stand, so a train that
+                // cannot stop on its gradient keeps the brake applied rather than being
+                // released into a roll by a timer. The tick count is only a backstop.
+                if (driver.vigilanceTripped) {
+                    if (Math.abs(train.speed) < 1e-4d || ++driver.tripTicks > TrainDriverState.TRIP_BRAKE_TICKS) {
+                        driver.clearTrip();
+                        driver.tripTicks = 0;
+                    }
+                } else if (driver.confirmWaiting < TrainDriverState.TRIP_TICKS) {
                     driver.confirmWaiting++;
-                    if (driver.confirmWaiting > TrainDriverState.CONFIRM_GRACE_TICKS)
-                        driver.failSafe();
-                } else if (driver.confirmTimer > 0) {
-                    driver.confirmTimer--;
                 } else {
-                    driver.confirmWaiting = 0;
-                    driver.confirmTimer = TrainDriverState.CONFIRM_INTERVAL_TICKS;
+                    driver.trip();
+                    driver.tripTicks = 0;
                 }
             } else {
-                driver.confirmWaiting = -1;
-                driver.confirmTimer = TrainDriverState.CONFIRM_INTERVAL_TICKS;
+                // Nobody is driving: drop the clock and any trip. A train with no driver
+                // must not stay pinned by a warning that was raised for someone else.
+                driver.confirmWaiting = 0;
+                driver.clearTrip();
+                driver.tripTicks = 0;
             }
 
             // Emergency brake application, and the speed cap it leaves behind until
@@ -235,6 +251,29 @@ public class GameEvents {
                 driver.emergencyTicks--;
             if (driver.emergencyPenalty && train.getCurrentStation() != null)
                 driver.clearPenalty();
+
+            // Park the train when it runs out of track.
+            //
+            // Create stops the train at a buffer stop by zeroing its speed
+            // (Train.travel sets speed = 0 when a carriage is blocked) but it leaves
+            // whatever the driver had selected alone - so the lever stays in
+            // ACCELERATE with the train stationary, which is both wrong as a report of
+            // what happened and dangerous the moment the track clears. Reported by the
+            // user: the train stopped at the end of the line but did not park itself in
+            // the brake.
+            //
+            // Latched, and rearmed only once the train actually moves again. A rule
+            // that re-asserts the brake every tick while blocked would fight the driver
+            // forever: a previous version of this file did exactly that and made it
+            // impossible to reverse away from a buffer stop, which is the one place a
+            // driver needs reverse.
+            boolean outOfTrack = train.speed == 0d && isBlocked(train);
+            if (outOfTrack && !driver.blockedParked) {
+                driver.failSafe();
+                driver.blockedParked = true;
+            } else if (!outOfTrack && Math.abs(train.speed) > 1e-4d) {
+                driver.blockedParked = false;   // moved again: allow a future park
+            }
 
             // The lever is deliberately NOT forced to the brake while a station is
             // held. An earlier version did that to stop a train being dispatched
@@ -246,6 +285,21 @@ public class GameEvents {
             // impossible. Leaving the lever alone is also harmless: reverse is capped
             // at a walking pace and takes an explicit selection.
         }
+    }
+
+    /**
+     * Whether any carriage of this train is against a buffer stop or an incompatible
+     * track, which is Create's own "the train cannot go further" condition.
+     *
+     * <p>Read from the carriages, which is where Create records it: {@code travel}
+     * sets {@code carriage.blocked} from its travelling points every tick.
+     */
+    private static boolean isBlocked(Train train) {
+        for (Carriage carriage : train.carriages) {
+            if (carriage.blocked || carriage.isOnIncompatibleTrack())
+                return true;
+        }
+        return false;
     }
 
     /**
