@@ -2,6 +2,7 @@ package com.george_vi.electroenergetics.client;
 
 import com.mojang.blaze3d.platform.InputConstants;
 import net.minecraft.client.KeyMapping;
+import net.minecraft.client.Minecraft;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.api.distmarker.OnlyIn;
 import org.lwjgl.glfw.GLFW;
@@ -19,8 +20,20 @@ import org.lwjgl.glfw.GLFW;
  * <p>Defaults are on the right hand and away from WASD, since the left hand holds the
  * movement keys while driving.
  *
- * <p>Read through {@link KeyMapping#isDown()}, so a rebind is honoured with no further
- * work and the lever cannot disagree with the suppression about which key is the cab's.
+ * <p>Read by polling GLFW, NOT through {@link KeyMapping#isDown()}. This is not a
+ * style choice and it is the one subtle thing in this class.
+ *
+ * <p>{@code KeyMapping.isDown()} returns a field that is only ever written by
+ * {@code KeyMapping.set(...)}, which vanilla calls from
+ * {@code KeyboardHandler.keyPress} - and {@code KeyboardHandlerMixin} cancels exactly
+ * that method for these keys while a driver is at the controls, so the field would
+ * never be set and every binding would read as released. The lever would be dead.
+ * Polling GLFW has no such dependency: the key state comes from the window, so it is
+ * unaffected by the event being suppressed.
+ *
+ * <p>Bindings are still real KeyMappings, so they are rebindable; what is read from
+ * them is their resolved key code, not their pressed state. That keeps a rebind
+ * working while leaving the read independent of the suppressed event.
  */
 @OnlyIn(Dist.CLIENT)
 public final class TrainControlKeys {
@@ -56,9 +69,17 @@ public final class TrainControlKeys {
         return ALL;
     }
 
-    /** Whether a binding is held. */
+    /**
+     * Whether a binding is held right now.
+     *
+     * <p>Deliberately reads the window rather than the KeyMapping's own state; see the
+     * class comment. The binding is used only to find out which key to poll, so a
+     * rebind is still honoured.
+     */
     public static boolean isDown(KeyMapping mapping) {
-        return mapping.isDown();
+        return InputConstants.isKeyDown(
+                Minecraft.getInstance().getWindow().getWindow(),
+                mapping.getKey().getValue());
     }
 
     /**
