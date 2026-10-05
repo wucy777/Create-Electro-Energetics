@@ -133,8 +133,16 @@ public class TrainHUDMixin {
      * <p>The deadband is Create's own scale: {@code train.speed} is a fraction of
      * line speed, so this is a small slice of a block per tick and only exists to
      * stop the arrow flickering as the train creeps to a halt.
+     *
+     * <p>PRIVATE, and that is not a style choice. Mixin merges any method in a mixin
+     * class that is not private into the target, so a package-private helper is
+     * treated as something to inject and the transform fails. It fails at RUNTIME,
+     * on class load, not at compile time - so CI cannot see it, and this one shipped:
+     * declaring it package-private (to make it reachable from a test) crashed the
+     * game on startup with "contains non-private static method isReversing".
+     * See _cache/check_mixin_visibility.py, which now checks this locally.
      */
-    static boolean isReversing(Train train) {
+    private static boolean isReversing(Train train) {
         if (train.speed > SPEED_DEADBAND)
             return false;
         if (train.speed < -SPEED_DEADBAND)
