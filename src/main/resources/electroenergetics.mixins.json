@@ -27,6 +27,7 @@
     "CarriageContraptionMixin",
     "CarriageMixin",
     "ComparatorBlockMixin",
+    "ContraptionColliderMixin",
     "FluidPropagatorMixin",
     "LevelChunkMixin",
     "LivingEntityMixin",
