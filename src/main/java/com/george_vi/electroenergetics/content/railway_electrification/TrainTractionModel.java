@@ -564,6 +564,10 @@ public final class TrainTractionModel {
      * @param brakeMs2      configured FRICTION service braking rate
      * @param emergency     whether the emergency brake is being applied
      * @param penalty       whether the post-emergency speed cap is in force
+     * @param curveLimitMs  fastest this train may take the curve it is on, or
+     *                      {@code <= 0} for no limit. Supplied by the caller because
+     *                      the law has no access to the track geometry, which lives on
+     *                      the carriages.
      * @param out           filled with the acceleration and the motor-brake share;
      *                      pass {@code null} when only the acceleration is wanted.
      *                      The share is reported rather than recomputed by the
@@ -573,7 +577,7 @@ public final class TrainTractionModel {
     public static double gearAcceleration(double signedSpeedMs, double gradeToPlusX, int carriages,
                                           double powerScale, TrainGear gear, double cruiseSpeedMs,
                                           double brakeMs2, boolean emergency, boolean penalty,
-                                          GearStep out) {
+                                          double curveLimitMs, GearStep out) {
         if (out != null)
             out.clear();
         double v = signedSpeedMs;
@@ -613,6 +617,19 @@ public final class TrainTractionModel {
         // accelerating to 1762 km/h with the cap supposedly in force.
         if (penalty)
             ceiling = Math.min(ceiling, PENALTY_SPEED);
+        // A curve lowers the ceiling exactly as the emergency penalty does, and for the
+        // same reason it is done by lowering the ceiling rather than clamping the speed:
+        // the train runs out of traction above it and is braked down to it, where a clamp
+        // would be a teleport the physics never agreed to.
+        //
+        // This has to happen HERE, in the law, and not only in Train.maxTurnSpeed. That
+        // method is consulted by Create's own control path and by Navigation, but the
+        // lever does not go through either - it runs this law, whose ceiling was the flat
+        // design figure. So the curve limit added for the lever's benefit was, for a
+        // lever-driven train, dead code: a driver could take a 20 m curve at 100 m/s with
+        // nothing objecting, which is precisely the case that throws people off the train.
+        if (curveLimitMs > 0d)
+            ceiling = Math.min(ceiling, curveLimitMs);
         // Which way the train is going, or would go if released from rest. Used
         // only to aim traction and the brake; gravity never needs it.
         double heading = speed < 1e-6d ? 1d : Math.signum(v);
@@ -676,14 +693,20 @@ public final class TrainTractionModel {
                     // oscillating between accelerating and braking - "蹦迪" - and every
                     // overshoot wasted the acceleration it had just spent.
                     //
-                    // The cap is still enforced, just without the oscillation: drag
-                    // alone holds the train at the ceiling, because the ceiling is
-                    // derived from the same drag. Overshoot is bounded by one tick of
-                    // motion rather than being fought, and nothing brakes a train that
-                    // is merely at its design speed. A train already ABOVE the cap (an
-                    // emergency penalty applied while running fast) is caught below,
-                    // where a speed over the ceiling does still brake - the case the
-                    // old code was written for and the only one that needs it.
+                    // The design ceiling is still enforced without the oscillation: drag
+                    // alone holds the train there, because the ceiling is derived from
+                    // the same drag. Overshoot is bounded by one tick of motion and
+                    // nothing brakes a train that is merely at its design speed.
+                    //
+                    // That reasoning holds ONLY for the design ceiling, where drag is
+                    // what stops the train running away. It does NOT hold for a ceiling
+                    // imposed from outside - the emergency cap or a curve - because
+                    // nothing about travelling at 100 m/s makes drag hold a train to
+                    // 11 m/s on a curve. Both of those are enforced by the targeted
+                    // blocks below instead, which brake a train that is genuinely over
+                    // the limit and leave one that is not alone. That split is the
+                    // point: "at the ceiling" and "over the ceiling" are different
+                    // problems, and only the second needs the brake.
                 }
             }
             case REVERSE -> {
@@ -821,30 +844,50 @@ public final class TrainTractionModel {
             }
         }
 
-        // The emergency speed cap, enforced on its own terms rather than by braking at
-        // the design ceiling.
+        // An externally imposed ceiling is enforced on its own terms rather than by
+        // braking at the ceiling itself.
         //
-        // Only a train that is ALREADY above the cap is braked, and only until it is
-        // back under it. That distinction is what separates "the penalty is in force"
-        // from "the train has reached its design speed": at the design ceiling the
-        // remaining thrust is a fraction of a m/s^2, so a brake there fights a train
-        // that is doing nothing wrong and produces the accelerate/brake oscillation
-        // described above. A train above the cap genuinely needs slowing, and braking
-        // it is the only way the cap is honoured on a descent, where the motors are not
-        // what is pushing it.
+        // Only a train that is ALREADY above such a limit is braked, and only until it is
+        // back under it. That distinction is what separates "a limit is in force" from
+        // "the train has reached its design speed": at the design ceiling the remaining
+        // thrust is a fraction of a m/s^2, so a brake there fights a train doing nothing
+        // wrong and produces the accelerate/brake oscillation described above. A train
+        // genuinely over a limit needs slowing, and braking is the only way the limit is
+        // honoured on a descent, where the motors are not what is pushing it.
         //
-        // The margin is hysteresis, so a train sitting exactly on the cap is not braked
-        // and released one tick at a time. PENALTY_SPEED is 40 km/h, a lower ceiling
-        // than the design one, so this can only ever be the penalty.
+        // Two limits reach here, and both are limits nothing else enforces:
         //
+        //   the emergency cap  - 40 km/h until the next station call
+        //   a curve            - v = sqrt(g*r*lateral), which a train entering too fast
+        //                        must be brought down to. Skipping this left the curve
+        //                        limit with no effect on a lever-driven train at all,
+        //                        because the ACCELERATE branch deliberately applies no
+        //                        brake at or above a ceiling and nothing else did either.
+        //
+        // The margin is hysteresis, so a train sitting exactly on a limit is not braked
+        // and released one tick at a time. Expressed as a fraction of the DESIGN ceiling
+        // rather than a fixed m/s, so it stays proportionate on a curve whose limit may
+        // be an order of magnitude below the design speed.
+        double enforcedCeiling = designMaxSpeed();
+        if (penalty)
+            enforcedCeiling = Math.min(enforcedCeiling, PENALTY_SPEED);
+        if (curveLimitMs > 0d)
+            enforcedCeiling = Math.min(enforcedCeiling, curveLimitMs);
+
+        // Only when the limit is genuinely below the design ceiling: at the design
+        // ceiling itself there is nothing to enforce, which is the case the ACCELERATE
+        // branch above deliberately leaves to drag.
+        boolean limitInForce = enforcedCeiling < designMaxSpeed() - 1e-9d;
+        boolean overLimit = speed > enforcedCeiling + Math.max(CAP_MARGIN, enforcedCeiling * 0.02d);
+
         // Skipped when the lever is already braking at least this hard: in that case
         // the driver's own brake is doing the work, and replacing it would throw away
         // the motor share and with it the regeneration.
-        if (penalty && !emergency && speed > PENALTY_SPEED + CAP_MARGIN) {
-            double penaltyBrakeForce = brakeTotal * mass;
-            if (Math.abs(leverBrakeForce) < penaltyBrakeForce) {
+        if (limitInForce && !emergency && overLimit) {
+            double limitBrakeForce = brakeTotal * mass;
+            if (Math.abs(leverBrakeForce) < limitBrakeForce) {
                 force -= leverBrakeForce;                 // drop whatever the lever applied
-                leverBrakeForce = -brakeHeading * penaltyBrakeForce;
+                leverBrakeForce = -brakeHeading * limitBrakeForce;
                 force += leverBrakeForce;
                 dynamicApplied = dynamicPart;
             }
@@ -937,12 +980,15 @@ public final class TrainTractionModel {
      * Convenience form for callers that only want the acceleration and not the
      * motor-brake share. The full form taking a {@link GearStep} is what the
      * driving path uses, because regeneration has to know that share.
+     *
+     * <p>No curve limit, so this is for callers with no track geometry to hand - a
+     * harness, or a readout that is not tied to where the train is standing.
      */
     public static double gearAcceleration(double signedSpeedMs, double gradeToPlusX, int carriages,
                                           double powerScale, TrainGear gear, double cruiseSpeedMs,
                                           double brakeMs2, boolean emergency, boolean penalty) {
         return gearAcceleration(signedSpeedMs, gradeToPlusX, carriages, powerScale, gear,
-                cruiseSpeedMs, brakeMs2, emergency, penalty, null);
+                cruiseSpeedMs, brakeMs2, emergency, penalty, 0d, null);
     }
 
     /**

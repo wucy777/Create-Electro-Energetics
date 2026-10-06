@@ -403,12 +403,24 @@ public class TrainMixin implements ICEETrainExtension {
         // the law works and where the cab's +x is the world's mirror*x.
         double gradeToPlusX = (self.speed < 0 ? -data.trackGrade : data.trackGrade) * mirror;
 
+        // The curve the train is on, if any, as a speed the law may not exceed.
+        //
+        // Passed in rather than looked up inside the law because the geometry lives on
+        // the carriages and the law is a pure function of forces. Without this the curve
+        // limit was dead code for a lever-driven train: Train.maxTurnSpeed is only
+        // consulted by Create's own controls and by Navigation, and the lever uses
+        // neither, so a driver could take a 20 m curve at 100 m/s with nothing objecting.
+        double curveLimit = 0d;
+        double curveRadius = leadingCurveRadius(self);
+        if (curveRadius > 0d)
+            curveLimit = TrainTractionModel.curveSpeedLimit(curveRadius);
+
         double a = TrainTractionModel.gearAcceleration(
                 signedSpeedMs, gradeToPlusX, carriages, data.powerScale,
                 effectiveGear, cruiseCommand,
                 TrainTractionModel.frictionBrake(),
                 st.emergencyTicks > 0 && st.emergencyArmed,
-                st.emergencyPenalty, data.gearStep);
+                st.emergencyPenalty, curveLimit, data.gearStep);
 
         // Back out of the mirror: the law worked in the cab's frame, and the speed it
         // writes is the train's own.
