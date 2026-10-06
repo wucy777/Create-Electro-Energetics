@@ -8,6 +8,7 @@
   "plugin": "com.george_vi.electroenergetics.CEEMixinPlugin",
   "client": [
     "CarriageSoundsMixin",
+    "ContraptionCarryDiagnosticMixin",
     "ControlsMovementBehaviourMixin",
     "HumanoidModelMixin",
     "ItemInHandRendererMixin",
