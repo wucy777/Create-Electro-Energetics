@@ -236,9 +236,21 @@ public class CatenaryModule {
             // lastVoltage. Only a train actually slowing under the brake is
             // regenerating; coasting does not, because the motors are not being
             // driven against anything.
+            //
+            // Gated on the supply actually being able to deliver, which is what
+            // `powerScale` already answers locally: it is 0 at or below the minimum
+            // traction voltage and rises to 1 as the terminal voltage recovers. That
+            // gate is a bug fix. The traction demand above is scaled by the supply, so
+            // a train with no catenary draws nothing - but regeneration was not, so a
+            // train braking through a neutral section, or braking into a station on an
+            // unelectrified stretch, still reported feeding power back into a wire it
+            // was not connected to. Reported exactly that way: wire live mid-route,
+            // dead at the platform, and braking for the stop still showed regen. A
+            // generator with no circuit recovers nothing.
             var trainCfg = CEEConfigs.server().trainValues;
             double regenPower = 0d;
-            if (trainData.braking && trainCfg.electricTrainRegenerativeBraking.get()) {
+            if (powerScale > 0d && trainData.braking
+                    && trainCfg.electricTrainRegenerativeBraking.get()) {
                 // Only the MOTOR brake's share can come back. The pads dissipate
                 // their energy as heat and recover nothing, so using the total
                 // braking rate here would claim recovery from friction. The gear law

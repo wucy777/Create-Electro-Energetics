@@ -2,9 +2,18 @@ package com.george_vi.electroenergetics.mixins;
 
 import com.llamalad7.mixinextras.injector.ModifyReturnValue;
 import com.simibubi.create.content.contraptions.AbstractContraptionEntity;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
+import net.minecraft.nbt.Tag;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.phys.Vec3;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /**
  * Keeps the per-tick displacement of a contact point on a contraption within the same
@@ -69,6 +78,15 @@ import org.spongepowered.asm.mixin.injection.At;
 @Mixin(AbstractContraptionEntity.class)
 public class AbstractContraptionEntityMixin {
 
+    @Unique
+    private static final Logger electroEnergetics$DISMONT_LOG =
+            LoggerFactory.getLogger("CEE-DIAG");
+
+    @Unique
+    private static String fmt(Vec3 v) {
+        return String.format("(%7.2f,%7.2f,%7.2f)", v.x, v.y, v.z);
+    }
+
     /**
      * How much of the rotation term to keep, as a multiple of the contraption's own
      * per-tick travel.
@@ -91,6 +109,67 @@ public class AbstractContraptionEntityMixin {
 
     /** Absolute allowance added to the bound, for a contraption moving very slowly. */
     private static final double MIN_ALLOWANCE = 0.5;
+
+    /**
+     * Furthest a dismount relocation may move a rider, in blocks. Three, for the same
+     * reason {@code ContraptionDismountMixin} uses three.
+     */
+    private static final double MAX_DISMOUNT_RELOCATION = 3.0d;
+
+    /**
+     * Refuses a STALE dismount position, on the second of the two paths that consume it.
+     *
+     * <p>{@code getDismountLocationForPassenger} is the OTHER reader of the
+     * {@code ContraptionDismountLocation} tag - {@code ContraptionHandler
+     * .entitiesWhoJustDismountedGetSentToTheRightLocation} is the first - and BOTH remove
+     * the tag, so whichever runs first wins and the other sees nothing. Guarding only one
+     * of them left the bug reachable through the other, which is why the first attempt at
+     * this fix did not stop the ejection.
+     *
+     * <p>The position in the tag was computed SERVER-side and is applied CLIENT-side a
+     * network round trip later, so it is wrong by train speed times the latency, pointing
+     * backwards along the track. See {@code ContraptionDismountMixin} for the full
+     * derivation and for why three blocks separates a legitimate step from the stale
+     * error at every speed this mod permits.
+     *
+     * <p>When the position is stale the rider's OWN current position is returned instead.
+     * That is the same principle as the guard in {@code ContraptionDismountMixin}: a rider
+     * leaving a seat is already at the seat, because {@code positionRider} puts them there
+     * every client tick, so leaving them where they are is correct and the stale
+     * coordinates are worse than no correction at all.
+     */
+    @Inject(method = "getDismountLocationForPassenger", at = @At("HEAD"), cancellable = true,
+            remap = false)
+    private void electroEnergetics$refuseStaleDismount(LivingEntity rider,
+                                                       CallbackInfoReturnable<Vec3> cir) {
+        try {
+            CompoundTag data = rider.getPersistentData();
+            if (!data.contains("ContraptionDismountLocation"))
+                return;
+
+            ListTag list = data.getList("ContraptionDismountLocation", Tag.TAG_DOUBLE);
+            if (list.size() < 3)
+                return;
+
+            Vec3 target = new Vec3(list.getDouble(0), list.getDouble(1), list.getDouble(2));
+            Vec3 from = rider.position();
+            double distance = target.subtract(from).length();
+            if (distance <= MAX_DISMOUNT_RELOCATION)
+                return;   // an ordinary correction: let Create apply it
+
+            // Clear it so Create's own body returns early and the position cannot be
+            // applied later by anything else.
+            data.remove("ContraptionDismountLocation");
+            cir.setReturnValue(from);
+
+            electroEnergetics$DISMONT_LOG.info(
+                    "DISMOUNT refused (dismountLocation) dist={} from={} to={} rider={}",
+                    String.format("%.2f", distance), fmt(from), fmt(target),
+                    rider.getType().toString());
+        } catch (Throwable ignored) {
+            // Never let a guard throw where vanilla expects a position.
+        }
+    }
 
     @ModifyReturnValue(method = "getContactPointMotion", at = @At("RETURN"), remap = false)
     private Vec3 electroEnergetics$boundContactPointMotion(Vec3 original) {

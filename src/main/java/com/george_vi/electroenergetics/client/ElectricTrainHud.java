@@ -117,7 +117,21 @@ public class ElectricTrainHud implements LayeredDraw.Layer {
         // readout. Create's experience bar divides by the same figure, so the two
         // agree. The throttle no longer caps an electric train's speed at all -
         // the lever does - so this is simply the modelled ceiling.
-        float manualCap = sample.maxSpeed()
+        //
+        // With no supply the server reports a sustain speed of ZERO, because that is
+        // what the traction can hold right now - so the denominator collapsed and the
+        // row lost its ceiling entirely, reading "9.0 m/s" where it had read
+        // "9.0 / 100.0 m/s". Reported as the maximum speed simply vanishing at a neutral
+        // section. That was the wrong thing to hide: the DESIGN ceiling is a property of
+        // the train, not of the wire, and it is exactly when the wire is dead that a
+        // driver wants to know what the set is capable of. The fallback is display-only;
+        // TrainHudData.maxSpeed() still reports the sustain speed to Create's speed bar,
+        // which is the figure that must not tempt a dead train into a target it cannot
+        // reach.
+        float displayCap = sample.maxSpeed();
+        if (!sample.powered() && sample.designMaxSpeed() > 0f)
+            displayCap = sample.designMaxSpeed();
+        float manualCap = displayCap
                 * ElectricManualSpeed.speedBarFactor(train, manualSpeedModifier());
 
         float partialTicks = deltaTracker.getGameTimeDeltaPartialTick(false);
@@ -376,9 +390,15 @@ public class ElectricTrainHud implements LayeredDraw.Layer {
         // With no supply the traction can sustain nothing, so the ceiling is
         // reported as zero. Showing "0 / 0" there would read as a broken readout,
         // so the ceiling is left blank and the catenary row explains why.
-        textSpeed = powered
-                ? String.format("%.1f / %.1f m/s", speed / 10d, cap / 10d)
-                : String.format("%.1f m/s", speed / 10d);
+        // The ceiling is ALWAYS shown after the slash, powered or not.
+        //
+        // It used to be dropped when the wire was dead, because the server reports a
+        // sustain speed of zero there and "9.0 / 0.0 m/s" would read as broken. The
+        // fallback above substitutes the design ceiling for display, so the format no
+        // longer has to change - and one format for the row is easier to read than a
+        // bracket convention invented for the unpowered case. The catenary row already
+        // carries "0.0 kV (unpowered)" and explains why the train is not pulling.
+        textSpeed = String.format("%.1f / %.1f m/s", speed / 10d, cap / 10d);
         textGear = gear < 0 || gear >= TrainGear.values().length
                 ? "--"
                 : TrainControlHud.label(TrainGear.values()[gear]);
