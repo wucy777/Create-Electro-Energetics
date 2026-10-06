@@ -143,6 +143,16 @@ public class AbstractContraptionEntityMixin {
     private void electroEnergetics$keepRiderOnMovingCarriage(LivingEntity rider,
                                                              CallbackInfoReturnable<Vec3> cir) {
         try {
+            // CLIENT ONLY, and the side matters. On the client the rider's position is the
+            // accurate one (Create carries them there) and the stored snapshot is stale, so
+            // refusing is right. On the SERVER it is the other way round: the server never
+            // carries a player, so its copy of the rider is the stale one, while the stored
+            // position was just computed from the contraption and is correct - applying it
+            // is what brings the server's copy back into line. Guarding the server would
+            // undo that correction.
+            if (!rider.level().isClientSide())
+                return;
+
             CompoundTag data = rider.getPersistentData();
             if (!data.contains("ContraptionDismountLocation"))
                 return;
