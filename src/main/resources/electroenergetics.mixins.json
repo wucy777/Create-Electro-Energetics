@@ -9,6 +9,7 @@
   "client": [
     "CarriageSoundsMixin",
     "ControlsMovementBehaviourMixin",
+    "FlingDiagnosticMixin",
     "HumanoidModelMixin",
     "ItemInHandRendererMixin",
     "KeyboardHandlerMixin",

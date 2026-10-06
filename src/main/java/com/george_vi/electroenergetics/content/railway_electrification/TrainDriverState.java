@@ -177,6 +177,19 @@ public class TrainDriverState {
         return id != null && id.equals(driverId);
     }
 
+    /**
+     * Whether the lever has already been dropped to COAST for a loss of supply, so it is
+     * not dropped again every tick.
+     *
+     * <p>Latched for the same reason as {@link #blockedParked}: a rule that re-asserts
+     * itself every tick fights the driver forever. A driver who is unpowered on a descent
+     * may deliberately leave the handle at ACCELERATE so the train picks up the moment the
+     * wire resumes, and pinning it back to COAST every tick would make that impossible.
+     * Dropping it once when the supply goes, and rearming when it comes back, leaves the
+     * driver in charge of the handle.
+     */
+    public boolean powerLossCoasted = false;
+
     // ------------------------------------------------------------------
     // Automatic station arrival (Create's "hold space" mode)
     // ------------------------------------------------------------------

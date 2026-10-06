@@ -36,6 +36,7 @@ import com.george_vi.electroenergetics.simulation.infrastructure.InfrastructureS
 import com.simibubi.create.AllSoundEvents;
 import com.george_vi.electroenergetics.content.railway_electrification.ElectricTrainData;
 import com.george_vi.electroenergetics.content.railway_electrification.TrainDriverState;
+import com.george_vi.electroenergetics.content.railway_electrification.TrainGear;
 import com.george_vi.electroenergetics.mixin_interfaces.ICEETrainExtension;
 import net.minecraft.server.MinecraftServer;
 import com.simibubi.create.Create;
@@ -310,12 +311,38 @@ public class GameEvents {
                 driver.clearTrip();
                 driver.tripTicks = 0;
             }
-            // A stopped train this mode owns keeps its clock where it is rather than
-            // resetting it: standing at a platform for a minute should not hand the
-            // driver a fresh 36 seconds the moment they pull away again. Holding the
-            // value rather than clearing it is what keeps a long station dwell from
-            // being a free reset, and it is also what makes the device honest - it
-            // measures running time unattended, and the count carries over.
+            // Power loss drops the lever to COAST, once, and hands it back when supply
+            // returns. A train that has lost its catenary is coasting whether or not the
+            // handle says so - the tractive effort is already scaled to zero by the supply
+            // voltage - so leaving the handle at ACCELERATE was the panel telling the
+            // driver something untrue about their own train.
+            //
+            // Latched rather than re-asserted every tick, for the same reason as the
+            // end-of-track park: a rule that reapplies itself fights the driver forever.
+            // A driver unpowered on a descent may deliberately leave the handle where it
+            // is, and pinning it back every tick would make that impossible. Dropping it
+            // once on the transition, and rearming when the wire comes back, leaves the
+            // handle the driver's to move.
+            //
+            // Only for a train this mode owns and only while it has motors: a fuel train
+            // has no supply to lose, and a train nobody has ever driven is not ours to
+            // reconfigure.
+            boolean hasSupply = data.isPowered || data.hasCreativeSource;
+            if (driver.underGearControl() && data.hasTractionMotors) {
+                if (!hasSupply && !driver.powerLossCoasted) {
+                    // Only from a position that commands traction: dropping COAST to COAST
+                    // is a no-op, and overwriting the BRAKE would release a train that is
+                    // deliberately held.
+                    if (driver.gear.appliesTraction())
+                        driver.gear = TrainGear.COAST;
+                    driver.powerLossCoasted = true;
+                } else if (hasSupply) {
+                    // Rearm on the way back, so the next neutral section drops it again.
+                    // The lever itself is left alone: the driver re-engages when they want
+                    // traction, which is what a real driver does after a dead section.
+                    driver.powerLossCoasted = false;
+                }
+            }
 
             // Emergency brake application, and the speed cap it leaves behind until
             // the next station call.
@@ -325,7 +352,6 @@ public class GameEvents {
                 driver.clearPenalty();
 
             // Park the train when it runs out of track.
-            //
             // Create stops the train at a buffer stop by zeroing its speed
             // (Train.travel sets speed = 0 when a carriage is blocked) but it leaves
             // whatever the driver had selected alone - so the lever stays in

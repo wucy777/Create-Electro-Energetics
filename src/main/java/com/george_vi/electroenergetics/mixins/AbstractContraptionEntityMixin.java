@@ -57,6 +57,14 @@ import org.spongepowered.asm.mixin.injection.At;
  * other entities, and {@code saveRemotePlayerFromClipping} runs for remote players on
  * the client. Bounding on both sides keeps them agreeing, which is the point - a
  * divergence here is exactly what becomes a rubber-band correction.
+ *
+ * <p>This bound was originally set at 2x the contraption's travel, which made it INERT:
+ * at 5 Blocks/tick the limit came to 11 while the value being bounded is at most the
+ * train's own 5 plus a rotation term, so nothing could ever trip it. A bound that cannot
+ * fire is decoration rather than a fix, and it was shipped on a theory that a later
+ * bytecode-level investigation did not confirm. It is 1.25x now, which leaves straight
+ * track untouched and engages only when rotation contributes more than about a quarter of
+ * the train's per-tick travel.
  */
 @Mixin(AbstractContraptionEntity.class)
 public class AbstractContraptionEntityMixin {
@@ -65,14 +73,24 @@ public class AbstractContraptionEntityMixin {
      * How much of the rotation term to keep, as a multiple of the contraption's own
      * per-tick travel.
      *
-     * <p>Generous on purpose. A real carriage on a real curve does move its outer
-     * contact points further than the train's centre does, so this has to leave room for
-     * that; it exists to stop a runaway, not to trim a legitimate swing.
+     * <p>1.25 rather than the 2.0 this started at, and the reason is that 2.0 made the
+     * bound INERT - it could never engage. At 5 Blocks/tick of travel the old limit was
+     * 5 x 2 + 1 = 11, while the value being bounded is the train's own motion (about 5)
+     * plus the rotation term, so nothing short of a 6-Block/tick rotation term would ever
+     * trip it. A bound that cannot fire is not a fix, it is decoration, and this one was
+     * shipped on a theory that a later, bytecode-level investigation did not confirm.
+     *
+     * <p>At 1.25 the limit is 5 x 1.25 + 0.5 = 6.75, so straight track - where the
+     * rotation term is ~0 and the value is the train's own 5 - is comfortably inside it and
+     * the carry is untouched. It engages only when rotation adds more than about a quarter
+     * of the train's per-tick travel, which is a genuinely large swing for a contact point
+     * on a carriage and is the regime where the term stops being a carry and becomes a
+     * throw.
      */
-    private static final double ROTATION_ALLOWANCE = 2d;
+    private static final double ROTATION_ALLOWANCE = 1.25;
 
     /** Absolute allowance added to the bound, for a contraption moving very slowly. */
-    private static final double MIN_ALLOWANCE = 1d;
+    private static final double MIN_ALLOWANCE = 0.5;
 
     @ModifyReturnValue(method = "getContactPointMotion", at = @At("RETURN"), remap = false)
     private Vec3 electroEnergetics$boundContactPointMotion(Vec3 original) {
