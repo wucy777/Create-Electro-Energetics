@@ -282,6 +282,25 @@ public class GameEvents {
                     driver.trip();
                     driver.tripTicks = 0;
                 }
+            } else if (owned) {
+                // Owned but STOPPED: reset the clock to zero, every tick, so a train at a
+                // stand always leaves with a full window.
+                //
+                // This is what the user asked for, and it replaces an earlier decision of
+                // mine to HOLD the count instead. I had held it to stop a long station
+                // dwell from acting as a free reset; the user's call is that stopping
+                // genuinely does reset it, which is also what a real vigilance device
+                // does - the clock measures time spent RUNNING unattended, and a train
+                // standing still is not that. Resetting rather than holding is also the
+                // simpler rule to reason about: the driver sees the count start from
+                // scratch whenever they pull away, with no carry-over they cannot see.
+                //
+                // This cannot be used to defeat the device: acknowledging is not required
+                // to get the reset, but the train has to actually be at a stand for it,
+                // and the trip that a lapsed driver earns is a brake to a stop - so the
+                // reset arrives at exactly the moment the device has already done its job.
+                driver.confirmWaiting = 0;
+                driver.tripTicks = 0;
             } else if (!owned) {
                 // Genuinely nobody's train, and nobody ever drove it: a schedule-driven
                 // one, or one parked up. Drop the clock and any trip, because a train

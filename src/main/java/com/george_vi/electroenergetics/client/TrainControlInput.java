@@ -157,9 +157,9 @@ public final class TrainControlInput {
         // - and the arrow keys are easy to catch while looking around - cannot change
         // what the train is doing.
         if (up && !upWasDown)
-            handle = moveHandle(handle, -NOTCHES_PER_PRESS);
+            handle = moveHandle(handle, -NOTCHES_PER_PRESS, engagedPosition(serverGear));
         if (down && !downWasDown)
-            handle = moveHandle(handle, +NOTCHES_PER_PRESS);
+            handle = moveHandle(handle, +NOTCHES_PER_PRESS, engagedPosition(serverGear));
 
         // Engage: commit the handle's position to the train.
         if (engage && !engageWasDown && handle != engagedPosition(serverGear))
@@ -193,13 +193,26 @@ public final class TrainControlInput {
      * <p>If the handle comes back to rest on the engaged position the selection is
      * cleared, so there is no pending state to show and the display stops hinting at
      * anything.
+     *
+     * <p>That last part was DOCUMENTED here but not implemented, which was a real bug
+     * with a visible symptom: nudging the handle up and back down left {@code selectedGear}
+     * set to the engaged position. Nothing was pending - the handle was exactly where the
+     * train was - yet every test for "is a selection pending" only asked whether the field
+     * was non-null, so the panel drew its pending asterisk and its hollow handle forever.
+     * Reported as "after engaging a gear, pressing up/down and returning to the same gear
+     * leaves a yellow asterisk on it permanently".
+     *
+     * <p>The comparison has to be against the ENGAGED position rather than the handle's
+     * previous position: from two detents away, arriving back at the engaged gear must
+     * clear the selection in one press, and it passes through no intermediate state that
+     * could be mistaken for "still pending".
      */
-    private static int moveHandle(int from, int delta) {
+    private static int moveHandle(int from, int delta, int engaged) {
         TrainGear[] values = TrainGear.values();
         int next = from + delta;
         if (next < 0 || next >= values.length)
             return from;   // already at an end of the lever; a detent does not wrap
-        selectedGear = values[next];
+        selectedGear = (next == engaged) ? null : values[next];
         return next;
     }
 

@@ -239,6 +239,8 @@
   "electroenergetics.train.value.regen": "regen",
   "electroenergetics.train.value.unpowered": "(unpowered)",
   "electroenergetics.train.value.motorised": "motorised",
+  "electroenergetics.train.panel.lever": "LEVER",
+  "electroenergetics.train.hint.move": "shift",
   "key.electroenergetics.train_engage": "Train lever: engage selected position",
   "electroenergetics.train.hint.engage": " engage",
   "electroenergetics.train.lamp.vigilance": "ACK",

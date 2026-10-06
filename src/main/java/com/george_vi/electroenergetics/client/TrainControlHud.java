@@ -123,18 +123,26 @@ public class TrainControlHud implements LayeredDraw.Layer {
         int engaged = TrainControlInput.engagedGear(serverGear);
         boolean pending = TrainControlInput.hasPendingSelection();
 
-        // Header: the handle's position, with a cue when it is not yet engaged. This
-        // is the one thing that must not be ambiguous, because moving the handle
-        // changes nothing on its own.
-        String header = label(selected);
-        graphics.drawString(font, header, x + 5, y + 4, ACTIVE_TEXT, false);
+        // Header: the panel's TITLE, deliberately not the gear's name.
+        //
+        // It used to print the selected position, which is the same text as one of the
+        // five labels below - so it read as a sixth detent sitting right above the first.
+        // Reported as "the current gear is so close to the first position that I thought
+        // it was another position". The handle already shows the position on the scale,
+        // so the title says what the panel is. The pending cue is an asterisk after the
+        // title now, which cannot be mistaken for a position either.
+        String header = tr("electroenergetics.train.panel.lever");
+        graphics.drawString(font, header, x + 5, y + 3, TEXT_DIM, false);
         if (pending) {
-            // An asterisk rather than a word: it fits the 12px header, is understood
-            // in every language, and matches the hollow handle below, which is the
-            // same statement made spatially.
             int hw2 = font.width(header);
-            graphics.drawString(font, "*", x + 7 + hw2, y + 4, PENDING, false);
+            graphics.drawString(font, "*", x + 7 + hw2, y + 3, PENDING, false);
         }
+
+        // Rule under the title, so the title and the scale cannot be read as one list of
+        // positions. Without it the title sits at the same indent and spacing as the
+        // labels, which is what made them look like one column.
+        graphics.fill(x + 4, TrainControlLayout.dividerY(y), x + pw - 4,
+                TrainControlLayout.dividerY(y) + 1, BACKDROP_EDGE);
 
         int cx = TrainControlLayout.slotCenterX(x);
         int railTop = TrainControlLayout.slotTopY(y);
@@ -191,13 +199,13 @@ public class TrainControlHud implements LayeredDraw.Layer {
         // Accent cap on the handle's side, tying it to the highlighted row.
         graphics.fill(hx - 2, hTop + 2, hx, hTop + hh - 2, pending ? PENDING : ACCENT);
 
-        // Footer: key hints, then the one thing worth saying.
-        int fy = y + ph - TrainControlLayout.FOOTER_H + 3;
+        // Footer: key hints on one line, the one thing worth saying on the next.
+        int fy = y + ph - TrainControlLayout.FOOTER_H + 4;
         drawSmall(graphics, font, hintText(), x + 5, fy, TEXT_DIM);
 
         String status = statusText(gear);
         if (!status.isEmpty())
-            drawSmall(graphics, font, status, x + 5, fy + 9, statusColor(gear));
+            drawSmall(graphics, font, status, x + 5, fy + 11, statusColor(gear));
     }
 
     /** Draws at 75% scale, without touching the pose stack of the surrounding frame. */
@@ -213,18 +221,24 @@ public class TrainControlHud implements LayeredDraw.Layer {
     /**
      * The key hints, built from the live bindings.
      *
-     * <p>Read from the KeyMappings rather than written out, so a player who rebinds
-     * sees their own keys here instead of the defaults. The gap between the lever
-     * keys and the engage key is wider than the rest, because those two are one
-     * gesture - move the handle, then engage it - and running all five together would
-     * read as five unrelated keys.
+     * <p>Read from the KeyMappings rather than written out, so a player who rebinds sees
+     * their own keys here instead of the defaults.
+     *
+     * <p>Drawn as GLYPHS - arrows and the word for the engage key - rather than as the
+     * bindings' translated names. That was the overflow: {@code getTranslatedKeyMessage}
+     * for the arrow keys is "up arrow key" / "down arrow key" (and four-character
+     * equivalents in Chinese), so the hint line was far wider than the 104-pixel panel and
+     * ran off the bottom-right of the screen. Reported as "the up/down hint at the bottom
+     * is cut off and I cannot see it". An arrow is also the clearer thing to show for a
+     * lever, since it says which WAY the handle moves rather than which key it is.
+     *
+     * <p>Only the engage key is named, because that one is not obvious from a glyph - and
+     * it is the key that actually does something, the arrows only move the handle.
      */
     private static String hintText() {
-        return key(TrainControlKeys.LEVER_UP) + "\u2191" + key(TrainControlKeys.LEVER_DOWN)
-                + "  " + key(TrainControlKeys.ENGAGE)
-                + tr("electroenergetics.train.hint.engage")
-                + "   " + key(TrainControlKeys.CONFIRM)
-                + "\u786e\u8ba4";
+        return "\u2191\u2193 " + tr("electroenergetics.train.hint.move")
+                + "   " + key(TrainControlKeys.ENGAGE)
+                + tr("electroenergetics.train.hint.engage");
     }
 
     /** A binding's key name, in the player's language. */

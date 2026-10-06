@@ -28,12 +28,34 @@ final class TrainControlLayout {
     static final int HANDLE_H = 11;
 
     static final int MARGIN = 4;
-    /** Header row showing which position the lever is in. */
-    static final int HEADER_H = 12;
-    /** Footer rows: the key hints, and the status line. */
-    static final int FOOTER_H = 22;
 
-    static final int TOTAL_H = HEADER_H + SLOT_H + HANDLE_H + FOOTER_H;
+    /**
+     * Header row: the panel's TITLE, not a lever position.
+     *
+     * <p>It used to show the name of the position the handle was in, which is the same
+     * text as one of the five detent labels below it - so the header read as a sixth
+     * position sitting immediately above the first. Reported exactly that way: "the
+     * current gear at the top is so close to the first position that I thought it was
+     * another position". The handle already marks the position on the scale, so the
+     * title says what the panel IS and the scale says where the lever is.
+     */
+    static final int HEADER_H = 14;
+
+    /** Rule between the title and the scale, so the two cannot be read as one list. */
+    static final int DIVIDER_H = 1;
+
+    /**
+     * Footer rows: two lines of key hints and the status line.
+     *
+     * <p>Two lines rather than one because the single line was wider than the panel and
+     * ran off the edge of the screen - the reported "the up/down hint at the bottom
+     * right is cut off and I cannot see it". The cause was printing the arrow keys'
+     * translated names ("up arrow key", "down arrow key"), which are long in every
+     * language; they are drawn as arrow glyphs now, which is both shorter and clearer.
+     */
+    static final int FOOTER_H = 30;
+
+    static final int TOTAL_H = HEADER_H + DIVIDER_H + SLOT_H + HANDLE_H + FOOTER_H;
 
     private TrainControlLayout() {}
 
@@ -52,6 +74,11 @@ final class TrainControlLayout {
 
     /** Top of the slot: the ACCELERATE end. */
     static int slotTopY(int panelY) {
+        return panelY + HEADER_H + DIVIDER_H;
+    }
+
+    /** Y of the rule that separates the title from the scale. */
+    static int dividerY(int panelY) {
         return panelY + HEADER_H;
     }
 
