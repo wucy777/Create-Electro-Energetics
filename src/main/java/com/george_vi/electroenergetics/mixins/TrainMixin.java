@@ -129,12 +129,23 @@ public class TrainMixin implements ICEETrainExtension {
         //
         // So: the design ceiling while the train can actually power itself, or while this
         // mod is the one supplying the force. Create's ceiling otherwise.
-        boolean oursToDrive = electricTrainData.hasTractionMotors
-                && (electricTrainData.isPowered || electricTrainData.driver.underGearControl());
+        //
+        // The branch on hasTractionMotors also carries the CLIENT case, which cannot be
+        // skipped: on the client the electrical simulation never runs, so hasTractionMotors
+        // is always false there and this train is not "ours to drive" by any local test -
+        // the only thing that knows it is an electric train is the sample the server sent.
+        // Dropping that path would have handed the client Create's ceiling and put the
+        // HUD's speed bar back on the wrong denominator, which is exactly the bug the
+        // synced ceiling was added for.
+        Train self = (Train) (Object) this;
 
-        if (oursToDrive) {
+        if (electricTrainData.hasTractionMotors) {
+            boolean oursToDrive = electricTrainData.isPowered
+                    || electricTrainData.driver.underGearControl();
+            if (!oursToDrive)
+                return original.call();
+
             // maxSpeed is in Blocks/Second, maxSpeed() must return Blocks/Tick.
-            Train self = (Train) (Object) this;
             float synced = TrainHudData.maxSpeedFor(self.id);
             if (synced > 0f)
                 return synced / 20f;
@@ -143,9 +154,16 @@ public class TrainMixin implements ICEETrainExtension {
             // Before the electrical solve has produced a figure, fall back to the
             // configured design ceiling so a driven train is not briefly capped by
             // Create while the first circuit build is still pending.
-            if (electricTrainData.driver.underGearControl())
-                return (float) (TrainTractionModel.designMaxSpeed() / 20d);
+            return (float) (TrainTractionModel.designMaxSpeed() / 20d);
         }
+
+        // Not an electric train on this side. On the client that is the NORMAL case for an
+        // electric train, so the answer has to come from the synced sample before falling
+        // back to Create. maxSpeedFor returns 0 for a consist with no motors, so a fuel
+        // train still reaches Create's figure.
+        float syncedHere = TrainHudData.maxSpeedFor(self.id);
+        if (syncedHere > 0f)
+            return syncedHere / 20f;
 
         return original.call();
     }
@@ -154,7 +172,12 @@ public class TrainMixin implements ICEETrainExtension {
     public float electroEnergetics$maxTurnSpeed(Operation<Float> original) {
         ElectricTrainData electricTrainData = electroenergetics$electricTrainData;
 
-        if (!electricTrainData.isPowered)
+        // hasTractionMotors, not isPowered - the same correction made to maxSpeed above,
+        // and needed here for the same reason: an electric train between substations was
+        // being handed Create's flat turning figure while keeping the electric straight-line
+        // ceiling, so its limit jumped between two unrelated numbers as it crossed a
+        // neutral section. A consist does not stop being electric because the wire ended.
+        if (!electricTrainData.hasTractionMotors)
             return original.call();
 
         // A curve limits speed by PHYSICS, not by Create's flat figure.
