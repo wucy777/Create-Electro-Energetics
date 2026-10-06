@@ -7,9 +7,9 @@
   "compatibilityLevel": "JAVA_21",
   "plugin": "com.george_vi.electroenergetics.CEEMixinPlugin",
   "client": [
+    "CarriageFrameLockMixin",
     "CarriageSoundsMixin",
     "ControlsMovementBehaviourMixin",
-    "ContraptionDismountMixin",
     "HumanoidModelMixin",
     "ItemInHandRendererMixin",
     "KeyboardHandlerMixin",
