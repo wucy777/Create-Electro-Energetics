@@ -3,8 +3,6 @@ package com.george_vi.electroenergetics.mixins;
 import com.llamalad7.mixinextras.injector.ModifyReturnValue;
 import com.simibubi.create.content.contraptions.AbstractContraptionEntity;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.ListTag;
-import net.minecraft.nbt.Tag;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.phys.Vec3;
 import org.slf4j.Logger;
@@ -111,10 +109,11 @@ public class AbstractContraptionEntityMixin {
     private static final double MIN_ALLOWANCE = 0.5;
 
     /**
-     * Furthest a dismount relocation may move a rider, in blocks. Three, for the same
-     * reason {@code ContraptionDismountMixin} uses three.
+     * Contraption travel per tick above which a stored dismount position counts as stale.
+     * See {@code ContraptionDismountMixin} for why this is a motion test and not a
+     * distance test.
      */
-    private static final double MAX_DISMOUNT_RELOCATION = 3.0d;
+    private static final double MAX_DISMOUNT_MOTION = 0.1d;
 
     /**
      * Refuses a STALE dismount position, on the second of the two paths that consume it.
@@ -123,49 +122,45 @@ public class AbstractContraptionEntityMixin {
      * {@code ContraptionDismountLocation} tag - {@code ContraptionHandler
      * .entitiesWhoJustDismountedGetSentToTheRightLocation} is the first - and BOTH remove
      * the tag, so whichever runs first wins and the other sees nothing. Guarding only one
-     * of them left the bug reachable through the other, which is why the first attempt at
-     * this fix did not stop the ejection.
+     * of them left the bug reachable through the other.
      *
-     * <p>The position in the tag was computed SERVER-side and is applied CLIENT-side a
-     * network round trip later, so it is wrong by train speed times the latency, pointing
-     * backwards along the track. See {@code ContraptionDismountMixin} for the full
-     * derivation and for why three blocks separates a legitimate step from the stale
-     * error at every speed this mod permits.
+     * <p>Tested by whether THIS contraption is moving, NOT by how far the move is. An
+     * earlier version compared the stored position against the rider's own, and that is
+     * meaningless on a moving train: the server never carries a player
+     * ({@code ContraptionCollider} skips {@code PlayerType.SERVER}), so its copy of the
+     * rider lags by the speed. Measured from a real session, the server thought the rider
+     * was 8.29 Blocks from where their client entity actually was, so a distance test
+     * measured the gap between two wrong numbers and refused a relocation that was
+     * correct. See {@code ContraptionDismountMixin} for the derivation.
      *
-     * <p>When the position is stale the rider's OWN current position is returned instead.
-     * That is the same principle as the guard in {@code ContraptionDismountMixin}: a rider
-     * leaving a seat is already at the seat, because {@code positionRider} puts them there
-     * every client tick, so leaving them where they are is correct and the stale
-     * coordinates are worse than no correction at all.
+     * <p>When refused, the rider's own current position is returned. A rider leaving a
+     * seat is already where the seat is - {@code positionRider} puts them there every
+     * client tick - so that is the correct answer and the stale snapshot is worse than no
+     * correction.
      */
     @Inject(method = "getDismountLocationForPassenger", at = @At("HEAD"), cancellable = true,
             remap = false)
-    private void electroEnergetics$refuseStaleDismount(LivingEntity rider,
-                                                       CallbackInfoReturnable<Vec3> cir) {
+    private void electroEnergetics$keepRiderOnMovingCarriage(LivingEntity rider,
+                                                             CallbackInfoReturnable<Vec3> cir) {
         try {
             CompoundTag data = rider.getPersistentData();
             if (!data.contains("ContraptionDismountLocation"))
                 return;
 
-            ListTag list = data.getList("ContraptionDismountLocation", Tag.TAG_DOUBLE);
-            if (list.size() < 3)
-                return;
+            AbstractContraptionEntity self = (AbstractContraptionEntity) (Object) this;
+            double motion = self.position().subtract(self.getPrevPositionVec()).length();
+            if (motion <= MAX_DISMOUNT_MOTION)
+                return;   // stationary: Create's relocation is accurate and useful
 
-            Vec3 target = new Vec3(list.getDouble(0), list.getDouble(1), list.getDouble(2));
             Vec3 from = rider.position();
-            double distance = target.subtract(from).length();
-            if (distance <= MAX_DISMOUNT_RELOCATION)
-                return;   // an ordinary correction: let Create apply it
-
-            // Clear it so Create's own body returns early and the position cannot be
-            // applied later by anything else.
+            // Cleared, because the OTHER reader runs every entity tick and would otherwise
+            // apply the same stale position on the next one.
             data.remove("ContraptionDismountLocation");
             cir.setReturnValue(from);
 
             electroEnergetics$DISMONT_LOG.info(
-                    "DISMOUNT refused (dismountLocation) dist={} from={} to={} rider={}",
-                    String.format("%.2f", distance), fmt(from), fmt(target),
-                    rider.getType().toString());
+                    "DISMOUNT cancelled (dismountLocation): carriage moving {} b/t, rider left at {}",
+                    String.format("%.3f", motion), fmt(from));
         } catch (Throwable ignored) {
             // Never let a guard throw where vanilla expects a position.
         }

@@ -135,7 +135,30 @@ public class ElectricTrainHud implements LayeredDraw.Layer {
                 * ElectricManualSpeed.speedBarFactor(train, manualSpeedModifier());
 
         float partialTicks = deltaTracker.getGameTimeDeltaPartialTick(false);
-        float speed = (float) Math.abs(train.speed) * 20f;
+
+        // Speed is measured from the CARRIAGE, not from train.speed, and that is the fix
+        // for a readout that stepped about once a second instead of moving smoothly.
+        //
+        // train.speed is a CLIENT-side field whose only writer is TrainHUDUpdatePacket,
+        // which the server sends from CarriageContraptionEntity.control() at a five-tick
+        // cooldown - and control() only runs while the driver is HOLDING a control key.
+        // The lever is pressed and released rather than held, so that packet is sent
+        // rarely and irregularly, and the displayed figure sat still and then jumped.
+        // Reported as "the speed at the bottom left jumps every second, not smooth".
+        //
+        // The carriage ENTITY, by contrast, is moved every single tick by Create's own
+        // position sync, and its per-tick displacement IS the train's speed - this is the
+        // same quantity Create itself reads for its carriage particles
+        // (CarriageContraptionEntity:432, position().distanceTo(getPrevPositionVec())).
+        // Taking it from the entity means the readout updates every tick whatever the
+        // packets are doing, and the frame lerp below smooths it from there.
+        //
+        // Clamped because a chunk load or a portal can relocate the carriage by hundreds
+        // of blocks in one tick, which would otherwise flash an absurd figure for a frame.
+        // The bound is far above any real running speed - design ceiling times 1.5, plus a
+        // margin for the ramp - so a genuine runaway is still reported honestly while a
+        // teleport spike is discarded.
+        float speed = carriageSpeed(train, sample);
         lerp(speed, manualCap, sample.power(), partialTicks);
 
         // Bottom-left, with the rows stacked upwards from the bottom margin, so
@@ -458,6 +481,32 @@ public class ElectricTrainHud implements LayeredDraw.Layer {
         if (grade < -0.005d)
             return 0x7EE787;   // gravity assists
         return 0xFFFFFF;
+    }
+
+    /**
+     * The train's speed in Blocks/Second, taken from the carriage contraption entity.
+     *
+     * <p>Preferred over {@code train.speed} because the entity is moved every tick, while
+     * the synced field is only refreshed by a throttled packet. Falls back to
+     * {@code train.speed} when no carriage entity is loaded - a train whose chunks are not
+     * present still has a speed worth showing, and it is better than displaying zero.
+     */
+    private static float carriageSpeed(Train train, TrainHudData.Sample sample) {
+        double limit = Math.max(
+                (sample != null ? sample.designMaxSpeed() : 0f) * 1.5f, 40f);
+
+        Carriage carriage = drivenCarriage();
+        if (carriage != null && carriage.train == train) {
+            Carriage.DimensionalCarriageEntity dce = carriage.getDimensionalIfPresent(
+                    Minecraft.getInstance().level.dimension());
+            CarriageContraptionEntity cce = dce == null ? null : dce.entity.get();
+            if (cce != null) {
+                double step = cce.position().distanceTo(cce.getPrevPositionVec());
+                if (step <= limit)
+                    return (float) (step * 20d);
+            }
+        }
+        return (float) Math.abs(train.speed) * 20f;
     }
 
     private void lerp(float speed, float maxSpeed, float power, float partialTicks) {
