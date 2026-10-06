@@ -13,8 +13,9 @@ public class CTrains extends ConfigBase {
     //   * constant tractive POWER above it,
     //   * speed on a gradient is whatever the rating can sustain against
     //     both running resistance and the gravity component,
-    //   * curves limit speed by physics (lateral acceleration), NOT by Create's
-    //     flat 14-20 m/s figure: v = sqrt(g * r * lateralLimit).
+    //   * curves impose NO limit and cost no power: an electric train takes a curve
+    //     at the same speed as straight track. This is a deliberate design decision,
+    //     not an omission - see §4.4 of the model documentation.
     // ------------------------------------------------------------------
 
     public final ConfigFloat electricTrainMaxSpeed = f(100f, 1f, "electricTrainMaxSpeed",
@@ -28,9 +29,6 @@ public class CTrains extends ConfigBase {
 
     public final ConfigBool electricTrainManualFullSpeed = b(true, "electricTrainManualFullSpeed",
             "Let a manually driven electric train reach the speed its own traction model allows. Create drives manual trains to maxSpeed() * manualTrainSpeedModifier (0.75 by default), a handicap meant for fuel trains; with this on, an electric train ignores that factor so the configured electricTrainMaxSpeed is actually reachable. Scheduled trains are unaffected.");
-
-    public final ConfigFloat electricTrainCurveLateralLimit = f(0.65f, 0.05f, "electricTrainCurveLateralLimit",
-            "Lateral (centrifugal) acceleration a passenger is willing to accept in a curve, which sets the speed limit as v = sqrt(g * radius * this). 0.65 Blocks/Second^2 is about the comfortable standing-passenger figure, and it is what a real railway allows before slowing trains or tilting bodies. This REPLACES Create's own flat curve limit (14-20 Blocks/Second for its trains), which is deliberately discarded because it does not scale with radius: a broad sweeping curve is safe at far more than 20 Blocks/Second, and a tight one is not safe at 100. Raise it for a more permissive railway, lower it for a stricter one. Set it very high to let trains take any curve at full speed. [in Blocks / Second^2]");
 
     public final ConfigFloat electricTrainBrakeDeceleration = f(0.8f, 0.05f, "electricTrainBrakeDeceleration",
             "FRICTION (adhesion) service braking, the pads on the discs. 0.8 Blocks/Second² is the realistic figure for an adhesion railway. This is what the BRAKE position applies, and it is the only braking that exists at a standstill, so on its own it holds a grade up to this/g = 8.2%. The reverse position adds the motors to it; see electricTrainReverseMaxSpeed. [in Blocks / Second²]");

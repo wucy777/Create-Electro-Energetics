@@ -54,44 +54,6 @@ public final class TrainTractionModel {
     }
 
     /**
-     * Fastest a train may take a curve of this radius without tipping its passengers
-     * over, from the balance of centripetal and gravitational acceleration [m/s].
-     *
-     * <p>{@code v = sqrt(g · r · tan(θ))}, the standard cant-deficiency formula, with
-     * {@code θ} a permitted UNCOMPENSATED lateral acceleration rather than a real
-     * track cant - Minecraft has no cant, so this is the whole of the allowance. At
-     * 0.65 m/s² - about the comfortable limit for standing passengers, and roughly what
-     * a real railway allows before it starts tilting bodies or slowing trains down -
-     * the figures are:
-     *
-     * <pre>
-     *   radius  20 m (a tight Create curve)  ->  11.3 m/s  (41 km/h)
-     *   radius 50 m                          ->  17.9 m/s  (64 km/h)
-     *   radius 100 m                         ->  25.0 m/s  (90 km/h)
-     *   radius 300 m                         ->  43.3 m/s (156 km/h)
-     *   radius 1000 m                        ->  79.1 m/s (285 km/h)
-     * </pre>
-     *
-     * <p>This exists because the mod previously removed Create's curve limit outright
-     * ({@code Train.maxTurnSpeed} returns a flat 14-20 m/s for its own trains, and the
-     * electric override replaced that with the design ceiling). That was reported as a
-     * bug in its own right: people standing on a train were thrown out of it, and the
-     * cause is that Create carries a rider by their contact point, whose per-tick
-     * displacement on a curve scales with the YAW RATE - which a train taking a tight
-     * curve at 100 m/s makes enormous. A curve limit is therefore not a Create
-     * formality to be discarded; it is the thing that keeps a rider on the train.
-     *
-     * <p>Returned in Blocks/Second, like every other speed in this model.
-     */
-    public static double curveSpeedLimit(double radiusBlocks) {
-        if (!(radiusBlocks > 0d) || !Double.isFinite(radiusBlocks))
-            return Double.MAX_VALUE;
-        double lateral = Math.max(
-                CEEConfigs.server().trainValues.electricTrainCurveLateralLimit.get(), 1e-3d);
-        return Math.sqrt(G * radiusBlocks * lateral);
-    }
-
-    /**
      * Whether a train at this speed has arrived at the ceiling it is allowed, so
      * ACCELERATE should hand over to CRUISE.
      *
@@ -564,10 +526,6 @@ public final class TrainTractionModel {
      * @param brakeMs2      configured FRICTION service braking rate
      * @param emergency     whether the emergency brake is being applied
      * @param penalty       whether the post-emergency speed cap is in force
-     * @param curveLimitMs  fastest this train may take the curve it is on, or
-     *                      {@code <= 0} for no limit. Supplied by the caller because
-     *                      the law has no access to the track geometry, which lives on
-     *                      the carriages.
      * @param out           filled with the acceleration and the motor-brake share;
      *                      pass {@code null} when only the acceleration is wanted.
      *                      The share is reported rather than recomputed by the
@@ -577,7 +535,7 @@ public final class TrainTractionModel {
     public static double gearAcceleration(double signedSpeedMs, double gradeToPlusX, int carriages,
                                           double powerScale, TrainGear gear, double cruiseSpeedMs,
                                           double brakeMs2, boolean emergency, boolean penalty,
-                                          double curveLimitMs, GearStep out) {
+                                          GearStep out) {
         if (out != null)
             out.clear();
         double v = signedSpeedMs;
@@ -617,19 +575,6 @@ public final class TrainTractionModel {
         // accelerating to 1762 km/h with the cap supposedly in force.
         if (penalty)
             ceiling = Math.min(ceiling, PENALTY_SPEED);
-        // A curve lowers the ceiling exactly as the emergency penalty does, and for the
-        // same reason it is done by lowering the ceiling rather than clamping the speed:
-        // the train runs out of traction above it and is braked down to it, where a clamp
-        // would be a teleport the physics never agreed to.
-        //
-        // This has to happen HERE, in the law, and not only in Train.maxTurnSpeed. That
-        // method is consulted by Create's own control path and by Navigation, but the
-        // lever does not go through either - it runs this law, whose ceiling was the flat
-        // design figure. So the curve limit added for the lever's benefit was, for a
-        // lever-driven train, dead code: a driver could take a 20 m curve at 100 m/s with
-        // nothing objecting, which is precisely the case that throws people off the train.
-        if (curveLimitMs > 0d)
-            ceiling = Math.min(ceiling, curveLimitMs);
         // Which way the train is going, or would go if released from rest. Used
         // only to aim traction and the brake; gravity never needs it.
         double heading = speed < 1e-6d ? 1d : Math.signum(v);
@@ -844,46 +789,30 @@ public final class TrainTractionModel {
             }
         }
 
-        // An externally imposed ceiling is enforced on its own terms rather than by
-        // braking at the ceiling itself.
+        // The emergency speed cap, enforced on its own terms rather than by braking at the
+        // design ceiling.
         //
-        // Only a train that is ALREADY above such a limit is braked, and only until it is
-        // back under it. That distinction is what separates "a limit is in force" from
-        // "the train has reached its design speed": at the design ceiling the remaining
-        // thrust is a fraction of a m/s^2, so a brake there fights a train doing nothing
-        // wrong and produces the accelerate/brake oscillation described above. A train
-        // genuinely over a limit needs slowing, and braking is the only way the limit is
-        // honoured on a descent, where the motors are not what is pushing it.
+        // Only a train that is ALREADY above the cap is braked, and only until it is back
+        // under it. That distinction is what separates "the cap is in force" from "the
+        // train has reached its design speed": at the design ceiling the remaining thrust
+        // is a fraction of a m/s^2, so a brake there fights a train doing nothing wrong and
+        // produces the accelerate/brake oscillation described above. A train genuinely over
+        // the cap needs slowing, and braking is the only way the cap is honoured on a
+        // descent, where the motors are not what is pushing it.
         //
-        // Two limits reach here, and both are limits nothing else enforces:
+        // This is the ONLY externally imposed ceiling in the model. Curves deliberately do
+        // not have one: see TrainMixin.electroEnergetics$maxTurnSpeed for why an electric
+        // train takes a curve at the same speed as straight track, and for the round in
+        // which I wrongly added a limit here and had to take it back out.
         //
-        //   the emergency cap  - 40 km/h until the next station call
-        //   a curve            - v = sqrt(g*r*lateral), which a train entering too fast
-        //                        must be brought down to. Skipping this left the curve
-        //                        limit with no effect on a lever-driven train at all,
-        //                        because the ACCELERATE branch deliberately applies no
-        //                        brake at or above a ceiling and nothing else did either.
-        //
-        // The margin is hysteresis, so a train sitting exactly on a limit is not braked
-        // and released one tick at a time. Expressed as a fraction of the DESIGN ceiling
-        // rather than a fixed m/s, so it stays proportionate on a curve whose limit may
-        // be an order of magnitude below the design speed.
-        double enforcedCeiling = designMaxSpeed();
-        if (penalty)
-            enforcedCeiling = Math.min(enforcedCeiling, PENALTY_SPEED);
-        if (curveLimitMs > 0d)
-            enforcedCeiling = Math.min(enforcedCeiling, curveLimitMs);
+        // The margin is hysteresis, so a train sitting exactly on the cap is not braked and
+        // released one tick at a time.
+        boolean overPenalty = penalty && !emergency && speed > PENALTY_SPEED + CAP_MARGIN;
 
-        // Only when the limit is genuinely below the design ceiling: at the design
-        // ceiling itself there is nothing to enforce, which is the case the ACCELERATE
-        // branch above deliberately leaves to drag.
-        boolean limitInForce = enforcedCeiling < designMaxSpeed() - 1e-9d;
-        boolean overLimit = speed > enforcedCeiling + Math.max(CAP_MARGIN, enforcedCeiling * 0.02d);
-
-        // Skipped when the lever is already braking at least this hard: in that case
-        // the driver's own brake is doing the work, and replacing it would throw away
-        // the motor share and with it the regeneration.
-        if (limitInForce && !emergency && overLimit) {
+        // Skipped when the lever is already braking at least this hard: in that case the
+        // driver's own brake is doing the work, and replacing it would throw away the
+        // motor share and with it the regeneration.
+        if (overPenalty) {
             double limitBrakeForce = brakeTotal * mass;
             if (Math.abs(leverBrakeForce) < limitBrakeForce) {
                 force -= leverBrakeForce;                 // drop whatever the lever applied
@@ -988,7 +917,7 @@ public final class TrainTractionModel {
                                           double powerScale, TrainGear gear, double cruiseSpeedMs,
                                           double brakeMs2, boolean emergency, boolean penalty) {
         return gearAcceleration(signedSpeedMs, gradeToPlusX, carriages, powerScale, gear,
-                cruiseSpeedMs, brakeMs2, emergency, penalty, 0d, null);
+                cruiseSpeedMs, brakeMs2, emergency, penalty, null);
     }
 
     /**

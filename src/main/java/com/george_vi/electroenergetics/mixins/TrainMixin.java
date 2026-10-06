@@ -13,9 +13,7 @@ import com.george_vi.electroenergetics.content.railway_electrification.sound_eff
 import com.george_vi.electroenergetics.mixin_interfaces.ICEETrainExtension;
 import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
-import com.simibubi.create.content.trains.entity.Carriage;
 import com.simibubi.create.content.trains.entity.Train;
-import com.simibubi.create.content.trains.entity.TravellingPoint;
 import com.simibubi.create.content.trains.graph.DimensionPalette;
 import com.simibubi.create.content.trains.graph.TrackGraph;
 import net.minecraft.core.HolderLookup;
@@ -27,7 +25,6 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
 
 import java.util.HashSet;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -168,81 +165,39 @@ public class TrainMixin implements ICEETrainExtension {
         return original.call();
     }
 
+    /**
+     * An electric train takes curves at the same speed as straight track.
+     *
+     * <p>This is the original design decision for this mod, and it was reinstated after I
+     * wrongly overrode it for one round. Curves impose no limit and cost no power.
+     *
+     * <p>I removed it on the theory that Create's contact-point rotation term was throwing
+     * riders off the train on curves, and that the curve limit was what kept the term
+     * small. The theory was wrong about which mechanism was responsible: bytecode-level
+     * investigation of the running jars showed the ejection is vanilla's "moved wrongly"
+     * rubber-band, which is fixed separately in
+     * {@link ServerGamePacketListenerImplMixin}. Having removed the limit on a false
+     * premise, and then made it actually bite in the gear law, I had quietly reversed a
+     * decision the user had already made and confirmed.
+     *
+     * <p>Returning the same figure as {@code maxSpeed()} is what "no curve limit" means,
+     * and it is done through {@code maxSpeed()} rather than by restating the design ceiling
+     * so the two can never disagree - including on the client, where {@code maxSpeed()} is
+     * the method that knows what the server synced.
+     */
     @WrapMethod(method = "maxTurnSpeed")
     public float electroEnergetics$maxTurnSpeed(Operation<Float> original) {
         ElectricTrainData electricTrainData = electroenergetics$electricTrainData;
 
-        // hasTractionMotors, not isPowered - the same correction made to maxSpeed above,
-        // and needed here for the same reason: an electric train between substations was
-        // being handed Create's flat turning figure while keeping the electric straight-line
-        // ceiling, so its limit jumped between two unrelated numbers as it crossed a
-        // neutral section. A consist does not stop being electric because the wire ended.
+        // Not an electric train: Create's own figure, untouched.
         if (!electricTrainData.hasTractionMotors)
             return original.call();
 
-        // A curve limits speed by PHYSICS, not by Create's flat figure.
-        //
-        // Create returns one constant (14-20 m/s) for every curve in the world, which is
-        // wrong in both directions: a broad sweeping curve is safe far above it, and a
-        // tight one is not safe at 100 m/s. So a radius-based limit is used instead -
-        // v = sqrt(g * r * lateralLimit) - which is the cant-deficiency formula and
-        // needs nothing but the curve's own radius.
-        //
-        // This method used to return the design ceiling outright, on the reasoning that
-        // "curves impose no limit in this model". That was a mistake, and it showed up
-        // as a bug in its own right: people standing on a train were thrown out of it on
-        // curves at speed. Create carries a standing rider by their CONTACT POINT, whose
-        // per-tick displacement scales with the yaw rate - so removing the curve limit
-        // removes the very thing that keeps a rider aboard. A curve limit is not
-        // paperwork to be discarded; it is what makes the ride survivable.
-        //
-        // Falls back to Create's own figure when the radius cannot be read, which is the
-        // conservative direction: an unknown curve is treated as a tight one.
-        Train self = (Train) (Object) this;
-        double radius = leadingCurveRadius(self);
-        if (!(radius > 0d))
-            return original.call();
-
-        double limit = TrainTractionModel.curveSpeedLimit(radius);
-        // Create returns Blocks/Tick here (its constants are m/s divided by 20).
-        return (float) Math.min(limit / 20d, electricTrainData.maxSpeed / 20f);
-    }
-
-    /**
-     * Radius of the curve the train is entering or on, or {@code 0} when it is on
-     * straight track or the geometry cannot be read.
-     *
-     * <p>Both ends are checked, not just the leading one: a train's rear carriage is
-     * still on a curve after its nose has straightened out, and at these speeds the
-     * difference is most of the consist. A limit that only looked ahead would let a long
-     * train straighten up while its tail was still swinging.
-     *
-     * <p>Read from the track edge, which is where Create keeps the data
-     * ({@code TrackEdge.getTurn()} returns the {@code BezierConnection}, whose
-     * {@code getRadius()} is the figure wanted). Guarded throughout, because this runs
-     * on the train's tick and a partially loaded graph is a normal state, not an error -
-     * failing to Create's own limit is always safe.
-     */
-    private static double leadingCurveRadius(Train train) {
-        try {
-            if (train.carriages.isEmpty())
-                return 0d;
-            double smallest = 0d;
-            for (Carriage carriage : List.of(train.carriages.get(0),
-                    train.carriages.get(train.carriages.size() - 1))) {
-                for (TravellingPoint point : List.of(carriage.getLeadingPoint(),
-                        carriage.getTrailingPoint())) {
-                    if (point.edge == null || !point.edge.isTurn())
-                        continue;
-                    double r = point.edge.getTurn().getRadius();
-                    if (r > 0d && (smallest == 0d || r < smallest))
-                        smallest = r;
-                }
-            }
-            return smallest;
-        } catch (Throwable ignored) {
-            return 0d;
-        }
+        // Create returns Blocks/Tick here, and maxSpeed() already returns Blocks/Tick, so
+        // the value is used as-is. Delegating rather than repeating the expression is
+        // deliberate: an unpowered train and a client-side train both need the synced
+        // ceiling that maxSpeed() resolves, and a second copy of that logic would drift.
+        return electroEnergetics$maxSpeed(original);
     }
 
     /**
@@ -426,24 +381,12 @@ public class TrainMixin implements ICEETrainExtension {
         // the law works and where the cab's +x is the world's mirror*x.
         double gradeToPlusX = (self.speed < 0 ? -data.trackGrade : data.trackGrade) * mirror;
 
-        // The curve the train is on, if any, as a speed the law may not exceed.
-        //
-        // Passed in rather than looked up inside the law because the geometry lives on
-        // the carriages and the law is a pure function of forces. Without this the curve
-        // limit was dead code for a lever-driven train: Train.maxTurnSpeed is only
-        // consulted by Create's own controls and by Navigation, and the lever uses
-        // neither, so a driver could take a 20 m curve at 100 m/s with nothing objecting.
-        double curveLimit = 0d;
-        double curveRadius = leadingCurveRadius(self);
-        if (curveRadius > 0d)
-            curveLimit = TrainTractionModel.curveSpeedLimit(curveRadius);
-
         double a = TrainTractionModel.gearAcceleration(
                 signedSpeedMs, gradeToPlusX, carriages, data.powerScale,
                 effectiveGear, cruiseCommand,
                 TrainTractionModel.frictionBrake(),
                 st.emergencyTicks > 0 && st.emergencyArmed,
-                st.emergencyPenalty, curveLimit, data.gearStep);
+                st.emergencyPenalty, data.gearStep);
 
         // Back out of the mirror: the law worked in the cab's frame, and the speed it
         // writes is the train's own.
