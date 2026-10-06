@@ -108,15 +108,31 @@ public final class ElectricManualSpeed {
         if (train == null)
             return new Traction(false, false);
 
-        if (((ICEETrainExtension) train).getElectricTrainData().isPowered) {
+        ElectricTrainData data = ((ICEETrainExtension) train).getElectricTrainData();
+
+        // hasTractionMotors, NOT isPowered. Falling back to "not an electric train" when
+        // the supply is lost re-applied Create's manual-driving handicap to a train that
+        // is merely between substations: its lever commands were scaled by 0.75 and, with
+        // the electric ceiling also discarded, it was additionally capped at Create's
+        // 40 Blocks/Second. Both went away and came back as the train crossed a neutral
+        // section, which is not a property any driver could understand.
+        //
+        // A consist does not stop being electric because the wire ended, so the question
+        // "is this an electric train" is answered from the latched motor count. Being
+        // unpowered is a separate fact, and it is already handled where it belongs - the
+        // tractive effort is scaled by the supply voltage.
+        if (data.hasTractionMotors) {
+            // Drive rules for an electric train, supply or not.
             CServer config = CEEConfigs.server();
             boolean waived = config != null
                     && config.trainValues.electricTrainManualFullSpeed.get();
             return new Traction(true, waived);
         }
 
+        // A non-electric train: on the client the electrical simulation never runs, so the
+        // answer has to come from what the server synced.
         TrainHudData.Sample sample = TrainHudData.get(train.id);
-        if (sample == null || !sample.powered())
+        if (sample == null || sample.motorCars() <= 0)
             return new Traction(false, false);
         return new Traction(true, sample.manualFullSpeed());
     }

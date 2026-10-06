@@ -46,6 +46,8 @@ import java.util.UUID;
  * @param regen            whether the motors are feeding the line right now
  * @param autoArrive       Create's navigation is running an automatic station arrival
  * @param unmanned         the driver has left the controls and the clock is running
+ * @param designMaxSpeed   the ceiling the consist is ALLOWED, supply or not; see
+ *                         {@code TrainHudData.maxSpeedFor}
  */
 public record SyncTrainGaugeDataPacket(UUID trainId, double voltage, double current,
                                        float maxSpeed, float power, double grade,
@@ -54,7 +56,8 @@ public record SyncTrainGaugeDataPacket(UUID trainId, double voltage, double curr
                                        int gear, boolean confirmDue, int vigilanceStage,
                                        boolean emergencyArmed,
                                        boolean emergencyPenalty, int cruiseState,
-                                       boolean regen, boolean autoArrive, boolean unmanned)
+                                       boolean regen, boolean autoArrive, boolean unmanned,
+                                       float designMaxSpeed)
         implements ClientboundPacketPayload {
 
     public static final StreamCodec<ByteBuf, SyncTrainGaugeDataPacket> STREAM_CODEC = new StreamCodec<>() {
@@ -78,6 +81,7 @@ public record SyncTrainGaugeDataPacket(UUID trainId, double voltage, double curr
             // growing it is the point - and the byte was already being sent.
             int flags = buffer.readUnsignedByte();
             int cruiseState = buffer.readByte();
+            float designMaxSpeed = buffer.readFloat();
             boolean confirmDue = (flags & 1) != 0;
             boolean emergencyArmed = (flags & 2) != 0;
             boolean emergencyPenalty = (flags & 4) != 0;
@@ -88,7 +92,7 @@ public record SyncTrainGaugeDataPacket(UUID trainId, double voltage, double curr
             return new SyncTrainGaugeDataPacket(trainId, voltage, current, maxSpeed, power,
                     grade, powered, carriages, motorCars, powerPerCarriage, manualFullSpeed,
                     gear, confirmDue, vigilanceStage, emergencyArmed, emergencyPenalty,
-                    cruiseState, regen, autoArrive, unmanned);
+                    cruiseState, regen, autoArrive, unmanned, designMaxSpeed);
         }
 
         @Override
@@ -111,6 +115,7 @@ public record SyncTrainGaugeDataPacket(UUID trainId, double voltage, double curr
                     | (p.autoArrive ? 64 : 0) | (p.unmanned ? 128 : 0);
             buffer.writeByte(flags);
             buffer.writeByte(p.cruiseState);
+            buffer.writeFloat(p.designMaxSpeed);
         }
     };
 
@@ -119,7 +124,7 @@ public record SyncTrainGaugeDataPacket(UUID trainId, double voltage, double curr
     public void handle(LocalPlayer player) {
         ClientTrainGaugeData.update(trainId, voltage, current);
         TrainHudData.update(trainId, maxSpeed, power, (float) voltage, grade, powered,
-                carriages, motorCars, powerPerCarriage, manualFullSpeed);
+                carriages, motorCars, powerPerCarriage, manualFullSpeed, designMaxSpeed);
         TrainHudData.updateGear(trainId, gear, confirmDue, vigilanceStage, emergencyArmed,
                 emergencyPenalty, cruiseState, regen, autoArrive, unmanned);
     }

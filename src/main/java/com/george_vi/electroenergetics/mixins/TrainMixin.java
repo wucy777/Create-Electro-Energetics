@@ -105,26 +105,49 @@ public class TrainMixin implements ICEETrainExtension {
     @WrapMethod(method = "maxSpeed")
     public float electroEnergetics$maxSpeed(Operation<Float> original) {
         ElectricTrainData electricTrainData = electroenergetics$electricTrainData;
-        float result;
 
-        if (electricTrainData.isPowered) {
+        // An electric train's ceiling does NOT depend on whether it has supply this
+        // second, and gating it on isPowered was a real conflict.
+        //
+        // The old code fell through to Create's own ceiling the moment the train was
+        // unpowered, which for a powered train is 40 Blocks/Second. So a 100 Blocks/Second
+        // electric train that merely crossed a neutral section or left the electrified
+        // line was silently re-capped at 40 by Create's figure - the train did not slow
+        // down, because nothing clamps train.speed to this, but everything that ASKS the
+        // train how fast it may go got the wrong answer: Navigation's target speed, the
+        // schedule's throttle cap, and the automatic-arrival command the gear law follows.
+        //
+        // WHY THE GATE IS ALSO underGearControl(). The ceiling is only safe to raise
+        // while dead for a train whose tractive effort this mod scales itself. The gear
+        // law multiplies effort by the supply voltage (powerScaleForVoltage), so a dead
+        // train it owns simply has no force available and coasts - the high ceiling grants
+        // it nothing. But an UNPOWERED train this mod does NOT own is driven by Create's
+        // own ramping (see approachTargetSpeed, which falls back to Create below), and
+        // that path applies its configured acceleration with no reference to the catenary
+        // at all. Handing it the electric ceiling would let a dead scheduled train
+        // accelerate to 100 Blocks/Second drawing no power whatsoever.
+        //
+        // So: the design ceiling while the train can actually power itself, or while this
+        // mod is the one supplying the force. Create's ceiling otherwise.
+        boolean oursToDrive = electricTrainData.hasTractionMotors
+                && (electricTrainData.isPowered || electricTrainData.driver.underGearControl());
+
+        if (oursToDrive) {
             // maxSpeed is in Blocks/Second, maxSpeed() must return Blocks/Tick.
-            result = electricTrainData.maxSpeed / 20f;
-        } else {
-            result = original.call();
-
-            // On the client the electrical simulation never runs, so isPowered is
-            // always false and we would fall through to Create's own top speed.
-            // Create's TrainHUD sizes its 18-segment speed bar as
-            // |speed| / (maxSpeed() * manualTrainSpeedModifier), so that stale
-            // denominator is what made the bar disagree with the train. Use the
-            // ceiling the server synced instead.
             Train self = (Train) (Object) this;
-            float synced = TrainHudData.maxSpeed(self.id);
+            float synced = TrainHudData.maxSpeedFor(self.id);
             if (synced > 0f)
-                result = synced / 20f;
+                return synced / 20f;
+            if (electricTrainData.maxSpeed > 0f)
+                return electricTrainData.maxSpeed / 20f;
+            // Before the electrical solve has produced a figure, fall back to the
+            // configured design ceiling so a driven train is not briefly capped by
+            // Create while the first circuit build is still pending.
+            if (electricTrainData.driver.underGearControl())
+                return (float) (TrainTractionModel.designMaxSpeed() / 20d);
         }
-        return result;
+
+        return original.call();
     }
 
     @WrapMethod(method = "maxTurnSpeed")

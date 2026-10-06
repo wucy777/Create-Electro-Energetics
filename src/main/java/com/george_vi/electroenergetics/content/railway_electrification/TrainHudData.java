@@ -35,10 +35,15 @@ public final class TrainHudData {
      *                         because it comes from a server-side config the
      *                         client cannot read, and the speed bar has to use
      *                         the same factor the train is actually driven with.
+     * @param designMaxSpeed   the ceiling this consist is ALLOWED, independent of
+     *                         whether it has supply right now. Distinct from
+     *                         {@code maxSpeed}, which is what it can currently
+     *                         sustain against gradient and supply.
      */
     public record Sample(float maxSpeed, float power, float voltage, double grade,
                          boolean powered, int carriages, int motorCars,
-                         float powerPerCarriage, boolean manualFullSpeed) {}
+                         float powerPerCarriage, boolean manualFullSpeed,
+                         float designMaxSpeed) {}
 
     private static final Map<UUID, Sample> SAMPLES = new ConcurrentHashMap<>();
 
@@ -73,9 +78,10 @@ public final class TrainHudData {
 
     public static void update(UUID trainId, float maxSpeed, float power, float voltage,
                               double grade, boolean powered, int carriages, int motorCars,
-                              float powerPerCarriage, boolean manualFullSpeed) {
+                              float powerPerCarriage, boolean manualFullSpeed,
+                              float designMaxSpeed) {
         SAMPLES.put(trainId, new Sample(maxSpeed, power, voltage, grade, powered,
-                carriages, motorCars, powerPerCarriage, manualFullSpeed));
+                carriages, motorCars, powerPerCarriage, manualFullSpeed, designMaxSpeed));
     }
 
     public static void updateGear(UUID trainId, int gear, boolean confirmDue, int vigilanceStage,
@@ -113,6 +119,30 @@ public final class TrainHudData {
     public static float maxSpeed(UUID trainId) {
         Sample s = SAMPLES.get(trainId);
         return s == null || !s.powered() ? 0f : s.maxSpeed();
+    }
+
+    /**
+     * The ceiling this consist is ALLOWED, whether or not it has supply right now.
+     *
+     * <p>Used by {@code Train.maxSpeed()} so that an electric train does not fall back
+     * to Create's own 40 Blocks/Second ceiling the moment the catenary ends. That
+     * fallback was a genuine conflict: a 100 Blocks/Second train crossing a neutral
+     * section, or running on to an unelectrified line, had every "how fast may I go"
+     * question answered with 40 - Navigation's target speed, the schedule's throttle
+     * cap, and the automatic-arrival command. The traction force is separately scaled by
+     * the supply voltage, so returning the design ceiling while dead grants no power:
+     * the train coasts.
+     *
+     * <p>Read on BOTH sides, and it has to be: the client never runs the electrical
+     * simulation, so it cannot compute this itself. Unlike {@link #maxSpeed(UUID)} this
+     * deliberately does not check {@code powered}, because being unpowered is exactly the
+     * case it exists to answer.
+     */
+    public static float maxSpeedFor(UUID trainId) {
+        Sample s = SAMPLES.get(trainId);
+        if (s == null || s.motorCars() <= 0)
+            return 0f;
+        return s.designMaxSpeed() > 0f ? s.designMaxSpeed() : s.maxSpeed();
     }
 
     /**
