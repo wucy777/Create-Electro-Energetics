@@ -172,13 +172,13 @@ public class TrainMixin implements ICEETrainExtension {
      * wrongly overrode it for one round. Curves impose no limit and cost no power.
      *
      * <p>I removed it on the theory that Create's contact-point rotation term was throwing
-     * riders off the train on curves, and that the curve limit was what kept the term
-     * small. The theory was wrong about which mechanism was responsible: bytecode-level
-     * investigation of the running jars showed the ejection is vanilla's "moved wrongly"
-     * rubber-band, which is fixed separately in
-     * {@link ServerGamePacketListenerImplMixin}. Having removed the limit on a false
-     * premise, and then made it actually bite in the gear law, I had quietly reversed a
-     * decision the user had already made and confirmed.
+     * riders off the train on curves, and that the curve limit was what kept the term small.
+     * That theory was wrong, and so was the replacement I built on it: I then blamed vanilla's
+     * "moved wrongly" rubber-band and guarded it, and a scan of every session log found that
+     * message had never once been logged, so that guard was dead code and has been deleted
+     * along with the rest. Having removed the limit on a false premise, and then made it
+     * actually bite in the gear law, I had quietly reversed a decision the user had already
+     * made and confirmed.
      *
      * <p>Returning the same figure as {@code maxSpeed()} is what "no curve limit" means,
      * and it is done through {@code maxSpeed()} rather than by restating the design ceiling

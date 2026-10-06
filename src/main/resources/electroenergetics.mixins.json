@@ -7,7 +7,6 @@
   "compatibilityLevel": "JAVA_21",
   "plugin": "com.george_vi.electroenergetics.CEEMixinPlugin",
   "client": [
-    "CarriageFrameLockMixin",
     "CarriageSoundsMixin",
     "ControlsMovementBehaviourMixin",
     "HumanoidModelMixin",
@@ -23,7 +22,6 @@
     "defaultRequire": 1
   },
   "mixins": [
-    "AbstractContraptionEntityMixin",
     "BlockStateBaseMixin",
     "CarriageContraptionEntityMixin",
     "CarriageContraptionMixin",
@@ -35,7 +33,6 @@
     "MinecraftServerMixin",
     "SchematicLevelMixin",
     "SchematicPrinterMixin",
-    "ServerGamePacketListenerImplMixin",
     "StructureTemplateMixin",
     "SubLevelAssemblyHelperMixin",
     "TrainMixin",
