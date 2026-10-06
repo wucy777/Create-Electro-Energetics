@@ -141,8 +141,23 @@ public class ElectricTrainHud implements LayeredDraw.Layer {
         // off the frame budget.
         // Math.round(float) widens to double and returns a long, so each of these
         // is narrowed back explicitly.
-        int speedI = (int) Math.round(shownSpeed);
-        int capI = (int) Math.round(shownMaxSpeed);
+        // Speed is quantised in TENTHS of a m/s, not whole ones.
+        //
+        // Whole m/s is too coarse to see the one thing a driver most needs to see when the
+        // lever is in a position that only coasts: whether the train is actually slowing.
+        // In 切断动力 the whole point is that drag alone acts, and drag is small - at 80 m/s
+        // it decelerates the consist by 0.107 m/s^2, so a whole-m/s readout sits on the same
+        // digit for 9.3 seconds and then jumps. That was reported as the train appearing to
+        // hold a constant speed while drawing no power, which is exactly what a rounded
+        // readout shows for a train that is in fact losing a metre per second every nine
+        // seconds. A tenth is ~1 s per change at that speed, so the drift is visible.
+        //
+        // It costs nothing measurable: the value is still cached, so the row is rebuilt
+        // only when a DISPLAYED digit changes, which is the same rule as before - there are
+        // simply ten times as many distinguishable values. String.format runs a few times a
+        // second while coasting rather than once every nine seconds.
+        int speedI = (int) Math.round(shownSpeed * 10f);
+        int capI = (int) Math.round(shownMaxSpeed * 10f);
         int gearI = gearState == null ? -1 : gearState.gear();
         int powerKwI = (int) Math.round(shownPower / 1000f);
         int deciVoltI = (int) Math.round(sample.voltage() / 100f);   // 0.1 kV steps
@@ -184,9 +199,9 @@ public class ElectricTrainHud implements LayeredDraw.Layer {
         // Warning lamps, as a strip above the rows.
         //
         // Above rather than beside, because the values column is at a fixed offset and
-        // its text is the widest thing here ("350 / 350 m/s"), so a side strip would
-        // sit on top of it. Above is empty space and always will be, since the panel
-        // grows downwards from a fixed top edge.
+        // its text is the widest thing here ("350.0 / 350.0 m/s" with the tenths shown),
+        // so a side strip would sit on top of it. Above is empty space and always will
+        // be, since the panel grows downwards from a fixed top edge.
         //
         // The vigilance lamp is the one that matters: the prompt is the only thing that
         // will drop the lever on its own, it is easy to miss as a line of text, and
@@ -348,7 +363,13 @@ public class ElectricTrainHud implements LayeredDraw.Layer {
         return VALUE;
     }
 
-    /** Rebuilds the cached row text; only called when a displayed value changed. */
+    /**
+     * Rebuilds the cached row text; only called when a displayed value changed.
+     *
+     * <p>{@code speed} and {@code cap} arrive as TENTHS of a m/s, matching how they were
+     * quantised, so the divisor is applied here rather than at the call site - that keeps
+     * the cached integers and the printed strings on the same scale by construction.
+     */
     private void rebuildText(int speed, int cap, int gear, int powerKw, int deciVolt,
                              int cars, int motors, boolean powered, double grade,
                              float perCarriage) {
@@ -356,8 +377,8 @@ public class ElectricTrainHud implements LayeredDraw.Layer {
         // reported as zero. Showing "0 / 0" there would read as a broken readout,
         // so the ceiling is left blank and the catenary row explains why.
         textSpeed = powered
-                ? speed + " / " + cap + " m/s"
-                : speed + " m/s";
+                ? String.format("%.1f / %.1f m/s", speed / 10d, cap / 10d)
+                : String.format("%.1f m/s", speed / 10d);
         textGear = gear < 0 || gear >= TrainGear.values().length
                 ? "--"
                 : TrainControlHud.label(TrainGear.values()[gear]);

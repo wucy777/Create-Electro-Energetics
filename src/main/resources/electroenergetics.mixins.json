@@ -9,7 +9,7 @@
   "client": [
     "CarriageSoundsMixin",
     "ControlsMovementBehaviourMixin",
-    "FlingDiagnosticMixin",
+    "ContraptionDismountMixin",
     "HumanoidModelMixin",
     "ItemInHandRendererMixin",
     "KeyboardHandlerMixin",
