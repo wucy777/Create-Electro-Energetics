@@ -119,6 +119,18 @@ public class CarriageVerticalCarryMixin {
     @Unique
     private static Vec3 electroEnergetics$surfaceAllowed = Vec3.ZERO;
 
+    /**
+     * What {@code collide(totalResponse, entity)} returned at {@code :283}, the push-out path.
+     *
+     * <p>Recorded because it distinguishes the two possible causes of the sink, which need
+     * different fixes: if this carries a positive Y, the solver IS resolving penetration and the
+     * surface branch's discarded term is the whole story. If it is zero, the rider is resting on
+     * the carriage without penetrating it at all, so there is no push-out to recover and the
+     * weight has to be supported rather than restored.
+     */
+    @Unique
+    private static Vec3 electroEnergetics$hardAllowed = Vec3.ZERO;
+
     /** The rider's position before this carriage's pass, to confirm a real horizontal carry. */
     @Unique
     private static Vec3 electroEnergetics$beforePos;
@@ -143,6 +155,25 @@ public class CarriageVerticalCarryMixin {
     private static double electroEnergetics$relYMin = Double.MAX_VALUE;
     @Unique
     private static double electroEnergetics$relYMax = -Double.MAX_VALUE;
+
+    /**
+     * What the whole pass did to the rider's height, and how often it was upwards.
+     *
+     * <p>This is the decisive pair. If a carried rider is never once raised by the pass - if
+     * {@code roseTicks} stays at zero - then nothing in Create supplies their weight at this
+     * speed, whatever the individual terms say, and the support has to be provided rather than
+     * recovered from a discarded value.
+     */
+    @Unique
+    private static double electroEnergetics$passDySum;
+    @Unique
+    private static int electroEnergetics$roseTicks;
+    @Unique
+    private static int electroEnergetics$sankTicks;
+    @Unique
+    private static double electroEnergetics$sankSum;
+    @Unique
+    private static double electroEnergetics$hardYSum;
 
     /** Scopes the redirects to train carriages and a rider actually being carried. */
     @Inject(method = "collideEntities", at = @At("HEAD"), remap = false)
@@ -202,6 +233,29 @@ public class CarriageVerticalCarryMixin {
     }
 
     /**
+     * Captures the push-out path's result at {@code :283}.
+     *
+     * <p>A positive Y here means the solver is resolving real penetration, in which case the
+     * surface branch's discarded term is the cause of the sink and applying it is the fix. A zero
+     * means the rider rests on the carriage without penetrating, so there is nothing to recover
+     * and the weight must be supported instead.
+     */
+    @WrapOperation(method = "collideEntities",
+            at = @At(value = "INVOKE",
+                    target = "Lcom/simibubi/create/content/contraptions/ContraptionCollider;"
+                            + "collide(Lnet/minecraft/world/phys/Vec3;"
+                            + "Lnet/minecraft/world/entity/Entity;)"
+                            + "Lnet/minecraft/world/phys/Vec3;",
+                    ordinal = 0),
+            remap = false)
+    private static Vec3 electroEnergetics$captureHardAllowed(Vec3 motion, Entity entity,
+                                                             Operation<Vec3> original) {
+        Vec3 allowed = original.call(motion, entity);
+        electroEnergetics$hardAllowed = allowed;
+        return allowed;
+    }
+
+    /**
      * Applies the vertical component, matching the hard-collision branch at {@code :284-285}.
      *
      * <p>{@code ordinal = 1} selects the surface branch's call at {@code :309}; ordinal 0 is
@@ -249,14 +303,27 @@ public class CarriageVerticalCarryMixin {
             electroEnergetics$carriedTicks++;
             double allowedY = electroEnergetics$surfaceAllowed.y;
             electroEnergetics$allowedYSum += allowedY;
+            electroEnergetics$hardYSum += electroEnergetics$hardAllowed.y;
             if (allowedY > 1.0e-4d)
                 electroEnergetics$positiveLifts++;
+
+            // What the pass as a whole did to their height, which is the measurement that cannot
+            // be argued with: if a carried rider is never raised, nothing here supports them.
+            double passDy = player.getY() - before.y;
+            electroEnergetics$passDySum += passDy;
+            if (passDy > 1.0e-4d)
+                electroEnergetics$roseTicks++;
+            else if (passDy < -1.0e-4d) {
+                electroEnergetics$sankTicks++;
+                electroEnergetics$sankSum += -passDy;
+            }
 
             double relY = player.getY() - contraption.getY();
             if (relY < electroEnergetics$relYMin) electroEnergetics$relYMin = relY;
             if (relY > electroEnergetics$relYMax) electroEnergetics$relYMax = relY;
 
-            electroEnergetics$maybeSummary(contraption.level().getGameTime(), player, allowedY);
+            electroEnergetics$maybeSummary(contraption.level().getGameTime(), player, allowedY,
+                    passDy);
         } catch (Throwable ignored) {
             // A carry correction must never be the thing that breaks the client.
             electroEnergetics$current = null;
@@ -266,7 +333,7 @@ public class CarriageVerticalCarryMixin {
 
     @Unique
     private static void electroEnergetics$maybeSummary(long now, LocalPlayer player,
-                                                       double allowedY) {
+                                                       double allowedY, double passDy) {
         if (now - electroEnergetics$lastSummary < SUMMARY_EVERY)
             return;
         if (electroEnergetics$lastSummary == Long.MIN_VALUE) {
@@ -281,21 +348,33 @@ public class CarriageVerticalCarryMixin {
 
         int t = electroEnergetics$carriedTicks;
         electroEnergetics$LOG.info(
-                "CARRY FIX carried={} allowedYavg={} allowedYnow={} positiveLifts={}/{} "
-                        + "relY=[{},{}] nowRelY={} vy={} onGround={} fallDist={}",
+                "CARRY FIX ticks={} surfaceYavg={} surfaceYnow={} positive={}/{} hardYavg={} "
+                        + "| passDyavg={} rose={}/{} sank={}/{} avgSank={} "
+                        + "| relY=[{},{}] nowRelY={} vy={} onGround={}",
                 t,
                 String.format("%.4f", electroEnergetics$allowedYSum / t),
                 String.format("%.4f", allowedY),
                 electroEnergetics$positiveLifts, t,
+                String.format("%.4f", electroEnergetics$hardYSum / t),
+                String.format("%.4f", electroEnergetics$passDySum / t),
+                electroEnergetics$roseTicks, t,
+                electroEnergetics$sankTicks, t,
+                String.format("%.4f", electroEnergetics$sankTicks == 0 ? 0d
+                        : electroEnergetics$sankSum / electroEnergetics$sankTicks),
                 String.format("%.3f", electroEnergetics$relYMin),
                 String.format("%.3f", electroEnergetics$relYMax),
                 String.format("%.3f", player.getY()),
                 String.format("%.3f", player.getDeltaMovement().y),
-                player.onGround(), String.format("%.3f", player.fallDistance));
+                player.onGround());
 
         electroEnergetics$carriedTicks = 0;
         electroEnergetics$positiveLifts = 0;
         electroEnergetics$allowedYSum = 0;
+        electroEnergetics$hardYSum = 0;
+        electroEnergetics$passDySum = 0;
+        electroEnergetics$roseTicks = 0;
+        electroEnergetics$sankTicks = 0;
+        electroEnergetics$sankSum = 0;
         electroEnergetics$relYMin = Double.MAX_VALUE;
         electroEnergetics$relYMax = -Double.MAX_VALUE;
     }
