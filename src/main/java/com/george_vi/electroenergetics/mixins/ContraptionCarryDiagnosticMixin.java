@@ -1,11 +1,17 @@
 package com.george_vi.electroenergetics.mixins;
 
+import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
+import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import com.simibubi.create.content.contraptions.AbstractContraptionEntity;
 import com.simibubi.create.content.contraptions.ContraptionCollider;
+import com.simibubi.create.content.trains.entity.CarriageContraptionEntity;
+import com.simibubi.create.foundation.collision.CollisionList;
+import com.simibubi.create.foundation.collision.ContinuousOBBCollider;
+import com.simibubi.create.foundation.collision.OrientedBB;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
-import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.Vec3;
+import org.apache.commons.lang3.mutable.MutableInt;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.spongepowered.asm.mixin.Mixin;
@@ -13,89 +19,67 @@ import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
-import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /**
- * Third-generation diagnostic for the rider sinking through the carriage floor. Read-only.
+ * ONE comprehensive instrumentation pass over the whole vertical path of the rider carry, so a
+ * single play session answers every remaining question instead of one build per hypothesis.
  *
- * <h2>What is established, and what each generation got wrong</h2>
+ * <h2>Why this class exists</h2>
  *
- * <p>The measured facts, which no longer need re-deriving. The rider is carried horizontally
- * perfectly - {@code carried/motion} is 0.993 to 1.000 - and every defect is VERTICAL. Against a
- * carriage sitting at a constant Y of -59.000, the rider oscillated between -60.000 and -57.560,
- * a relative height swinging from +1.44 to -1.00 Blocks, and settled at -60.000, which is the
- * rail surface. The descent is a steady 0.076 Blocks per tick with {@code vy} pinned at -0.08
- * for as long as it lasts, so it is not an accelerating fall: it is one gravity step per tick
- * that never accumulates and never gets undone. All the while {@code onGround} reads true and
- * {@code fallDistance} reads 0.0, which is a state Create forces rather than one the game
- * arrived at.
+ * <p>I changed one thing, waited for CI, asked for a manual play session, read a log, changed one
+ * thing - five times over, and was wrong four of them. Every iteration costs a full build plus a
+ * human test run, which is an absurd price for one bit of information. The user's objection is
+ * correct and this is the correction: instrument every decision point at once, so that whatever
+ * the answer turns out to be, the log already contains it.
  *
- * <ul>
- *   <li><b>H1, the capture window is too small - DISPROVED.</b> {@code BEYOND WINDOW} appeared
- *       zero times.</li>
- *   <li><b>H2, the damage path launches them - NOT OBSERVED.</b> {@code ownDelta} stayed at
- *       gravity throughout.</li>
- *   <li><b>H3, two carriages carry one rider - real but rare.</b> Two occurrences.</li>
- *   <li><b>H4, savePlayerFromClipping lifts them - DISPROVED, and the probe that "proved" it was
- *       faulty.</b> {@code SNAP} appeared zero times in three logs, but that is not evidence the
- *       function never ran: the probe only logged when the rider actually MOVED, and that
- *       function returns early in several places without moving anyone. It also turns out to be
- *       gated on a condition this situation may never satisfy - see below. This version
- *       therefore records every CALL, not only every effect.</li>
- * </ul>
- *
- * <h2>The candidate this version tests</h2>
- *
- * <p>Create holds a rider on a carriage up through two paths, and this situation may satisfy
- * neither.
- *
- * <p>Path one is the hard-collision branch, {@code :283-285}, which only adjusts Y when
- * {@code totalResponse} is non-zero - i.e. when the rider is actually penetrating something.
- * Resting on a floor is not penetrating, so a resting rider gets {@code allowedMovement.y = 0}
- * from it.
- *
- * <p>Path two is the floor snap, and it is armed and fired under conditions that a level track
- * never meets:
+ * <h2>Already settled - not instrumented again</h2>
  *
  * <pre>
- *   ContraptionCollider.java:363   speed = contraptionMotion.multiply(0, 1, 0).lengthSqr()
- *   ContraptionCollider.java:367   if (speed &lt; 0.05) return;      VERTICAL motion only
+ *   horizontal carry is exact                     carried/motion = 0.993 - 1.000
+ *   the collider barely moves the rider in Y      sank = 1/763, rose = 14/763
+ *   the term :309-310 discards is always zero     surfaceYavg = 0.0000, positiveY = 0/763
+ *   the floor snap never runs                     snapOuterCalls = 0
  * </pre>
  *
- * <p>On level track the carriage's vertical motion is about zero, so {@code :367} returns every
- * tick and the snap never reaches the ray that would find the floor. Meanwhile {@code :309-310},
- * the surface branch that actually carries a standing rider, writes X and Z and passes
- * {@code entityPosition.y} straight through - the vertical component of the contact-point motion
- * is discarded there.
+ * <h2>What this records, and the question each field answers</h2>
  *
- * <p>That combination would produce exactly what was measured: horizontal carry perfect,
- * vertical support absent, one gravity step per tick, and {@code onGround} asserted true
- * anyway by {@code :303}. It would also explain why Create's own contraptions do not show it -
- * they are slow enough that a tenth of a Block per tick is not noticed, and the same missing
- * support is present in both cases.
+ * <p><b>1. The solver's raw verdict.</b> {@code ContinuousOBBCollider.collideMany} returns a
+ * {@code CollisionResponse} holding {@code surfaceCollision}, {@code temporalResponse},
+ * {@code collisionResponse} and {@code normal}. {@code ContraptionCollider} derives
+ * {@code hardCollision} from whether the response is non-zero and {@code temporalCollision} from
+ * whether {@code temporalResponse} differs from 1, so capturing the raw response gives all three
+ * branch flags without touching a local variable. This is the ground truth, taken before any of
+ * {@code ContraptionCollider}'s own transformations.
  *
- * <h2>How it is tested rather than argued</h2>
+ * <p>The header comment on {@code collideEntities} states plainly that surface collision
+ * detection "isn't very accurate", so the first question is whether a standing rider is being
+ * classified as a surface contact at all - and if not, which classification they do get.
  *
- * <p>Three questions, each answered by an existing public field or a return value, so nothing
- * has to be inferred:
+ * <p><b>2. The motion the solver was given.</b> That argument is the entity's delta movement minus
+ * the carriage's, rotated into carriage space. A standing rider's own gravity displacement is
+ * therefore inside it, which makes this the exact per-tick sink the solver is being asked to
+ * resolve. Whether it does is the whole question, and this records the number rather than my
+ * assumption about it.
  *
- * <ol>
- *   <li><b>Is the rider registering as touching the carriage at all?</b>
- *       {@code :295 registerColliding} runs ONLY inside {@code if (surfaceCollision)}, and
- *       {@code collidingEntities} is public. So membership of that map IS the value of
- *       surfaceCollision, read without touching the local variable.</li>
- *   <li><b>Do the two snap functions run, and what do they decide?</b> Recorded on entry and on
- *       exit including early returns, which is what the previous version failed to do.</li>
- *   <li><b>What is the carriage's VERTICAL motion?</b> Recorded as its own field, since that is
- *       the quantity {@code :367} gates on and the one number the previous logs never
- *       captured.</li>
- * </ol>
+ * <p><b>3. Which branches actually ran.</b> hard, temporal, surface and "bailed before applying
+ * anything" are each counted per tick, so the combination a standing rider produces is visible
+ * rather than deduced. That bail-out is {@code :280 if (!hardCollision && !surfaceCollision)
+ * continue;}.
+ *
+ * <p><b>4. The outcome of the whole pass.</b> The rider's Y before and after, which measures
+ * directly whether this pass sank them, held them, or did nothing - the one result that no
+ * interpretation can argue with.
+ *
+ * <p><b>5. Contact and height.</b> Membership of {@code collidingEntities} at value zero means the
+ * carriage registered the rider during this very pass, and the rider's height relative to the
+ * carriage shows whether the floor is being held.
  *
  * <h2>Cost</h2>
  *
- * <p>Silent below {@link #MIN_INTERESTING_MOTION}. Detail lines are capped hard; the main output
- * is a periodic summary of counts, which is what settles the question. No allocation unless a
- * line is written, and nothing is written below the speed gate.
+ * <p>Completely silent unless a client player is being carried by a train carriage faster than
+ * 0.5 Blocks/tick, so ordinary worlds, standing players and every other contraption log nothing.
+ * Output is one summary line per hundred ticks, hard capped. Two box tests and a few dozen
+ * arithmetic operations per carriage per tick otherwise, with no allocation unless a line is due.
  */
 @Mixin(ContraptionCollider.class)
 public class ContraptionCarryDiagnosticMixin {
@@ -103,96 +87,96 @@ public class ContraptionCarryDiagnosticMixin {
     @Unique
     private static final Logger electroEnergetics$LOG = LoggerFactory.getLogger("CEE-CARRY");
 
-    /** Below this carriage speed, in Blocks/tick, nothing is logged. */
     @Unique
     private static final double MIN_INTERESTING_MOTION = 0.5d;
-
-    /** Hard stop so a long session cannot grow the log without bound. */
     @Unique
-    private static final int MAX_LINES = 2500;
-
-    /** Per-category caps. */
+    private static final int SUMMARY_EVERY = 100;
     @Unique
-    private static final int MAX_PER_KIND = 400;
-
-    /** Emit the summary every this many ticks. */
-    @Unique
-    private static final int SUMMARY_EVERY = 40;
+    private static final int MAX_SUMMARY_LINES = 300;
 
     @Unique
     private static final Vec3 electroEnergetics$NONE = new Vec3(Double.NaN, Double.NaN, Double.NaN);
 
-    // ---- per-call carry state ----
+    // ---- per-pass state, written at HEAD, consumed at RETURN ----
 
+    @Unique
+    private static AbstractContraptionEntity electroEnergetics$current;
     @Unique
     private static Vec3 electroEnergetics$beforePos = electroEnergetics$NONE;
     @Unique
     private static double electroEnergetics$motion;
     @Unique
     private static double electroEnergetics$motionY;
+    @Unique
+    private static boolean electroEnergetics$sawResponse;
+    @Unique
+    private static boolean electroEnergetics$rSurface;
+    @Unique
+    private static double electroEnergetics$rTemporal = 1d;
+    @Unique
+    private static Vec3 electroEnergetics$rResponse = Vec3.ZERO;
+    @Unique
+    private static Vec3 electroEnergetics$rNormal = Vec3.ZERO;
+    @Unique
+    private static double electroEnergetics$rResponseY;
+    @Unique
+    private static Vec3 electroEnergetics$solverMotion = Vec3.ZERO;
 
-    // ---- ownership ----
-
-    @Unique
-    private static int electroEnergetics$ownerId = -1;
-    @Unique
-    private static long electroEnergetics$ownerTick = Long.MIN_VALUE;
-
-    // ---- snap call state ----
-
-    @Unique
-    private static double electroEnergetics$snapYBefore;
-    @Unique
-    private static Vec3 electroEnergetics$snapPosBefore = electroEnergetics$NONE;
-
-    // ---- counters, reset each summary ----
-
-    @Unique
-    private static int electroEnergetics$ticks;
-    @Unique
-    private static int electroEnergetics$surfaceTicks;
-    @Unique
-    private static int electroEnergetics$snapClientCalls;
-    @Unique
-    private static int electroEnergetics$snapInnerCalls;
-    @Unique
-    private static int electroEnergetics$snapInnerTrue;
-    @Unique
-    private static int electroEnergetics$snapMovedRider;
-    @Unique
-    private static double electroEnergetics$vySum;
-    @Unique
-    private static int electroEnergetics$vyCount;
-    @Unique
-    private static double electroEnergetics$motionYSum;
-    @Unique
-    private static double electroEnergetics$relYMin = Double.MAX_VALUE;
-    @Unique
-    private static double electroEnergetics$relYMax = -Double.MAX_VALUE;
-    @Unique
-    private static double electroEnergetics$sinkPerTickSum;
-    @Unique
-    private static int electroEnergetics$sinkTicks;
-
-    // ---- lifetime counters ----
+    // ---- counters for the current window ----
 
     @Unique
     private static int electroEnergetics$lines;
     @Unique
-    private static int electroEnergetics$details;
+    private static long electroEnergetics$lastSummary = Long.MIN_VALUE;
     @Unique
-    private static long electroEnergetics$lastSummary;
+    private static int electroEnergetics$ticks;
     @Unique
-    private static boolean electroEnergetics$cappedLogged;
+    private static int electroEnergetics$solverCalls;
+    @Unique
+    private static int electroEnergetics$surfaceYes;
+    @Unique
+    private static int electroEnergetics$temporalYes;
+    @Unique
+    private static int electroEnergetics$hardYes;
+    @Unique
+    private static int electroEnergetics$bailed;
+    @Unique
+    private static int electroEnergetics$roseTicks;
+    @Unique
+    private static int electroEnergetics$sankTicks;
+    @Unique
+    private static double electroEnergetics$sankSum;
+    @Unique
+    private static double electroEnergetics$passDySum;
+    @Unique
+    private static double electroEnergetics$solverMotionYSum;
+    @Unique
+    private static double electroEnergetics$responseYSum;
+    @Unique
+    private static int electroEnergetics$inContactTicks;
+    @Unique
+    private static double electroEnergetics$relYMin = Double.MAX_VALUE;
+    @Unique
+    private static double electroEnergetics$relYMax = -Double.MAX_VALUE;
 
-    // ------------------------------------------------------------------ carry
+    // ---------------------------------------------------------------- pass entry
 
     @Inject(method = "collideEntities", at = @At("HEAD"), remap = false)
-    private static void electroEnergetics$beforeCarry(AbstractContraptionEntity contraption,
-                                                      CallbackInfo ci) {
+    private static void electroEnergetics$enter(AbstractContraptionEntity contraption,
+                                                CallbackInfo ci) {
         electroEnergetics$beforePos = electroEnergetics$NONE;
+        electroEnergetics$current = null;
+        electroEnergetics$sawResponse = false;
+        electroEnergetics$rSurface = false;
+        electroEnergetics$rTemporal = 1d;
+        electroEnergetics$rResponse = Vec3.ZERO;
+        electroEnergetics$rNormal = Vec3.ZERO;
+        electroEnergetics$rResponseY = 0d;
+        electroEnergetics$solverMotion = Vec3.ZERO;
         try {
             if (!contraption.level().isClientSide())
+                return;
+            if (!(contraption instanceof CarriageContraptionEntity))
                 return;
 
             LocalPlayer player = Minecraft.getInstance().player;
@@ -202,215 +186,189 @@ public class ContraptionCarryDiagnosticMixin {
             Vec3 motion = contraption.position().subtract(contraption.getPrevPositionVec());
             electroEnergetics$motion = motion.length();
             electroEnergetics$motionY = motion.y;
-
             if (electroEnergetics$motion < MIN_INTERESTING_MOTION)
                 return;
 
+            // Exactly Create's own selection box, ContraptionCollider:100-101.
             if (!contraption.getBoundingBox().inflate(2d).expandTowards(0, 32, 0)
                     .contains(player.position()))
                 return;
 
+            electroEnergetics$current = contraption;
             electroEnergetics$beforePos = player.position();
         } catch (Throwable ignored) {
+            electroEnergetics$current = null;
             electroEnergetics$beforePos = electroEnergetics$NONE;
         }
     }
+
+    // ------------------------------------------------- 1 & 2. the solver's verdict
+
+    /**
+     * Captures {@code CollisionResponse} and the motion handed to the solver.
+     *
+     * <p>One call site in {@code collideEntities}, so no ordinal is needed and there is nothing to
+     * get wrong about which invocation this is.
+     */
+    @WrapOperation(method = "collideEntities",
+            at = @At(value = "INVOKE",
+                    target = "Lcom/simibubi/create/foundation/collision/ContinuousOBBCollider;"
+                            + "collideMany(Lcom/simibubi/create/foundation/collision/CollisionList;"
+                            + "Lcom/simibubi/create/foundation/collision/CollisionList;"
+                            + "Lcom/simibubi/create/foundation/collision/OrientedBB;"
+                            + "Lnet/minecraft/world/phys/Vec3;FZ)"
+                            + "Lcom/simibubi/create/foundation/collision/ContinuousOBBCollider"
+                            + "$CollisionResponse;"),
+            remap = false)
+    private static ContinuousOBBCollider.CollisionResponse electroEnergetics$captureSolver(
+            CollisionList collidable, CollisionList dense, OrientedBB obb,
+            Vec3 motion, float maxStep, boolean horizontalPass,
+            Operation<ContinuousOBBCollider.CollisionResponse> original) {
+
+        electroEnergetics$solverMotion = motion;
+        ContinuousOBBCollider.CollisionResponse response =
+                original.call(collidable, dense, obb, motion, maxStep, horizontalPass);
+        if (response != null) {
+            electroEnergetics$sawResponse = true;
+            electroEnergetics$rSurface = response.surfaceCollision;
+            electroEnergetics$rTemporal = response.temporalResponse;
+            electroEnergetics$rResponse = response.collisionResponse == null
+                    ? Vec3.ZERO : response.collisionResponse;
+            electroEnergetics$rNormal = response.normal == null ? Vec3.ZERO : response.normal;
+            electroEnergetics$rResponseY = electroEnergetics$rResponse.y;
+        }
+        return response;
+    }
+
+    // ---------------------------------------------------------------- pass exit
 
     @Inject(method = "collideEntities", at = @At("RETURN"), remap = false)
-    private static void electroEnergetics$afterCarry(AbstractContraptionEntity contraption,
-                                                     CallbackInfo ci) {
+    private static void electroEnergetics$exit(AbstractContraptionEntity contraption,
+                                               CallbackInfo ci) {
         try {
+            AbstractContraptionEntity scoped = electroEnergetics$current;
             Vec3 before = electroEnergetics$beforePos;
+            electroEnergetics$current = null;
             electroEnergetics$beforePos = electroEnergetics$NONE;
-            if (Double.isNaN(before.x))
+            if (scoped == null || before == null || Double.isNaN(before.x))
                 return;
 
             LocalPlayer player = Minecraft.getInstance().player;
             if (player == null)
                 return;
 
-            double carried = player.position().distanceTo(before);
-            boolean movedIt = carried > electroEnergetics$motion * 0.5d;
             long now = contraption.level().getGameTime();
-            boolean isOwner = contraption.getId() == electroEnergetics$ownerId
-                    && now - electroEnergetics$ownerTick <= 1;
+            double carriageY = contraption.getY();
+            double passDy = player.getY() - before.y;
 
-            if (movedIt) {
-                electroEnergetics$ownerId = contraption.getId();
-                electroEnergetics$ownerTick = now;
-                isOwner = true;
+            electroEnergetics$ticks++;
+            if (electroEnergetics$sawResponse)
+                electroEnergetics$solverCalls++;
+
+            boolean temporal = Math.abs(electroEnergetics$rTemporal - 1d) > 1.0e-9;
+            boolean hard = !electroEnergetics$rResponse.equals(Vec3.ZERO);
+
+            if (electroEnergetics$rSurface)
+                electroEnergetics$surfaceYes++;
+            if (temporal)
+                electroEnergetics$temporalYes++;
+            if (hard)
+                electroEnergetics$hardYes++;
+            // ContraptionCollider:280 - bails before applying anything at all.
+            if (!hard && !electroEnergetics$rSurface)
+                electroEnergetics$bailed++;
+
+            electroEnergetics$passDySum += passDy;
+            if (passDy > 1.0e-4d)
+                electroEnergetics$roseTicks++;
+            else if (passDy < -1.0e-4d) {
+                electroEnergetics$sankTicks++;
+                electroEnergetics$sankSum += -passDy;
             }
 
-            // Question 1, answered without touching a local: registerColliding is called ONLY
-            // inside `if (surfaceCollision)`, and the map is public.
-            boolean surface = contraption.collidingEntities.containsKey(player);
+            electroEnergetics$solverMotionYSum += electroEnergetics$solverMotion.y;
+            electroEnergetics$responseYSum += electroEnergetics$rResponseY;
 
-            if (isOwner) {
-                electroEnergetics$ticks++;
-                if (surface)
-                    electroEnergetics$surfaceTicks++;
-                electroEnergetics$motionYSum += electroEnergetics$motionY;
+            // A value of zero here means the carriage registered the rider during THIS pass.
+            MutableInt contact = contraption.collidingEntities.get(player);
+            if (contact != null && contact.intValue() == 0)
+                electroEnergetics$inContactTicks++;
 
-                double vy = player.getDeltaMovement().y;
-                electroEnergetics$vySum += vy;
-                electroEnergetics$vyCount++;
+            double relY = player.getY() - carriageY;
+            if (relY < electroEnergetics$relYMin) electroEnergetics$relYMin = relY;
+            if (relY > electroEnergetics$relYMax) electroEnergetics$relYMax = relY;
 
-                double relY = player.getY() - contraption.getY();
-                if (relY < electroEnergetics$relYMin) electroEnergetics$relYMin = relY;
-                if (relY > electroEnergetics$relYMax) electroEnergetics$relYMax = relY;
-
-                if (vy < -0.01d) {
-                    electroEnergetics$sinkTicks++;
-                    electroEnergetics$sinkPerTickSum += -vy;
-                }
-
-                electroEnergetics$maybeSummary(now, player, relY, surface);
-            }
+            electroEnergetics$maybeSummary(now, player, carriageY);
         } catch (Throwable ignored) {
-            // A diagnostic must never be the thing that breaks the game.
-        }
-    }
-
-    // ------------------------------------------------------------------- snap
-
-    /** Outer gate: armed by safetyLock and the vertical-motion test at :363-368. */
-    @Inject(method = "saveClientPlayerFromClipping", at = @At("HEAD"), remap = false)
-    private static void electroEnergetics$outerSnapHead(AbstractContraptionEntity contraption,
-                                                        Vec3 contraptionMotion, CallbackInfo ci) {
-        electroEnergetics$snapPosBefore = electroEnergetics$NONE;
-        try {
-            electroEnergetics$snapClientCalls++;
-            LocalPlayer player = Minecraft.getInstance().player;
-            if (player == null)
-                return;
-            electroEnergetics$snapYBefore = player.getY();
-            electroEnergetics$snapPosBefore = player.position();
-        } catch (Throwable ignored) {
-            electroEnergetics$snapPosBefore = electroEnergetics$NONE;
-        }
-    }
-
-    @Inject(method = "saveClientPlayerFromClipping", at = @At("RETURN"), remap = false)
-    private static void electroEnergetics$outerSnapReturn(AbstractContraptionEntity contraption,
-                                                          Vec3 contraptionMotion, CallbackInfo ci) {
-        try {
-            LocalPlayer player = Minecraft.getInstance().player;
-            if (player == null || Double.isNaN(electroEnergetics$snapPosBefore.x))
-                return;
-            double dy = player.getY() - electroEnergetics$snapYBefore;
-            if (Math.abs(dy) > 1.0e-4d) {
-                electroEnergetics$snapMovedRider++;
-                electroEnergetics$detail("SNAP moved dy={} motionY={} motion={} carriage={} at={}",
-                        f(dy), f(contraptionMotion.y), f(contraptionMotion.length()),
-                        contraption.getId(), v(player.position()));
-            }
-        } catch (Throwable ignored) {
-            // A diagnostic must never be the thing that breaks the game.
-        }
-    }
-
-    /** The ray itself, and its boolean: false means it found no floor. */
-    @Inject(method = "savePlayerFromClipping", at = @At("HEAD"), remap = false)
-    private static void electroEnergetics$innerSnapHead(Player entity,
-                                                        AbstractContraptionEntity contraption,
-                                                        Vec3 contraptionMotion, double yStartOffset,
-                                                        CallbackInfoReturnable<Boolean> cir) {
-        try {
-            electroEnergetics$snapInnerCalls++;
-        } catch (Throwable ignored) {
-            // read-only
-        }
-    }
-
-    @Inject(method = "savePlayerFromClipping", at = @At("RETURN"), remap = false)
-    private static void electroEnergetics$innerSnapReturn(Player entity,
-                                                          AbstractContraptionEntity contraption,
-                                                          Vec3 contraptionMotion, double yStartOffset,
-                                                          CallbackInfoReturnable<Boolean> cir) {
-        try {
-            boolean found = Boolean.TRUE.equals(cir.getReturnValue());
-            if (found)
-                electroEnergetics$snapInnerTrue++;
-            electroEnergetics$detail("SNAP inner foundFloor={} motionY={} motion={} carriage={} "
-                            + "yStartOffset={} at={}",
-                    found, f(contraptionMotion.y), f(contraptionMotion.length()),
-                    contraption.getId(), f(yStartOffset), v(entity.position()));
-        } catch (Throwable ignored) {
-            // read-only
+            electroEnergetics$current = null;
+            electroEnergetics$beforePos = electroEnergetics$NONE;
         }
     }
 
     // ---------------------------------------------------------------- summary
 
     @Unique
-    private static void electroEnergetics$maybeSummary(long now, LocalPlayer player, double relY,
-                                                       boolean surface) {
-        if (now - electroEnergetics$lastSummary < SUMMARY_EVERY)
-            return;
+    private static void electroEnergetics$maybeSummary(long now, LocalPlayer player,
+                                                       double carriageY) {
+        // The sentinel is tested FIRST. Writing this as `now - Long.MIN_VALUE` overflows to a
+        // large negative number that is always below the interval, so the guard would return on
+        // every tick and the summary could never print - which is exactly what silenced an
+        // earlier build of this diagnostic, and cost a whole test run to find.
         if (electroEnergetics$lastSummary == Long.MIN_VALUE) {
             electroEnergetics$lastSummary = now;
             return;
         }
+        if (now - electroEnergetics$lastSummary < SUMMARY_EVERY)
+            return;
         electroEnergetics$lastSummary = now;
-        if (electroEnergetics$ticks == 0)
+        if (electroEnergetics$lines++ >= MAX_SUMMARY_LINES)
             return;
 
         int t = electroEnergetics$ticks;
-        electroEnergetics$LOG.info(
-                "CARRY SUM ticks={} surfaceReg={}/{} ({}%) snapOuterCalls={} snapInnerCalls={} "
-                        + "snapInnerFoundFloor={} snapMovedRider={} motionYavg={} vyAvg={} "
-                        + "relY=[{},{}] nowRelY={} sinkTicks={}/{} avgSinkStep={} onGround={} "
-                        + "fallDist={}",
-                t, electroEnergetics$surfaceTicks, t,
-                String.format("%.0f", 100.0 * electroEnergetics$surfaceTicks / t),
-                electroEnergetics$snapClientCalls, electroEnergetics$snapInnerCalls,
-                electroEnergetics$snapInnerTrue, electroEnergetics$snapMovedRider,
-                f(electroEnergetics$motionYSum / t),
-                f(electroEnergetics$vyCount == 0 ? 0 : electroEnergetics$vySum / electroEnergetics$vyCount),
-                f(electroEnergetics$relYMin), f(electroEnergetics$relYMax), f(relY),
-                electroEnergetics$sinkTicks, t,
-                f(electroEnergetics$sinkTicks == 0 ? 0
-                        : electroEnergetics$sinkPerTickSum / electroEnergetics$sinkTicks),
-                player.onGround(), f(player.fallDistance));
-
-        // Reset the window so each summary describes its own interval.
-        electroEnergetics$ticks = 0;
-        electroEnergetics$surfaceTicks = 0;
-        electroEnergetics$snapClientCalls = 0;
-        electroEnergetics$snapInnerCalls = 0;
-        electroEnergetics$snapInnerTrue = 0;
-        electroEnergetics$snapMovedRider = 0;
-        electroEnergetics$vySum = 0;
-        electroEnergetics$vyCount = 0;
-        electroEnergetics$motionYSum = 0;
-        electroEnergetics$relYMin = Double.MAX_VALUE;
-        electroEnergetics$relYMax = -Double.MAX_VALUE;
-        electroEnergetics$sinkPerTickSum = 0;
-        electroEnergetics$sinkTicks = 0;
-    }
-
-    @Unique
-    private static void electroEnergetics$detail(String format, Object... args) {
-        if (electroEnergetics$lines >= MAX_LINES) {
-            if (!electroEnergetics$cappedLogged) {
-                electroEnergetics$cappedLogged = true;
-                electroEnergetics$LOG.info("CARRY diagnostic hit its {} line cap", MAX_LINES);
-            }
+        if (t == 0) {
+            electroEnergetics$LOG.info("CARRY SUM no carriage passes this window");
             return;
         }
-        if (electroEnergetics$details++ >= MAX_PER_KIND)
-            return;
-        electroEnergetics$lines++;
-        electroEnergetics$LOG.info(format, args);
-    }
 
-    @Unique
-    private static String f(double value) {
-        return String.format("%.3f", value);
-    }
+        electroEnergetics$LOG.info(
+                "CARRY SUM ticks={} solverCalls={} | surface={}/{} temporal={}/{} hard={}/{} "
+                        + "bailed280={}/{} | solverMotionYavg={} responseYavg={} "
+                        + "inContact={}/{} | passDyavg={} rose={} sank={} avgSank={} "
+                        + "| relY=[{},{}] nowRelY={} carriageY={} playerY={} vy={} onGround={}",
+                t, electroEnergetics$solverCalls,
+                electroEnergetics$surfaceYes, t,
+                electroEnergetics$temporalYes, t,
+                electroEnergetics$hardYes, t,
+                electroEnergetics$bailed, t,
+                String.format("%.4f", electroEnergetics$solverMotionYSum / t),
+                String.format("%.4f", electroEnergetics$responseYSum / t),
+                electroEnergetics$inContactTicks, t,
+                String.format("%.4f", electroEnergetics$passDySum / t),
+                electroEnergetics$roseTicks, electroEnergetics$sankTicks,
+                String.format("%.4f", electroEnergetics$sankTicks == 0 ? 0d
+                        : electroEnergetics$sankSum / electroEnergetics$sankTicks),
+                String.format("%.3f", electroEnergetics$relYMin),
+                String.format("%.3f", electroEnergetics$relYMax),
+                String.format("%.3f", player.getY() - carriageY),
+                String.format("%.3f", carriageY),
+                String.format("%.3f", player.getY()),
+                String.format("%.3f", player.getDeltaMovement().y),
+                player.onGround());
 
-    @Unique
-    private static String v(Vec3 vec) {
-        return String.format("(%.2f,%.2f,%.2f)", vec.x, vec.y, vec.z);
+        electroEnergetics$ticks = 0;
+        electroEnergetics$solverCalls = 0;
+        electroEnergetics$surfaceYes = 0;
+        electroEnergetics$temporalYes = 0;
+        electroEnergetics$hardYes = 0;
+        electroEnergetics$bailed = 0;
+        electroEnergetics$roseTicks = 0;
+        electroEnergetics$sankTicks = 0;
+        electroEnergetics$sankSum = 0;
+        electroEnergetics$passDySum = 0;
+        electroEnergetics$solverMotionYSum = 0;
+        electroEnergetics$responseYSum = 0;
+        electroEnergetics$inContactTicks = 0;
+        electroEnergetics$relYMin = Double.MAX_VALUE;
+        electroEnergetics$relYMax = -Double.MAX_VALUE;
     }
 }
