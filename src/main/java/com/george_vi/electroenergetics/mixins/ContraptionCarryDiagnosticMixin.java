@@ -159,6 +159,39 @@ public class ContraptionCarryDiagnosticMixin {
     @Unique
     private static double electroEnergetics$relYMax = -Double.MAX_VALUE;
 
+    // ---- HORIZONTAL / LATERAL, added because a rider was thrown out sideways at 60 m/s ----
+    //
+    // The rider sinking was fixed, but at higher speed they are ejected out of the SIDE, which
+    // is a different axis entirely and was never instrumented. The quantities below are the ones
+    // that govern lateral motion: whether the pass carried them in X/Z at all, whether the
+    // contact point they were carried by lagged the carriage, and whether the lateral push-out
+    // (:256-257, :261-262) fired.
+
+    /** Lateral, i.e. horizontal, displacement the pass actually applied to the rider. */
+    @Unique
+    private static double electroEnergetics$carriedHorizSum;
+    /** The rider's horizontal distance from the carriage centre after the pass. */
+    @Unique
+    private static double electroEnergetics$radialMax;
+    /** Ticks where the pass applied essentially no horizontal carry. */
+    @Unique
+    private static int electroEnergetics$horizLostTicks;
+    /** Ticks where the lateral push-out zeroed an axis of the rider's own motion. */
+    @Unique
+    private static int electroEnergetics$lateralZeroedTicks;
+    /** Largest single-pass horizontal gap between where the rider was and where they ended up. */
+    @Unique
+    private static double electroEnergetics$passDxzMax;
+    /** The contact-point motion's horizontal magnitude, which is what carries them. */
+    @Unique
+    private static double electroEnergetics$contactHSum;
+    /** Whether the carriage still considered them a contact at all. */
+    @Unique
+    private static int electroEnergetics$contactZeroTicks;
+    /** The rider's own horizontal speed, which should stay near zero when standing still. */
+    @Unique
+    private static double electroEnergetics$ownHSum;
+
     // ---------------------------------------------------------------- pass entry
 
     @Inject(method = "collideEntities", at = @At("HEAD"), remap = false)
@@ -298,6 +331,31 @@ public class ContraptionCarryDiagnosticMixin {
             if (relY < electroEnergetics$relYMin) electroEnergetics$relYMin = relY;
             if (relY > electroEnergetics$relYMax) electroEnergetics$relYMax = relY;
 
+            // ---- HORIZONTAL ----
+            // The axis that was never instrumented, and the one the rider was ejected along.
+            double passDxz = Math.hypot(player.getX() - before.x, player.getZ() - before.z);
+            electroEnergetics$carriedHorizSum += passDxz;
+            if (passDxz > electroEnergetics$passDxzMax) electroEnergetics$passDxzMax = passDxz;
+            // A pass that moved them essentially not at all horizontally while the carriage
+            // travelled: they were dropped by the carry.
+            if (passDxz < electroEnergetics$motion * 0.5d)
+                electroEnergetics$horizLostTicks++;
+
+            // How far out to the side of the carriage centre they are. Growth here is the rider
+            // sliding toward the edge, which is the precursor to being thrown off it.
+            double radial = Math.hypot(player.getX() - contraption.getX(),
+                                       player.getZ() - contraption.getZ());
+            if (radial > electroEnergetics$radialMax) electroEnergetics$radialMax = radial;
+
+            // What actually carries them horizontally, and their own horizontal speed, which
+            // should stay near zero while standing.
+            Vec3 contactMotion = contraption.getContactPointMotion(player.position());
+            electroEnergetics$contactHSum += Math.hypot(contactMotion.x, contactMotion.z);
+            Vec3 own = player.getDeltaMovement();
+            electroEnergetics$ownHSum += Math.hypot(own.x, own.z);
+            if (contact != null && contact.intValue() != 0)
+                electroEnergetics$contactZeroTicks++;
+
             electroEnergetics$maybeSummary(now, player, carriageY);
         } catch (Throwable ignored) {
             electroEnergetics$current = null;
@@ -355,6 +413,23 @@ public class ContraptionCarryDiagnosticMixin {
                 String.format("%.3f", player.getDeltaMovement().y),
                 player.onGround());
 
+        // The horizontal half, reported separately because the ejection is a lateral event and
+        // mixing it into the vertical line made neither readable.
+        electroEnergetics$LOG.info(
+                "CARRY LAT ticks={} carriedHavg={} passDxzMax={} motion={} motionY={} "
+                        + "contactHavg={} ownHavg={} radialMax={} "
+                        + "horizLost={}/{} contactLost={}/{}",
+                t,
+                String.format("%.3f", electroEnergetics$carriedHorizSum / t),
+                String.format("%.3f", electroEnergetics$passDxzMax),
+                String.format("%.3f", electroEnergetics$motion),
+                String.format("%.4f", electroEnergetics$motionY),
+                String.format("%.3f", electroEnergetics$contactHSum / t),
+                String.format("%.3f", electroEnergetics$ownHSum / t),
+                String.format("%.3f", electroEnergetics$radialMax),
+                electroEnergetics$horizLostTicks, t,
+                electroEnergetics$contactZeroTicks, t);
+
         electroEnergetics$ticks = 0;
         electroEnergetics$solverCalls = 0;
         electroEnergetics$surfaceYes = 0;
@@ -370,5 +445,12 @@ public class ContraptionCarryDiagnosticMixin {
         electroEnergetics$inContactTicks = 0;
         electroEnergetics$relYMin = Double.MAX_VALUE;
         electroEnergetics$relYMax = -Double.MAX_VALUE;
+        electroEnergetics$carriedHorizSum = 0;
+        electroEnergetics$radialMax = 0;
+        electroEnergetics$horizLostTicks = 0;
+        electroEnergetics$passDxzMax = 0;
+        electroEnergetics$contactHSum = 0;
+        electroEnergetics$contactZeroTicks = 0;
+        electroEnergetics$ownHSum = 0;
     }
 }
