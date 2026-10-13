@@ -143,6 +143,17 @@ public class CarriageVerticalCarryMixin {
 
     @Unique
     private static int electroEnergetics$lines;
+
+    /**
+     * The last summary tick, or {@link Long#MIN_VALUE} before the first.
+     *
+     * <p>Note the comparison below. Doing this as {@code now - lastSummary < SUMMARY_EVERY}
+     * overflows when {@code lastSummary} is still {@code Long.MIN_VALUE}: the subtraction wraps
+     * to a large negative number, which is less than the interval, so the guard returns on every
+     * tick and the timestamp is never updated - the summary can then never be emitted at all.
+     * That is exactly what silenced the first build of this class. The sentinel is therefore
+     * tested explicitly and first.
+     */
     @Unique
     private static long electroEnergetics$lastSummary = Long.MIN_VALUE;
     @Unique
@@ -174,6 +185,20 @@ public class CarriageVerticalCarryMixin {
     private static double electroEnergetics$sankSum;
     @Unique
     private static double electroEnergetics$hardYSum;
+
+    /**
+     * How often the redirect ran at all, and how often it ran with a carriage scoped.
+     *
+     * <p>These exist so the question "did the injection apply, and did the guard let it through"
+     * is answered by a count rather than by inference - the previous build emitted no summary at
+     * all and I could not tell a failed injection from a silent guard without them.
+     */
+    @Unique
+    private static int electroEnergetics$redirectCalls;
+    @Unique
+    private static int electroEnergetics$appliedCalls;
+    @Unique
+    private static int electroEnergetics$capturedCalls;
 
     /** Scopes the redirects to train carriages and a rider actually being carried. */
     @Inject(method = "collideEntities", at = @At("HEAD"), remap = false)
@@ -227,6 +252,7 @@ public class CarriageVerticalCarryMixin {
             remap = false)
     private static Vec3 electroEnergetics$captureSurfaceAllowed(Vec3 motion, Entity entity,
                                                                Operation<Vec3> original) {
+        electroEnergetics$capturedCalls++;
         Vec3 allowed = original.call(motion, entity);
         electroEnergetics$surfaceAllowed = allowed;
         return allowed;
@@ -270,10 +296,12 @@ public class CarriageVerticalCarryMixin {
             remap = false)
     private static void electroEnergetics$applyVerticalCarry(Entity entity,
                                                             double x, double y, double z) {
+        electroEnergetics$redirectCalls++;
         if (electroEnergetics$current == null) {
             entity.setPos(x, y, z);
             return;
         }
+        electroEnergetics$appliedCalls++;
         entity.setPos(x, y + electroEnergetics$surfaceAllowed.y, z);
     }
 
@@ -334,12 +362,14 @@ public class CarriageVerticalCarryMixin {
     @Unique
     private static void electroEnergetics$maybeSummary(long now, LocalPlayer player,
                                                        double allowedY, double passDy) {
-        if (now - electroEnergetics$lastSummary < SUMMARY_EVERY)
-            return;
+        // Sentinel FIRST, because `now - Long.MIN_VALUE` overflows to a negative number and the
+        // interval test below would then return forever. See the field comment.
         if (electroEnergetics$lastSummary == Long.MIN_VALUE) {
             electroEnergetics$lastSummary = now;
             return;
         }
+        if (now - electroEnergetics$lastSummary < SUMMARY_EVERY)
+            return;
         electroEnergetics$lastSummary = now;
         if (electroEnergetics$carriedTicks == 0)
             return;
@@ -348,10 +378,13 @@ public class CarriageVerticalCarryMixin {
 
         int t = electroEnergetics$carriedTicks;
         electroEnergetics$LOG.info(
-                "CARRY FIX ticks={} surfaceYavg={} surfaceYnow={} positive={}/{} hardYavg={} "
+                "CARRY FIX ticks={} redirect={} applied={} captured={} "
+                        + "| surfaceYavg={} surfaceYnow={} positive={}/{} hardYavg={} "
                         + "| passDyavg={} rose={}/{} sank={}/{} avgSank={} "
                         + "| relY=[{},{}] nowRelY={} vy={} onGround={}",
                 t,
+                electroEnergetics$redirectCalls, electroEnergetics$appliedCalls,
+                electroEnergetics$capturedCalls,
                 String.format("%.4f", electroEnergetics$allowedYSum / t),
                 String.format("%.4f", allowedY),
                 electroEnergetics$positiveLifts, t,
@@ -375,6 +408,9 @@ public class CarriageVerticalCarryMixin {
         electroEnergetics$roseTicks = 0;
         electroEnergetics$sankTicks = 0;
         electroEnergetics$sankSum = 0;
+        electroEnergetics$redirectCalls = 0;
+        electroEnergetics$appliedCalls = 0;
+        electroEnergetics$capturedCalls = 0;
         electroEnergetics$relYMin = Double.MAX_VALUE;
         electroEnergetics$relYMax = -Double.MAX_VALUE;
     }
