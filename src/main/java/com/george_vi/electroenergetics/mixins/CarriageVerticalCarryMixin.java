@@ -9,6 +9,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.phys.Vec3;
+import org.apache.commons.lang3.mutable.MutableInt;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.spongepowered.asm.mixin.Mixin;
@@ -19,70 +20,77 @@ import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
- * Stops a rider sinking through the floor of a moving train carriage, by applying the vertical
- * component Create itself computes and then discards.
+ * Keeps a rider standing on a moving train carriage from sinking through its floor.
  *
- * <h2>The bug, measured rather than inferred</h2>
+ * <h2>Six hypotheses, five disproved by measurement</h2>
  *
- * <p>A diagnostic run of about six hundred ticks pinned it down:
+ * <p>Each of these looked obvious in the source, and each was wrong. They are recorded because
+ * the reasoning is what misled me, not the code:
+ *
+ * <ul>
+ *   <li><b>The capture window is too small - DISPROVED.</b> {@code BEYOND WINDOW} appeared zero
+ *       times in every log.</li>
+ *   <li><b>The damage path launches them - NOT OBSERVED.</b> The rider's delta movement stayed at
+ *       gravity throughout.</li>
+ *   <li><b>Two carriages carry one rider - real but rare.</b> Two occurrences.</li>
+ *   <li><b>The floor snap lifts them - DISPROVED.</b> It never ran: {@code snapOuterCalls = 0}.</li>
+ *   <li><b>Restoring the vertical term :309-310 discards is the fix - DISPROVED.</b> That term
+ *       measured {@code surfaceYavg = 0.0000} across 763 carried ticks, so the redirect was
+ *       adding zero. It is still applied below because it is correct on a gradient, but it is
+ *       not the sink.</li>
+ *   <li><b>The collider pass lowers the rider - DISPROVED.</b> {@code sank = 1 / 763 ticks},
+ *       {@code rose = 14 / 763}: the pass does essentially nothing vertically.</li>
+ * </ul>
+ *
+ * <p>What the same run established:
  *
  * <pre>
- *   surfaceReg     = 100% in all 28 windows   the surface branch runs every tick
- *   snapOuterCalls = 0    in all 28 windows   the floor-snap ray never runs at all
- *   carriage Y constant at -59.000 while the rider travelled -60.000 to -57.560
- *   horizontal carry perfect: carried/motion = 0.993 to 1.000
- *   descent a steady 0.076 Blocks/tick, vy near -0.08, onGround true, fallDistance 0.0
+ *   surfaceReg = 100%        the carriage's surface branch runs every tick
+ *   relY minimum drifted +1.025 to -1.000 and stayed there
+ *   player Y settled at exactly -60.000 - an integer, a world block face
  * </pre>
  *
- * <p>Horizontal carry is flawless; the entire defect is vertical. The descent is one gravity step
- * per tick that is never undone - a constant rate, where a real fall would accelerate.
- *
- * <h2>The cause, in two adjacent lines</h2>
- *
- * <p>Create supports a rider's weight in three places. The one a rider standing on a carriage
- * floor goes through is the only one that discards its vertical half:
- *
- * <pre>
- *   :283-285  hard       allowedMovement = collide(totalResponse, entity)
- *                        setPos(x + allowed.x, y + allowed.y, z + allowed.z)    Y APPLIED
- *   :308-310  surface    allowedMovement = collide(contactPointMotion, entity)
- *                        setPos(x + allowed.x, y,             z + allowed.z)    Y DISCARDED
- * </pre>
- *
- * <p>{@code :295 registerColliding} runs only inside {@code if (surfaceCollision)}, and the 100%
- * figure above confirms that is the branch in use, so it is the second of those that carries a
- * standing rider.
- *
- * <p>{@code collide} is the push-out solver - handed a penetration response, it returns the motion
- * needed to leave it. A rider resting on a carriage floor penetrates it slightly, so this returns
- * a POSITIVE {@code allowedMovement.y} whose whole purpose is to lift them clear. {@code :309}
- * passes {@code entityPosition.y} straight through instead, so that lift is thrown away, the rider
- * stays in penetration, and the next tick repeats with slightly more. That is the constant-rate
- * sink, and it is why the rate does not accelerate: each tick removes one gravity step and each
- * tick's computed correction is discarded again.
- *
- * <p>A carriage floor is not a world block, so vanilla's own collision cannot catch the rider
- * either, and nothing else supplies their weight.
+ * <p>So nothing in the collider causes the sink; it is what the collider fails to do. The rider's
+ * own gravity displaces them downward each tick and nothing restores them, because a carriage
+ * floor is not a world block and vanilla's collision therefore never supplies the support that
+ * would normally stop it.
  *
  * <h2>The fix</h2>
  *
- * <p>The surface branch is made to use the same expression as the hard-collision branch, so the
- * rider travels vertically with the contact point exactly as they already do horizontally. This
- * is not a new mechanism - it is the line Create already wrote two hundred lines earlier,
- * applied to the branch that omits it.
+ * <p>While the carriage is genuinely supporting the rider, their expected height is advanced by
+ * the contact point's vertical motion each tick and restored whenever they have dropped below it.
  *
- * <p>Because it applies the solver's own push-out rather than imposing a height, it cannot hold
- * anyone in the air and cannot fight a jump: leaving the carriage stops the push-out, and an
- * ascending rider gets no penetration to resolve. An earlier attempt of mine imposed a height
- * instead and would have floated a jumping rider at the apex of their arc; this does not.
+ * <p>The discriminator is exact, and it is what two earlier attempts got wrong. {@code
+ * ContraptionCollider:295} calls {@code registerColliding}, which stores a fresh
+ * {@code MutableInt} at zero, and {@code AbstractContraptionEntity} increments those counters on
+ * its own tick and removes entries above three. Since entity ticks run before
+ * {@code ClientTickEvent.Post}, a value of zero AFTER the pass means this carriage registered the
+ * rider DURING this pass - they are standing on it right now. A rider who is jumping, falling,
+ * or in the aisle reads as not in contact and is left alone.
  *
- * <h2>Measurement</h2>
+ * <p>The first attempt used "the carriage carried them horizontally" instead, which remains true
+ * throughout a jump and would have held the rider floating at the apex of their arc. This cannot,
+ * because a jumping rider is not in contact.
  *
- * <p>The same run reports the vertical component it is applying and the rider's height relative
- * to the carriage, so the fix is verified against the numbers that found the bug rather than
- * against an expectation. Specifically {@code allowedYavg} should be small and positive - that is
- * the discarded lift being recovered - and the relative height should stop reaching its previous
- * floor of about -1.000.
+ * <p>Ownership is tracked so sibling carriages do not fight: a carriage that is not the current
+ * holder ignores its own lack of contact rather than clearing the hold, and a carriage reporting
+ * contact while another already holds does not steal it. Only the holding carriage releasing
+ * contact ends the hold.
+ *
+ * <h2>Why the restore is bounded</h2>
+ *
+ * <p>{@link #MAX_RESTORE} is far above the measured per-tick sink (about 0.03) and far below any
+ * genuine change of level. Beyond it the rider is taken to have moved to a different height -
+ * walked down a step, crossed to a lower deck - and their position becomes the new baseline
+ * instead of being hauled back. Only a RISE is ever corrected, never a fall below, so nothing
+ * here can push a rider down or hold up one who should be falling.
+ *
+ * <h2>Also kept</h2>
+ *
+ * <p>{@code :309-310} writes X and Z but passes {@code entityPosition.y} through, dropping the
+ * {@code allowedMovement.y} computed one line earlier at {@code :308}, whereas the hard-collision
+ * branch at {@code :284-285} applies its own. That omission is real and is restored here, matching
+ * Create's own line, so a rider on a gradient travels with the floor.
  *
  * <h2>Scope and cost</h2>
  *
@@ -90,10 +98,8 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * ({@code ContraptionCollider:120-121}, {@code PlayerType.SERVER}) and learns the result from the
  * client's movement packets, as it already does for Create's own carry.
  *
- * <p>Confined to {@link CarriageContraptionEntity} by a per-pass guard, so no other contraption
- * changes - not Create's bearings, pistons or gantries. No packets, and no allocation unless the
- * summary line is due, which is once per hundred ticks and only while a rider is actually on a
- * moving carriage.
+ * <p>Confined to {@link CarriageContraptionEntity}, so no other contraption changes. No packets,
+ * no allocation unless the summary line is due.
  */
 @Mixin(ContraptionCollider.class)
 public class CarriageVerticalCarryMixin {
@@ -105,11 +111,28 @@ public class CarriageVerticalCarryMixin {
     @Unique
     private static final double MIN_INTERESTING_MOTION = 0.5d;
 
+    /**
+     * Largest downward deficit treated as missed support and restored, in Blocks.
+     *
+     * <p>The measured sink is about 0.03 per tick, so this covers several ticks of it while
+     * staying far below any real change of level.
+     */
+    @Unique
+    private static final double MAX_RESTORE = 0.30d;
+
+    /** Below this, the position is left completely alone. */
+    @Unique
+    private static final double EPSILON = 1.0e-4d;
+
     /** Summary cadence and hard line cap, so a long session cannot fill the log. */
     @Unique
     private static final int SUMMARY_EVERY = 100;
     @Unique
     private static final int MAX_SUMMARY_LINES = 200;
+
+    /** Ticks before a remembered height is discarded rather than trusted. */
+    @Unique
+    private static final int HOLD_EXPIRY_TICKS = 5;
 
     /** The carriage currently being processed, so the redirects can be scoped to it. */
     @Unique
@@ -119,19 +142,11 @@ public class CarriageVerticalCarryMixin {
     @Unique
     private static Vec3 electroEnergetics$surfaceAllowed = Vec3.ZERO;
 
-    /**
-     * What {@code collide(totalResponse, entity)} returned at {@code :283}, the push-out path.
-     *
-     * <p>Recorded because it distinguishes the two possible causes of the sink, which need
-     * different fixes: if this carries a positive Y, the solver IS resolving penetration and the
-     * surface branch's discarded term is the whole story. If it is zero, the rider is resting on
-     * the carriage without penetrating it at all, so there is no push-out to recover and the
-     * weight has to be supported rather than restored.
-     */
+    /** What {@code collide(totalResponse, entity)} returned at {@code :283}. */
     @Unique
     private static Vec3 electroEnergetics$hardAllowed = Vec3.ZERO;
 
-    /** The rider's position before this carriage's pass, to confirm a real horizontal carry. */
+    /** The rider's position before this carriage's pass. */
     @Unique
     private static Vec3 electroEnergetics$beforePos;
 
@@ -139,68 +154,54 @@ public class CarriageVerticalCarryMixin {
     @Unique
     private static double electroEnergetics$motion;
 
+    // ---- the height held across ticks ----
+
+    /** The rider's expected height while the holding carriage supports them, else NaN. */
+    @Unique
+    private static double electroEnergetics$holdY = Double.NaN;
+
+    /** The carriage doing the holding, and the tick that ended. */
+    @Unique
+    private static int electroEnergetics$holdOwner = -1;
+    @Unique
+    private static long electroEnergetics$holdTick = Long.MIN_VALUE;
+
     // ---- verification ----
 
     @Unique
     private static int electroEnergetics$lines;
-
-    /**
-     * The last summary tick, or {@link Long#MIN_VALUE} before the first.
-     *
-     * <p>Note the comparison below. Doing this as {@code now - lastSummary < SUMMARY_EVERY}
-     * overflows when {@code lastSummary} is still {@code Long.MIN_VALUE}: the subtraction wraps
-     * to a large negative number, which is less than the interval, so the guard returns on every
-     * tick and the timestamp is never updated - the summary can then never be emitted at all.
-     * That is exactly what silenced the first build of this class. The sentinel is therefore
-     * tested explicitly and first.
-     */
     @Unique
     private static long electroEnergetics$lastSummary = Long.MIN_VALUE;
-    @Unique
-    private static int electroEnergetics$carriedTicks;
-    @Unique
-    private static int electroEnergetics$positiveLifts;
-    @Unique
-    private static double electroEnergetics$allowedYSum;
-    @Unique
-    private static double electroEnergetics$relYMin = Double.MAX_VALUE;
-    @Unique
-    private static double electroEnergetics$relYMax = -Double.MAX_VALUE;
-
-    /**
-     * What the whole pass did to the rider's height, and how often it was upwards.
-     *
-     * <p>This is the decisive pair. If a carried rider is never once raised by the pass - if
-     * {@code roseTicks} stays at zero - then nothing in Create supplies their weight at this
-     * speed, whatever the individual terms say, and the support has to be provided rather than
-     * recovered from a discarded value.
-     */
-    @Unique
-    private static double electroEnergetics$passDySum;
-    @Unique
-    private static int electroEnergetics$roseTicks;
-    @Unique
-    private static int electroEnergetics$sankTicks;
-    @Unique
-    private static double electroEnergetics$sankSum;
-    @Unique
-    private static double electroEnergetics$hardYSum;
-
-    /**
-     * How often the redirect ran at all, and how often it ran with a carriage scoped.
-     *
-     * <p>These exist so the question "did the injection apply, and did the guard let it through"
-     * is answered by a count rather than by inference - the previous build emitted no summary at
-     * all and I could not tell a failed injection from a silent guard without them.
-     */
     @Unique
     private static int electroEnergetics$redirectCalls;
     @Unique
     private static int electroEnergetics$appliedCalls;
     @Unique
     private static int electroEnergetics$capturedCalls;
+    @Unique
+    private static int electroEnergetics$onSurfaceTicks;
+    @Unique
+    private static int electroEnergetics$restoredTicks;
+    @Unique
+    private static double electroEnergetics$restoreSum;
+    @Unique
+    private static int electroEnergetics$rebasedTicks;
+    @Unique
+    private static int electroEnergetics$releasedTicks;
+    @Unique
+    private static double electroEnergetics$surfaceYSum;
+    @Unique
+    private static int electroEnergetics$positiveSurfaceY;
+    @Unique
+    private static double electroEnergetics$hardYSum;
+    @Unique
+    private static double electroEnergetics$relYMin = Double.MAX_VALUE;
+    @Unique
+    private static double electroEnergetics$relYMax = -Double.MAX_VALUE;
+    @Unique
+    private static double electroEnergetics$lastCarriageY;
 
-    /** Scopes the redirects to train carriages and a rider actually being carried. */
+    /** Scopes the redirects to train carriages and records the rider's starting position. */
     @Inject(method = "collideEntities", at = @At("HEAD"), remap = false)
     private static void electroEnergetics$enter(AbstractContraptionEntity contraption,
                                                 CallbackInfo ci) {
@@ -234,14 +235,7 @@ public class CarriageVerticalCarryMixin {
         }
     }
 
-    /**
-     * Captures what the surface branch's collision solve returned.
-     *
-     * <p>Wrapped rather than recomputed because {@code collide} is package-private and cannot be
-     * called from here, and recording the real value keeps this exactly in step with whatever the
-     * solver actually decided. {@code ordinal = 1} selects the call at {@code :308}; ordinal 0 is
-     * {@code :283}.
-     */
+    /** Captures the surface branch's collision result at {@code :308}. Ordinal 1 of 2. */
     @WrapOperation(method = "collideEntities",
             at = @At(value = "INVOKE",
                     target = "Lcom/simibubi/create/content/contraptions/ContraptionCollider;"
@@ -258,14 +252,7 @@ public class CarriageVerticalCarryMixin {
         return allowed;
     }
 
-    /**
-     * Captures the push-out path's result at {@code :283}.
-     *
-     * <p>A positive Y here means the solver is resolving real penetration, in which case the
-     * surface branch's discarded term is the cause of the sink and applying it is the fix. A zero
-     * means the rider rests on the carriage without penetrating, so there is nothing to recover
-     * and the weight must be supported instead.
-     */
+    /** Captures the hard-collision branch's result at {@code :283}. Ordinal 0 of 2. */
     @WrapOperation(method = "collideEntities",
             at = @At(value = "INVOKE",
                     target = "Lcom/simibubi/create/content/contraptions/ContraptionCollider;"
@@ -282,12 +269,10 @@ public class CarriageVerticalCarryMixin {
     }
 
     /**
-     * Applies the vertical component, matching the hard-collision branch at {@code :284-285}.
+     * Applies the vertical component the surface branch drops, matching {@code :284-285}.
      *
-     * <p>{@code ordinal = 1} selects the surface branch's call at {@code :309}; ordinal 0 is
-     * {@code :284}, which already adds its own {@code .y} and must not be added to twice. Ordinals
-     * were read from the shipped bytecode: {@code Entity.setPos} appears exactly twice inside
-     * {@code collideEntities}, at 1546 and 1782.
+     * <p>Ordinal 1 of {@code Entity.setPos}: the shipped bytecode has exactly two, at 1546 (the
+     * hard branch, which already adds its own {@code .y}) and 1782 (the surface branch).
      */
     @Redirect(method = "collideEntities",
             at = @At(value = "INVOKE",
@@ -306,7 +291,7 @@ public class CarriageVerticalCarryMixin {
     }
 
     @Inject(method = "collideEntities", at = @At("RETURN"), remap = false)
-    private static void electroEnergetics$afterCarry(AbstractContraptionEntity contraption,
+    private static void electroEnergetics$holdHeight(AbstractContraptionEntity contraption,
                                                      CallbackInfo ci) {
         try {
             AbstractContraptionEntity scoped = electroEnergetics$current;
@@ -320,38 +305,91 @@ public class CarriageVerticalCarryMixin {
             if (player == null || player.isPassenger() || player.isSpectator())
                 return;
 
-            // Carried horizontally means genuinely in contact with this carriage - the same test
-            // the horizontal carry itself satisfies, so this is exactly the set of riders whose
-            // weight Create is failing to support. An airborne or departing rider fails it.
-            double carriedHorizontally = Math.hypot(
-                    player.getX() - before.x, player.getZ() - before.z);
-            if (carriedHorizontally <= electroEnergetics$motion * 0.5d)
+            long now = contraption.level().getGameTime();
+            double carriageY = contraption.getY();
+
+            // Contact registered DURING THIS PASS. registerColliding stores a fresh counter at
+            // zero and the entity's own tick increments these, so zero now means the carriage
+            // just registered them - i.e. they are standing on it. Not membership, which would
+            // still match a rider who jumped a tick ago.
+            MutableInt contact = contraption.collidingEntities.get(player);
+            boolean onSurface = contact != null && contact.intValue() == 0;
+            boolean isHolder = contraption.getId() == electroEnergetics$holdOwner;
+
+            if (!onSurface) {
+                // Only the carriage that was holding may end the hold. A sibling carriage's
+                // report of no contact is meaningless - the rider is simply standing on the
+                // other one - and letting it clear the hold would break the state every tick.
+                if (isHolder && !Double.isNaN(electroEnergetics$holdY)) {
+                    electroEnergetics$holdY = Double.NaN;
+                    electroEnergetics$holdOwner = -1;
+                    electroEnergetics$releasedTicks++;
+                }
+                electroEnergetics$recordRel(contraption, player, carriageY);
+                electroEnergetics$maybeSummary(now, player, carriageY);
                 return;
-
-            electroEnergetics$carriedTicks++;
-            double allowedY = electroEnergetics$surfaceAllowed.y;
-            electroEnergetics$allowedYSum += allowedY;
-            electroEnergetics$hardYSum += electroEnergetics$hardAllowed.y;
-            if (allowedY > 1.0e-4d)
-                electroEnergetics$positiveLifts++;
-
-            // What the pass as a whole did to their height, which is the measurement that cannot
-            // be argued with: if a carried rider is never raised, nothing here supports them.
-            double passDy = player.getY() - before.y;
-            electroEnergetics$passDySum += passDy;
-            if (passDy > 1.0e-4d)
-                electroEnergetics$roseTicks++;
-            else if (passDy < -1.0e-4d) {
-                electroEnergetics$sankTicks++;
-                electroEnergetics$sankSum += -passDy;
             }
 
-            double relY = player.getY() - contraption.getY();
-            if (relY < electroEnergetics$relYMin) electroEnergetics$relYMin = relY;
-            if (relY > electroEnergetics$relYMax) electroEnergetics$relYMax = relY;
+            // Another carriage is already holding and its hold is still fresh. Leave it alone
+            // rather than fighting over the same rider.
+            if (!isHolder && !Double.isNaN(electroEnergetics$holdY)
+                    && now - electroEnergetics$holdTick <= HOLD_EXPIRY_TICKS) {
+                electroEnergetics$recordRel(contraption, player, carriageY);
+                electroEnergetics$maybeSummary(now, player, carriageY);
+                return;
+            }
 
-            electroEnergetics$maybeSummary(contraption.level().getGameTime(), player, allowedY,
-                    passDy);
+            electroEnergetics$onSurfaceTicks++;
+
+            // The contact point is where the floor went this tick, so the held height advances by
+            // it and tracks the carriage rather than a fixed world Y.
+            Vec3 carry = contraption.getContactPointMotion(player.position());
+
+            double expected;
+            if (isHolder && !Double.isNaN(electroEnergetics$holdY)
+                    && now - electroEnergetics$holdTick <= HOLD_EXPIRY_TICKS) {
+                expected = electroEnergetics$holdY + carry.y;
+            } else {
+                // Freshly stepped onto this carriage: adopt where they are, so this needs to know
+                // nothing about the carriage's geometry.
+                expected = player.getY();
+            }
+
+            double deficit = expected - player.getY();
+
+            if (deficit > MAX_RESTORE) {
+                // Far below the held height: a real change of level. Take their position as the
+                // truth instead of hauling them back up.
+                expected = player.getY();
+                electroEnergetics$rebasedTicks++;
+            } else if (deficit > EPSILON) {
+                player.setPos(player.getX(), expected, player.getZ());
+                electroEnergetics$restoredTicks++;
+                electroEnergetics$restoreSum += deficit;
+            } else if (deficit < -EPSILON) {
+                // Above the held height: stepping up, or being lifted by the carriage. Follow
+                // them - this is what keeps a step up working and never pulls anyone down.
+                expected = player.getY();
+            }
+
+            electroEnergetics$holdY = expected;
+            electroEnergetics$holdOwner = contraption.getId();
+            electroEnergetics$holdTick = now;
+
+            // Travelling with the floor means no downward speed accumulates, so a supported rider
+            // is not falling as far as vanilla is concerned.
+            Vec3 own = player.getDeltaMovement();
+            if (own.y < carry.y)
+                player.setDeltaMovement(own.x, carry.y, own.z);
+            player.fallDistance = 0;
+
+            electroEnergetics$surfaceYSum += electroEnergetics$surfaceAllowed.y;
+            if (electroEnergetics$surfaceAllowed.y > EPSILON)
+                electroEnergetics$positiveSurfaceY++;
+            electroEnergetics$hardYSum += electroEnergetics$hardAllowed.y;
+
+            electroEnergetics$recordRel(contraption, player, carriageY);
+            electroEnergetics$maybeSummary(now, player, carriageY);
         } catch (Throwable ignored) {
             // A carry correction must never be the thing that breaks the client.
             electroEnergetics$current = null;
@@ -360,10 +398,21 @@ public class CarriageVerticalCarryMixin {
     }
 
     @Unique
+    private static void electroEnergetics$recordRel(AbstractContraptionEntity contraption,
+                                                   LocalPlayer player, double carriageY) {
+        electroEnergetics$lastCarriageY = carriageY;
+        double relY = player.getY() - carriageY;
+        if (relY < electroEnergetics$relYMin) electroEnergetics$relYMin = relY;
+        if (relY > electroEnergetics$relYMax) electroEnergetics$relYMax = relY;
+    }
+
+    @Unique
     private static void electroEnergetics$maybeSummary(long now, LocalPlayer player,
-                                                       double allowedY, double passDy) {
-        // Sentinel FIRST, because `now - Long.MIN_VALUE` overflows to a negative number and the
-        // interval test below would then return forever. See the field comment.
+                                                       double carriageY) {
+        // The sentinel is tested FIRST. As `now - Long.MIN_VALUE` this overflows to a large
+        // negative number that is always below the interval, so the test below would return on
+        // every tick and the summary could never be emitted at all - which is exactly what
+        // silenced the first build of this class.
         if (electroEnergetics$lastSummary == Long.MIN_VALUE) {
             electroEnergetics$lastSummary = now;
             return;
@@ -371,43 +420,40 @@ public class CarriageVerticalCarryMixin {
         if (now - electroEnergetics$lastSummary < SUMMARY_EVERY)
             return;
         electroEnergetics$lastSummary = now;
-        if (electroEnergetics$carriedTicks == 0)
-            return;
         if (electroEnergetics$lines++ >= MAX_SUMMARY_LINES)
             return;
 
-        int t = electroEnergetics$carriedTicks;
+        int t = electroEnergetics$onSurfaceTicks;
         electroEnergetics$LOG.info(
-                "CARRY FIX ticks={} redirect={} applied={} captured={} "
-                        + "| surfaceYavg={} surfaceYnow={} positive={}/{} hardYavg={} "
-                        + "| passDyavg={} rose={}/{} sank={}/{} avgSank={} "
-                        + "| relY=[{},{}] nowRelY={} vy={} onGround={}",
-                t,
+                "CARRY FIX onCarriage={} restored={}/{} avgRestore={} rebased={} released={} "
+                        + "| surfaceYavg={} positiveY={} hardYavg={} "
+                        + "| redirect={} applied={} captured={} "
+                        + "| relY=[{},{}] nowRelY={} carriageY={} playerY={} vy={} onGround={}",
+                t, electroEnergetics$restoredTicks, t,
+                String.format("%.4f", electroEnergetics$restoredTicks == 0 ? 0d
+                        : electroEnergetics$restoreSum / electroEnergetics$restoredTicks),
+                electroEnergetics$rebasedTicks, electroEnergetics$releasedTicks,
+                String.format("%.4f", t == 0 ? 0d : electroEnergetics$surfaceYSum / t),
+                electroEnergetics$positiveSurfaceY,
+                String.format("%.4f", t == 0 ? 0d : electroEnergetics$hardYSum / t),
                 electroEnergetics$redirectCalls, electroEnergetics$appliedCalls,
                 electroEnergetics$capturedCalls,
-                String.format("%.4f", electroEnergetics$allowedYSum / t),
-                String.format("%.4f", allowedY),
-                electroEnergetics$positiveLifts, t,
-                String.format("%.4f", electroEnergetics$hardYSum / t),
-                String.format("%.4f", electroEnergetics$passDySum / t),
-                electroEnergetics$roseTicks, t,
-                electroEnergetics$sankTicks, t,
-                String.format("%.4f", electroEnergetics$sankTicks == 0 ? 0d
-                        : electroEnergetics$sankSum / electroEnergetics$sankTicks),
                 String.format("%.3f", electroEnergetics$relYMin),
                 String.format("%.3f", electroEnergetics$relYMax),
+                String.format("%.3f", player.getY() - carriageY),
+                String.format("%.3f", carriageY),
                 String.format("%.3f", player.getY()),
                 String.format("%.3f", player.getDeltaMovement().y),
                 player.onGround());
 
-        electroEnergetics$carriedTicks = 0;
-        electroEnergetics$positiveLifts = 0;
-        electroEnergetics$allowedYSum = 0;
+        electroEnergetics$onSurfaceTicks = 0;
+        electroEnergetics$restoredTicks = 0;
+        electroEnergetics$restoreSum = 0;
+        electroEnergetics$rebasedTicks = 0;
+        electroEnergetics$releasedTicks = 0;
+        electroEnergetics$surfaceYSum = 0;
+        electroEnergetics$positiveSurfaceY = 0;
         electroEnergetics$hardYSum = 0;
-        electroEnergetics$passDySum = 0;
-        electroEnergetics$roseTicks = 0;
-        electroEnergetics$sankTicks = 0;
-        electroEnergetics$sankSum = 0;
         electroEnergetics$redirectCalls = 0;
         electroEnergetics$appliedCalls = 0;
         electroEnergetics$capturedCalls = 0;
