@@ -201,6 +201,19 @@ public class CarriageVerticalCarryMixin {
     @Unique
     private static double electroEnergetics$lastCarriageY;
 
+    // ---- fallback carry: supplied when Create's own detection misses the rider ----
+
+    /** Game tick of the last fallback supply, so only one carriage supplies per tick. */
+    @Unique
+    private static long electroEnergetics$suppliedTick = Long.MIN_VALUE;
+    @Unique
+    private static int electroEnergetics$suppliedTicks;
+    @Unique
+    private static double electroEnergetics$suppliedHSum;
+    /** Ticks Create carried them itself, for comparison against the fallback. */
+    @Unique
+    private static int electroEnergetics$carryByCreateTicks;
+
     /** Scopes the redirects to train carriages and records the rider's starting position. */
     @Inject(method = "collideEntities", at = @At("HEAD"), remap = false)
     private static void electroEnergetics$enter(AbstractContraptionEntity contraption,
@@ -317,6 +330,13 @@ public class CarriageVerticalCarryMixin {
             boolean isHolder = contraption.getId() == electroEnergetics$holdOwner;
 
             if (!onSurface) {
+                // Create's carry lives inside `if (surfaceCollision)` at :294, and the diagnostic
+                // shows that detection collapsing as speed rises: it fired on 22% of passes at
+                // 16 m/s but only 2% at 71 m/s, with `hardCollision` never true at all. So :280
+                // bails and the rider is carried by nobody - which is the sideways ejection.
+                // The carry Create would have applied is therefore applied here.
+                electroEnergetics$supplyMissedCarry(contraption, player, before);
+
                 // Only the carriage that was holding may end the hold. A sibling carriage's
                 // report of no contact is meaningless - the rider is simply standing on the
                 // other one - and letting it clear the hold would break the state every tick.
@@ -329,6 +349,9 @@ public class CarriageVerticalCarryMixin {
                 electroEnergetics$maybeSummary(now, player, carriageY);
                 return;
             }
+
+            // Create carried them, so no fallback is needed this tick.
+            electroEnergetics$carryByCreateTicks++;
 
             // Another carriage is already holding and its hold is still fresh. Leave it alone
             // rather than fighting over the same rider.
@@ -397,6 +420,79 @@ public class CarriageVerticalCarryMixin {
         }
     }
 
+    /**
+     * Applies the carry Create would have applied, when its own detection missed the rider.
+     *
+     * <p>Measured: {@code surfaceCollision} - the only branch that carries a standing rider, since
+     * {@code hardCollision} is never true for one - fired on 22% of passes at 16 m/s but only 2%
+     * at 71 m/s. {@code :280} then bails, and the rider is carried by nobody, which is what throws
+     * them out of the side of the carriage at speed.
+     *
+     * <p>The motion used is {@code getContactPointMotion}, the same call Create makes at
+     * {@code :307}. It is exactly the displacement of the material point under the rider's feet,
+     * so applying it puts them where Create would have put them - no new mechanism, and nothing
+     * invented about the carriage's geometry.
+     *
+     * <p>Three guards, each preventing a specific way this could do harm:
+     *
+     * <ol>
+     *   <li><b>The rider must be inside the carriage's OWN box</b>, not the inflated selection
+     *       window. A bystander beside the track is inside the window, which is why the window
+     *       exists, but is not inside the carriage and must never be carried by it.</li>
+     *   <li><b>Only one carriage may supply per tick.</b> Adjacent carriages' boxes overlap at a
+     *       coupling, so without this the rider could be carried twice in one tick and move at
+     *       double speed - which is a worse bug than the one being fixed.</li>
+     *   <li><b>Nothing is supplied while Create is carrying them.</b> This runs only from the
+     *       branch where Create reported no contact, so the two can never both apply.</li>
+     * </ol>
+     *
+     * <p>It also refuses when the rider is already moving faster horizontally than the carriage,
+     * so a player sprinting along a carriage or jumping off it is not held back.
+     */
+    @Unique
+    private static void electroEnergetics$supplyMissedCarry(AbstractContraptionEntity contraption,
+                                                            LocalPlayer player, Vec3 before) {
+        try {
+            if (electroEnergetics$motion < MIN_INTERESTING_MOTION)
+                return;
+
+            // Guard 1: inside the carriage itself, not merely inside the selection window.
+            if (!contraption.getBoundingBox().inflate(0.3d).contains(player.position()))
+                return;
+
+            long now = contraption.level().getGameTime();
+
+            // Guard 2: at most one carriage supplies per tick.
+            if (electroEnergetics$suppliedTick == now)
+                return;
+
+            Vec3 carry = contraption.getContactPointMotion(player.position());
+            double carryH = Math.hypot(carry.x, carry.z);
+            if (carryH < 1.0e-4d)
+                return;   // carriage is not moving horizontally; nothing to carry
+
+            // Do not fight a rider who is already moving horizontally as fast as the carriage -
+            // that is someone walking, sprinting, or stepping off, not someone being left behind.
+            Vec3 own = player.getDeltaMovement();
+            if (Math.hypot(own.x, own.z) >= carryH)
+                return;
+
+            electroEnergetics$suppliedTick = now;
+
+            // The carry, as Create applies it: displace by the contact point's motion.
+            player.setPos(player.getX() + carry.x, player.getY() + carry.y, player.getZ() + carry.z);
+            // Carried, so not falling.
+            if (own.y < carry.y)
+                player.setDeltaMovement(own.x, carry.y, own.z);
+            player.fallDistance = 0;
+
+            electroEnergetics$suppliedTicks++;
+            electroEnergetics$suppliedHSum += carryH;
+        } catch (Throwable ignored) {
+            // A carry correction must never be the thing that breaks the client.
+        }
+    }
+
     @Unique
     private static void electroEnergetics$recordRel(AbstractContraptionEntity contraption,
                                                    LocalPlayer player, double carriageY) {
@@ -425,11 +521,15 @@ public class CarriageVerticalCarryMixin {
 
         int t = electroEnergetics$onSurfaceTicks;
         electroEnergetics$LOG.info(
-                "CARRY FIX onCarriage={} restored={}/{} avgRestore={} rebased={} released={} "
+                "CARRY FIX onCarriage={} byCreate={} supplied={} suppliedHavg={} "
+                        + "| restored={}/{} avgRestore={} rebased={} released={} "
                         + "| surfaceYavg={} positiveY={} hardYavg={} "
                         + "| redirect={} applied={} captured={} "
                         + "| relY=[{},{}] nowRelY={} carriageY={} playerY={} vy={} onGround={}",
-                t, electroEnergetics$restoredTicks, t,
+                t, electroEnergetics$carryByCreateTicks, electroEnergetics$suppliedTicks,
+                String.format("%.3f", electroEnergetics$suppliedTicks == 0 ? 0d
+                        : electroEnergetics$suppliedHSum / electroEnergetics$suppliedTicks),
+                electroEnergetics$restoredTicks, t,
                 String.format("%.4f", electroEnergetics$restoredTicks == 0 ? 0d
                         : electroEnergetics$restoreSum / electroEnergetics$restoredTicks),
                 electroEnergetics$rebasedTicks, electroEnergetics$releasedTicks,
@@ -447,6 +547,9 @@ public class CarriageVerticalCarryMixin {
                 player.onGround());
 
         electroEnergetics$onSurfaceTicks = 0;
+        electroEnergetics$carryByCreateTicks = 0;
+        electroEnergetics$suppliedTicks = 0;
+        electroEnergetics$suppliedHSum = 0;
         electroEnergetics$restoredTicks = 0;
         electroEnergetics$restoreSum = 0;
         electroEnergetics$rebasedTicks = 0;
