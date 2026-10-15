@@ -15,6 +15,7 @@
     "LevelRendererAccessor",
     "MouseHandlerMixin",
     "MultiPlayerGameModeMixin",
+    "RiderFlightRecorderMixin",
     "SchematicRendererMixin",
     "TrainHUDMixin"
   ],
