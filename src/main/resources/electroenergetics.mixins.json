@@ -7,7 +7,7 @@
   "compatibilityLevel": "JAVA_21",
   "plugin": "com.george_vi.electroenergetics.CEEMixinPlugin",
   "client": [
-    "CarriageCarryOncePerTickMixin",
+    "CarriageClearVelocityMixin",
     "CarriageSoundsMixin",
     "ControlsMovementBehaviourMixin",
     "HumanoidModelMixin",
