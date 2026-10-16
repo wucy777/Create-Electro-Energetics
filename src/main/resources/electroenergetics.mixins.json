@@ -7,7 +7,6 @@
   "compatibilityLevel": "JAVA_21",
   "plugin": "com.george_vi.electroenergetics.CEEMixinPlugin",
   "client": [
-    "CarriageClearVelocityMixin",
     "CarriageSoundsMixin",
     "ControlsMovementBehaviourMixin",
     "HumanoidModelMixin",
@@ -17,6 +16,7 @@
     "MouseHandlerMixin",
     "MultiPlayerGameModeMixin",
     "RiderFlightRecorderMixin",
+    "RiderWriteTraceMixin",
     "SchematicRendererMixin",
     "TrainHUDMixin"
   ],
