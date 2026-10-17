@@ -54,8 +54,8 @@ public final class TrainTractionModel {
     }
 
     /**
-     * Whether a train at this speed has arrived at the ceiling it is allowed, so
-     * ACCELERATE should hand over to CRUISE.
+     * Whether a train at this speed has arrived at its design ceiling, so ACCELERATE
+     * should hand over to CRUISE.
      *
      * <p>A small tolerance below the ceiling rather than an exact equality, because the
      * speed approaches the ceiling asymptotically as drag eats the remaining thrust and
@@ -63,14 +63,13 @@ public final class TrainTractionModel {
      * ACCELERATE gives up early. 0.5 m/s below 100 is half a percent, reached within a
      * few ticks of the ceiling and far below anything a driver could notice.
      *
-     * <p>Penalty-aware: with the emergency cap in force the ceiling is 40 km/h, and
-     * ACCELERATE has to hand over there rather than at the design speed. Handing over at
-     * the wrong one would leave the lever in ACCELERATE above a cap it can never pull
-     * past, which is the same oscillation the handover exists to remove.
+     * <p>Not penalty-aware, and it does not need to be. The emergency cap is not enforced
+     * here at all: it is a cap on {@code Train.maxSpeed()}, which both control schemes ask,
+     * because after an emergency stop the train is always under Create's controls. By the
+     * time the cap matters this lever is not the thing driving the train.
      */
-    public static boolean atDesignCeiling(double speedMs, int carriages, boolean penalty) {
-        double ceiling = penalty ? Math.min(designMaxSpeed(), PENALTY_SPEED) : designMaxSpeed();
-        return speedMs >= ceiling - CEILING_HANDOVER_BAND;
+    public static boolean atDesignCeiling(double speedMs, int carriages) {
+        return speedMs >= designMaxSpeed() - CEILING_HANDOVER_BAND;
     }
 
     /** How far below the design ceiling still counts as having reached it [m/s]. */
@@ -346,23 +345,6 @@ public final class TrainTractionModel {
     private static final double CRUISE_DEADBAND = 0.5d;
 
     /**
-     * Speed cap left in force after the emergency brake is used [m/s], until the
-     * next station call. This is the cost of using it.
-     */
-    public static final double PENALTY_SPEED = 40d / 3.6d;   // 40 km/h
-
-    /**
-     * Hysteresis band above the penalty cap before the brake is applied again [m/s].
-     *
-     * <p>Without it the penalty would enforce itself by braking, then stop braking the
-     * instant the train dropped under the cap, then brake again - the same
-     * accelerate/brake oscillation the ceiling used to cause, just at 40 km/h instead
-     * of at top speed. One metre per second is well under the 0.8 m/s^2 the brake can
-     * remove in a tick, so the band is closed within a tick or two and cannot be felt.
-     */
-    private static final double CAP_MARGIN = 1d;
-
-    /**
      * How much more adhesion the emergency brake can find than the service brake.
      *
      * <p>Emergency braking is not a different mechanism, it is the same friction
@@ -473,14 +455,16 @@ public final class TrainTractionModel {
         return frictionBrake() + dynamicBrake() * dynamicBrakeFade(speedMs);
     }
 
-    /**
-     * Total emergency braking rate at this speed [m/s²]: maximum adhesion plus the
-     * electric brake.
-     */
-    public static double emergencyBrakeDeceleration(double speedMs) {
-        return frictionBrake() * EMERGENCY_ADHESION_FACTOR
-                + dynamicBrake() * dynamicBrakeFade(speedMs);
-    }
+    // emergencyBrakeDeceleration(speedMs) used to live here and has been removed.
+    //
+    // It returned frictionBrake()*EMERGENCY_ADHESION_FACTOR + dynamicBrake()*fade, which was wrong
+    // in the one way that mattered: the electric share was applied at full effect with no supply at
+    // all, because the supply scaling lives in gearAcceleration and this method never saw it. A
+    // train that had lost its wire would have been credited with braking it could not produce.
+    //
+    // Its only caller built the two parts separately so the motor half could be scaled, which left
+    // this method unused. Keeping an unused method that encodes the wrong physics is a trap for
+    // whoever reaches for it next, so it is gone rather than left as a convenience.
 
     /**
      * Braking rate that is still available at a standstill [m/s²].
@@ -525,7 +509,6 @@ public final class TrainTractionModel {
      * @param cruiseSpeedMs speed the cruise position holds, as a magnitude
      * @param brakeMs2      configured FRICTION service braking rate
      * @param emergency     whether the emergency brake is being applied
-     * @param penalty       whether the post-emergency speed cap is in force
      * @param out           filled with the acceleration and the motor-brake share;
      *                      pass {@code null} when only the acceleration is wanted.
      *                      The share is reported rather than recomputed by the
@@ -534,7 +517,7 @@ public final class TrainTractionModel {
      */
     public static double gearAcceleration(double signedSpeedMs, double gradeToPlusX, int carriages,
                                           double powerScale, TrainGear gear, double cruiseSpeedMs,
-                                          double brakeMs2, boolean emergency, boolean penalty,
+                                          double brakeMs2, boolean emergency,
                                           GearStep out) {
         if (out != null)
             out.clear();
@@ -562,19 +545,15 @@ public final class TrainTractionModel {
         force -= gradeResistance(gradeToPlusX, carriages);
 
         double effort = availableEffort(speed, carriages, powerScale);
+        // There is no emergency-speed-cap term here any more, and its absence is deliberate.
+        //
+        // The cap is enforced on Train.maxSpeed() instead, because after an emergency stop the
+        // train always ends up under CREATE's controls: the stop lowers the pantographs, the driver
+        // is barred from raising them until the next station, so the speed gate hands the train
+        // over. Create computes its target from maxSpeed(), so that is the one place a cap is
+        // obeyed by both schemes. Enforcing it here as well would have been a second copy that
+        // could silently disagree with the first.
         double ceiling = designMaxSpeed();
-        // The emergency brake leaves a speed cap behind until the next station, which
-        // is what makes using it a real decision rather than a free extra stop. The
-        // cap lowers the ceiling rather than clamping train.speed: a clamp would be a
-        // teleport the physics never agreed to, and it would also stop the train
-        // dead the instant it crossed the cap. Lowering the ceiling instead means the
-        // train runs out of traction there and, if it is already over the cap, is
-        // braked down to it - see the ACCELERATE and CRUISE branches, which apply the
-        // brake when they are above the ceiling. Without that second part a descent
-        // simply ignored the penalty: the harness showed a train on a 1-in-3 grade
-        // accelerating to 1762 km/h with the cap supposedly in force.
-        if (penalty)
-            ceiling = Math.min(ceiling, PENALTY_SPEED);
         // Which way the train is going, or would go if released from rest. Used
         // only to aim traction and the brake; gravity never needs it.
         double heading = speed < 1e-6d ? 1d : Math.signum(v);
@@ -601,7 +580,17 @@ public final class TrainTractionModel {
         // does not. `brakeMs2` is the caller's friction setting, which is what the
         // config means; the electric contribution is added on top. See the block
         // comment above serviceBrakeDeceleration for why this is not one figure.
-        double dynamicPart = dynamicBrake() * dynamicBrakeFade(speed);
+        // The motor brake is a MOTOR brake: it retards the train by working the motors against the
+        // direction of travel, so it needs the supply exactly as traction does. Scaling it by the
+        // supply is what makes that true in the model.
+        //
+        // Without this the electric share of the brake was applied at full effect even with no
+        // supply at all, because nothing in the brake path ever consulted powerScale - only the
+        // traction path did. A train that had lost its wire would therefore brake harder than the
+        // friction alone can account for, which is not a stop it could really make. The friction
+        // part is untouched and remains available with no power, which is the whole reason the
+        // brake is kept while coasting.
+        double dynamicPart = dynamicBrake() * dynamicBrakeFade(speed) * powerScale;
         double brakeTotal = brakeMs2 + dynamicPart;
         // Accumulated as the motor brake is applied, so the caller knows how much
         // of the stop the motors are doing and can regenerate only that share.
@@ -638,14 +627,20 @@ public final class TrainTractionModel {
                     // oscillating between accelerating and braking - "蹦迪" - and every
                     // overshoot wasted the acceleration it had just spent.
                     //
-                    // The design ceiling is still enforced without the oscillation: drag
-                    // alone holds the train there, because the ceiling is derived from
-                    // the same drag. Overshoot is bounded by one tick of motion and
-                    // nothing brakes a train that is merely at its design speed.
+                    // The design ceiling is still enforced without the oscillation, but NOT by
+                    // drag - it is enforced by the `speed < ceiling` test immediately above,
+                    // which stops adding tractive effort once the train is at its design speed.
                     //
-                    // That reasoning holds ONLY for the design ceiling, where drag is
-                    // what stops the train running away. It does NOT hold for a ceiling
-                    // imposed from outside - the emergency cap or a curve - because
+                    // An earlier version of this comment claimed "drag alone holds the train
+                    // there, because the ceiling is derived from the same drag". That is not true
+                    // of the configured figures: with the defaults the tractive effort equals the
+                    // running resistance at about 115 m/s, well ABOVE the 100 m/s ceiling. Without
+                    // the test above the train would run on to 115 m/s. (Verified numerically in
+                    // _cache/verify_physics_spec.py.) Overshoot is still bounded by one tick of
+                    // motion, and nothing brakes a train that is merely at its design speed.
+                    //
+                    // That reasoning holds ONLY for the design ceiling. It does NOT hold for a
+                    // ceiling imposed from outside - the emergency cap or a curve - because
                     // nothing about travelling at 100 m/s makes drag hold a train to
                     // 11 m/s on a curve. Both of those are enforced by the targeted
                     // blocks below instead, which brake a train that is genuinely over
@@ -703,11 +698,9 @@ public final class TrainTractionModel {
                 }
             }
             case CRUISE -> {
-                // The held speed is capped by the ceiling, which is how the emergency
-                // penalty applies here: with the cap in force cruise holds 40 km/h
-                // rather than braking only below whatever the driver set. Without
-                // this the penalty would be honoured going uphill and quietly ignored
-                // on a descent, where the set speed exceeds it.
+                // The held speed is capped by the design ceiling. The emergency cap is NOT applied
+                // here - it lives on Train.maxSpeed(), which is what Create obeys once the train has
+                // been handed over.
                 double target = Math.min(Math.max(cruiseSpeedMs, 0d), ceiling);
                 // Commanded to STOP, which is how an automatic arrival at a station
                 // finishes: Create's navigation zeroes its target speed once the train is
@@ -789,50 +782,36 @@ public final class TrainTractionModel {
             }
         }
 
-        // The emergency speed cap, enforced on its own terms rather than by braking at the
-        // design ceiling.
+        // The emergency speed cap used to be enforced here, by braking a train already above it.
         //
-        // Only a train that is ALREADY above the cap is braked, and only until it is back
-        // under it. That distinction is what separates "the cap is in force" from "the
-        // train has reached its design speed": at the design ceiling the remaining thrust
-        // is a fraction of a m/s^2, so a brake there fights a train doing nothing wrong and
-        // produces the accelerate/brake oscillation described above. A train genuinely over
-        // the cap needs slowing, and braking is the only way the cap is honoured on a
-        // descent, where the motors are not what is pushing it.
+        // It is gone on purpose, not by oversight. The cap now lives on Train.maxSpeed(), which is
+        // the one figure both control schemes ask, because after an emergency stop the train is
+        // always Create's: the stop lowers the pantographs and the driver is barred from raising
+        // them until the next station, so the speed gate hands the train over and this lever is no
+        // longer the thing driving it. Enforcing the cap in both places would have been two copies
+        // that could disagree, and the one here could never have been reached.
         //
-        // This is the ONLY externally imposed ceiling in the model. Curves deliberately do
-        // not have one: see TrainMixin.electroEnergetics$maxTurnSpeed for why an electric
-        // train takes a curve at the same speed as straight track, and for the round in
-        // which I wrongly added a limit here and had to take it back out.
-        //
-        // The margin is hysteresis, so a train sitting exactly on the cap is not braked and
-        // released one tick at a time.
-        boolean overPenalty = penalty && !emergency && speed > PENALTY_SPEED + CAP_MARGIN;
-
-        // Skipped when the lever is already braking at least this hard: in that case the
-        // driver's own brake is doing the work, and replacing it would throw away the
-        // motor share and with it the regeneration.
-        if (overPenalty) {
-            double limitBrakeForce = brakeTotal * mass;
-            if (Math.abs(leverBrakeForce) < limitBrakeForce) {
-                force -= leverBrakeForce;                 // drop whatever the lever applied
-                leverBrakeForce = -brakeHeading * limitBrakeForce;
-                force += leverBrakeForce;
-                dynamicApplied = dynamicPart;
-            }
-        }
+        // This leaves no externally imposed ceiling in the model at all. Curves deliberately do
+        // not have one either: see TrainMixin.electroEnergetics$maxTurnSpeed for why an electric
+        // train takes a curve at the same speed as straight track, and for the round in which I
+        // wrongly added a limit here and had to take it back out.
 
         // Emergency braking REPLACES the lever's braking instead of adding to it.
         //
-        // It is not a second brake bolted alongside the service one: it is the same
-        // friction brake taken to the limit of adhesion with sanding. Adding them
-        // gave 3.5 + 4.0 = 7.5 m/s^2, roughly twice what any real train can do and a
-        // stopping distance to match. Whichever the lever was applying is undone
-        // here and the emergency rate put in its place, so the position of the lever
-        // does not change how hard the emergency brake bites.
+        // Whichever the lever was applying is undone here and the emergency rate put in its place,
+        // so the position of the lever does not change how hard the emergency brake bites. Adding
+        // them gave 3.5 + 4.0 = 7.5 m/s^2, roughly twice what any real train can do and a stopping
+        // distance to match.
+        //
+        // The rate is built from its two parts rather than taken from emergencyBrakeDeceleration,
+        // because the MOTOR half has to be scaled by the supply. That method returns the full
+        // electric share unconditionally, which is correct for a reading taken with power available
+        // but wrong for the physics here: with no supply the motor brake cannot contribute at all,
+        // and leaving it in would give a train that had lost its wire more braking than it can
+        // really produce. `dynamicPart` already carries the supply scaling.
         if (emergency && speed > 1e-6d) {
             force -= leverBrakeForce;
-            force -= Math.signum(v) * emergencyBrakeDeceleration(speed) * mass;
+            force -= Math.signum(v) * (frictionBrake() * EMERGENCY_ADHESION_FACTOR + dynamicPart) * mass;
             dynamicApplied = dynamicPart;
         }
 
@@ -915,9 +894,9 @@ public final class TrainTractionModel {
      */
     public static double gearAcceleration(double signedSpeedMs, double gradeToPlusX, int carriages,
                                           double powerScale, TrainGear gear, double cruiseSpeedMs,
-                                          double brakeMs2, boolean emergency, boolean penalty) {
+                                          double brakeMs2, boolean emergency) {
         return gearAcceleration(signedSpeedMs, gradeToPlusX, carriages, powerScale, gear,
-                cruiseSpeedMs, brakeMs2, emergency, penalty, null);
+                cruiseSpeedMs, brakeMs2, emergency, null);
     }
 
     /**

@@ -3,6 +3,7 @@ package com.george_vi.electroenergetics.content.railway_electrification.pantogra
 import com.george_vi.electroenergetics.CEEPartialModels;
 import com.george_vi.electroenergetics.client.WireRenderer;
 import com.george_vi.electroenergetics.config.CEEConfigs;
+import com.george_vi.electroenergetics.content.railway_electrification.TrainHudData;
 import com.george_vi.electroenergetics.content.railway_electrification.catenary.CatenaryConnection;
 import com.george_vi.electroenergetics.foundation.nodes.InWorldNodeConnection;
 import com.george_vi.electroenergetics.mixin_interfaces.IPantographList;
@@ -11,6 +12,7 @@ import com.mojang.blaze3d.vertex.PoseStack;
 import com.simibubi.create.api.behaviour.movement.MovementBehaviour;
 import com.simibubi.create.content.contraptions.behaviour.MovementContext;
 import com.simibubi.create.content.contraptions.render.ContraptionMatrices;
+import com.simibubi.create.content.trains.entity.Carriage;
 import com.simibubi.create.content.trains.entity.CarriageContraptionEntity;
 import com.simibubi.create.foundation.virtualWorld.VirtualRenderWorld;
 import net.createmod.catnip.animation.AnimationTickHolder;
@@ -45,22 +47,49 @@ public class PantographMovementBehaviour implements MovementBehaviour {
         if (!(context.contraption.entity instanceof CarriageContraptionEntity e))
             return;
 
-        boolean prevDisabled = context.data.getBoolean("Disabled");
-        if (!context.data.contains("Forward")) {
-            TrainPantographEntry pantographState = ((IPantographList) e.getCarriage()).getPantographState(context.localPos);
-            if (pantographState != null)
-                context.data.putBoolean("Forward", pantographState.facingForward);
-        }
-        if (context.disabled) {
-            if (!prevDisabled)
-                ((IPantographList) e.getCarriage()).changePantographState(context.localPos, false);
-            targetExtensionState = 0f;
+        // The ARM follows the driver's handle. It does NOT set it.
+        //
+        // This used to be the other way round, and it was the only way a pantograph could be
+        // worked at all: Create's Contraption Controls block toggled `context.disabled`, and this
+        // method pushed that into the entry's `active` flag. That is gone. Whether a pantograph is
+        // up is now a per-pantograph decision the driver makes from the cab, sent to the server and
+        // validated there against the catenary geometry - see SetPantographPacket. So this method
+        // only reads the flag and animates the arm to match.
+        //
+        // Create's controls block is still honoured as a physical override, because it is a real
+        // block a player may have fitted and silently ignoring it would be worse than obeying it.
+        //
+        // A NULL entry means one of two very different things, and they must not be confused.
+        //
+        // ON THE SERVER it means a crosswise-mounted pantograph, which CarriageContraptionMixin
+        // deliberately leaves out of the list (:79-87). Not in the driver's control, never collects
+        // current, but still a real block that used to follow the wire whenever the controls block
+        // allowed - so it keeps the old behaviour.
+        //
+        // ON THE CLIENT it is the NORMAL case for EVERY pantograph, and that is the trap. A client
+        // carriage is built from AddTrainPacket (Carriage.STREAM_CODEC), which carries only the
+        // bogeys and the spacing - it never goes through Carriage.read, which is the only thing that
+        // populates the list. So the client's list is empty and this lookup returns null for a
+        // pantograph that the server knows perfectly well is lowered.
+        //
+        // Treating that as "not in the list, so use the controls block" made the arm render RAISED
+        // whenever no controls block was fitted, whatever the driver had commanded: the electrical
+        // state was correct and the picture contradicted it. The driver lowers a pantograph, the
+        // train stops collecting, and the arm sits up against the wire anyway.
+        //
+        // The client's only source of per-pantograph truth is the state the server syncs to the
+        // driver, so that is asked below before falling back.
+        boolean raised;
+        TrainPantographEntry entry = ((IPantographList) e.getCarriage())
+                .getPantographState(context.localPos);
+        if (entry != null) {
+            raised = entry.active && !context.disabled;
         } else {
-            if (prevDisabled) {
-                ((IPantographList) e.getCarriage()).changePantographState(context.localPos, true);
-                targetExtensionState = 0.75f;
-            }
+            Boolean synced = syncedActive(e, context);
+            raised = (synced == null || synced) && !context.disabled;
         }
+        if (!raised)
+            targetExtensionState = 0f;
 
         if (context.world.isClientSide && currentExtensionState == targetExtensionState && prevExtensionState != currentExtensionState)
             context.world.playLocalSound(context.position.x, context.position.y, context.position.z, SoundEvents.CHAIN_HIT, SoundSource.NEUTRAL, 0.1f, 1f, false);
@@ -69,7 +98,18 @@ public class PantographMovementBehaviour implements MovementBehaviour {
 
         // Look for the connection point, and try to adjust the pantographs extension state to fit that point
 
-        if (context.world.isClientSide && !context.disabled) {
+        // Arm geometry, client-side only. Gated on `raised` as well as on the controls block:
+        //
+        //   raised, wire in reach   -> the arm follows the wire (the bisection below)
+        //   raised, nothing in reach-> targetExtensionState = 0, so it comes down
+        //   NOT raised              -> this whole block is skipped and the arm stays down
+        //
+        // That last line is the removal of automatic raising. Previously the arm was pushed up
+        // whenever wire was in reach, whoever wanted it; now a pantograph only goes up when the
+        // driver raises it, and the geometry here only decides how high the arm has to sit to touch
+        // what is already there. Automatic LOWERING is kept, because a real pantograph cannot be
+        // left pressing against nothing.
+        if (context.world.isClientSide && !context.disabled && raised) {
             double pantographX = context.state.getValue(PantographBlock.FACING).getAxisDirection() == Direction.AxisDirection.NEGATIVE ? 0.5 : -0.5;
             if (!isDouble)
                 pantographX /= 2;
@@ -157,6 +197,32 @@ public class PantographMovementBehaviour implements MovementBehaviour {
         context.data.putFloat("CurrentExtensionState", currentExtensionState);
         context.blockEntityData.putFloat("ExtensionState", targetExtensionState);
         context.data.putFloat("PrevExtensionState", prevExtensionState);
+    }
+
+    /**
+     * What the server last said this pantograph's handle position is, or null if it has not said.
+     *
+     * <p>Only needed on the client, where the carriage carries no list of its own. The server sends
+     * the driver one entry per pantograph, keyed by the carriage's index in the consist and by the
+     * same local position {@code IPantographList} keys on, so the two sides agree on identity even
+     * after the train is reassembled.
+     *
+     * <p>Returning null means "no answer yet", which the caller treats as the old behaviour rather
+     * than as "lowered": on the single tick between a carriage appearing and the server's first sync
+     * arriving, folding every arm would be a visible twitch on every train that enters view.
+     */
+    private static Boolean syncedActive(CarriageContraptionEntity e, MovementContext context) {
+        Carriage carriage = e.getCarriage();
+        if (carriage == null || carriage.train == null)
+            return null;
+        int index = carriage.train.carriages.indexOf(carriage);
+        if (index < 0)
+            return null;
+        for (SyncTrainPantographsPacket.Entry s : TrainHudData.pantographs(carriage.train.id)) {
+            if (s.carriageIndex() == index && s.localPos().equals(context.localPos))
+                return s.active();
+        }
+        return null;
     }
 
     Vec3 getConnectorPos(float extensionState, MovementContext context) {

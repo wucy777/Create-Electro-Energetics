@@ -33,6 +33,17 @@ public final class TrainControlInput {
     private static boolean confirmWasDown;
     private static boolean engageWasDown;
     private static boolean emergencyWasDown;
+    private static boolean pantoNextWasDown;
+    private static boolean pantoToggleWasDown;
+
+    /**
+     * Which pantograph the pantograph keys act on, as an index into the server's list.
+     *
+     * <p>Reset to the first pantograph whenever the driver gets back in the cab, so the selection
+     * is never inherited from a previous session and cannot point at a pantograph that no longer
+     * exists.
+     */
+    private static int selectedPantograph;
 
     /**
      * The position the driver has moved the handle to but NOT yet engaged.
@@ -97,12 +108,48 @@ public final class TrainControlInput {
     }
 
     /**
+     * Whether the player is at the controls of an electric train AT ALL, in either control scheme.
+     *
+     * <p>Deliberately wider than {@link #isDrivingElectricTrain()}, and the difference is what stops
+     * the feature deadlocking.
+     *
+     * <p>The pantographs are worked from this test rather than from the lever's, because a driver
+     * who drops every pantograph is handed to Create - at which point the lever keys must be dead
+     * but the pantograph keys must very much still work. Gating them on the lever would mean that
+     * the moment a train was handed over, the only control that could bring it back stopped
+     * responding: the driver could lower a pantograph and then never raise one again.
+     *
+     * <p>The train is known to be an electric one on the client by the pantograph list having been
+     * sent, which the server only ever sends to the driver of a consist that has them.
+     */
+    public static boolean isAtElectricTrainControls() {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.options == null || mc.options.hideGui || mc.player == null || mc.level == null)
+            return false;
+        if (mc.gameMode == null || mc.gameMode.getPlayerMode() == GameType.SPECTATOR)
+            return false;
+        if (mc.screen != null)
+            return false;
+        Train train = drivenTrain();
+        if (train == null)
+            return false;
+        return TrainHudData.leverDriven(train.id)
+                || !TrainHudData.pantographs(train.id).isEmpty();
+    }
+
+    /**
      * Called every client tick. Reads the keys, and sends anything that changed.
      *
      * <p>Nothing is sent while the lever is not moving, so a train standing at a
      * platform with a driver aboard generates no traffic at all.
      */
     public static void tick() {
+        // The pantographs are serviced first and on their own test, so that they keep working after
+        // the train has been handed to Create. That is not a detail: raising a pantograph is the only
+        // way back out of CREATE, so if this were gated on the lever the handover would be a
+        // one-way trip.
+        tickPantographs();
+
         if (!isDrivingElectricTrain()) {
             // Drop the edge state so the first press after getting back in the cab is
             // treated as a fresh press even if the key was down the whole time.
@@ -148,6 +195,23 @@ public final class TrainControlInput {
         boolean engage = TrainControlKeys.isDown(TrainControlKeys.ENGAGE);
         boolean emergency = TrainControlKeys.isDown(TrainControlKeys.EMERGENCY);
 
+        // Nothing is accepted while the controls are locked. Checked once, here, rather than inside
+        // each key's handler: the lockout covers the entire panel, and a per-key test is a list
+        // that would have to be kept complete every time a control is added.
+        //
+        // The edge states below are still updated, so a key held down through the lockout does not
+        // fire the moment it lifts.
+        if (TrainHudData.controlsLocked(train.id)) {
+            upWasDown = up;
+            downWasDown = down;
+            confirmWasDown = confirm;
+            engageWasDown = engage;
+            emergencyWasDown = emergency;
+            pantoNextWasDown = TrainControlKeys.isDown(TrainControlKeys.PANTOGRAPH_NEXT);
+            pantoToggleWasDown = TrainControlKeys.isDown(TrainControlKeys.PANTOGRAPH_TOGGLE);
+            return;
+        }
+
         // Up notches towards ACCELERATE, down towards REVERSE. The lever is ordered
         // accelerate-first in the enum, so "up" is a lower index.
         //
@@ -157,9 +221,9 @@ public final class TrainControlInput {
         // - and the arrow keys are easy to catch while looking around - cannot change
         // what the train is doing.
         if (up && !upWasDown)
-            handle = moveHandle(handle, -NOTCHES_PER_PRESS, engagedPosition(serverGear));
+            handle = moveHandle(handle, -NOTCHES_PER_PRESS, engagedPosition(serverGear), train);
         if (down && !downWasDown)
-            handle = moveHandle(handle, +NOTCHES_PER_PRESS, engagedPosition(serverGear));
+            handle = moveHandle(handle, +NOTCHES_PER_PRESS, engagedPosition(serverGear), train);
 
         // Engage: commit the handle's position to the train.
         if (engage && !engageWasDown && handle != engagedPosition(serverGear))
@@ -171,7 +235,8 @@ public final class TrainControlInput {
         // Emergency is only offered by the server's own rule (reverse, while moving);
         // sending it otherwise is harmless because the handler ignores it, but this
         // avoids the packet entirely.
-        if (emergency && !emergencyWasDown && handle == TrainGear.REVERSE.ordinal())
+        if (emergency && !emergencyWasDown && handle == TrainGear.REVERSE.ordinal()
+                && TrainHudData.emergencyBrakeAvailable(train.id))
             send(SetTrainGearPacket.emergency(train.id));
 
         upWasDown = up;
@@ -179,6 +244,73 @@ public final class TrainControlInput {
         confirmWasDown = confirm;
         engageWasDown = engage;
         emergencyWasDown = emergency;
+    }
+
+    /**
+     * The pantograph keys, read on their own test so they survive the handover to Create.
+     *
+     * <p>Called from {@link #tick()} BEFORE the lever is considered, and deliberately not inside the
+     * lever's branch. A driver who drops every pantograph is handed to Create, and raising one is
+     * the only way back - so these keys must keep working precisely when the lever keys have stopped.
+     *
+     * <p>Both keys are edge-triggered, like the lever's: the select key steps once per press, and
+     * the toggle acts once, rather than firing every tick they are held.
+     */
+    private static void tickPantographs() {
+        boolean pantoNext = TrainControlKeys.isDown(TrainControlKeys.PANTOGRAPH_NEXT);
+        boolean pantoToggle = TrainControlKeys.isDown(TrainControlKeys.PANTOGRAPH_TOGGLE);
+
+        // Not at the controls of an electric consist: drop the edge state, so a key held while
+        // walking up to the train does not fire the moment the panel appears.
+        if (!isAtElectricTrainControls()) {
+            pantoNextWasDown = pantoToggleWasDown = false;
+            selectedPantograph = 0;
+            return;
+        }
+
+        Train train = drivenTrain();
+        if (train == null) {
+            pantoNextWasDown = pantoToggleWasDown = false;
+            return;
+        }
+
+        // Locked by the emergency brake: the whole panel is inert, so nothing is sent. The edge
+        // state is still updated, so a key held down through the lockout does not fire when it lifts.
+        boolean locked = TrainHudData.controlsLocked(train.id);
+
+        java.util.List<com.george_vi.electroenergetics.content.railway_electrification.pantograph
+                .SyncTrainPantographsPacket.Entry> pantographs = TrainHudData.pantographs(train.id);
+
+        if (!locked && !pantographs.isEmpty()) {
+            // Clamped rather than wrapped blindly: the server's list can shrink when a carriage is
+            // removed, and a selection left pointing past the end would make the toggle key do
+            // nothing at all.
+            if (selectedPantograph >= pantographs.size())
+                selectedPantograph = 0;
+
+            if (pantoNext && !pantoNextWasDown)
+                selectedPantograph = (selectedPantograph + 1) % pantographs.size();
+
+            if (pantoToggle && !pantoToggleWasDown) {
+                var target = pantographs.get(selectedPantograph);
+                // Toggle means "the other of how it currently stands", so one key both raises and
+                // lowers. The server refuses a raise it cannot justify and reports the outcome by
+                // syncing back, so no local state is invented here - a refused raise simply does
+                // not happen on screen either.
+                CatnipServices.NETWORK.sendToServer(
+                        new com.george_vi.electroenergetics.content.railway_electrification
+                                .pantograph.SetPantographPacket(train.id, target.carriageIndex(),
+                                target.localPos(), !target.active()));
+            }
+        }
+
+        pantoNextWasDown = pantoNext;
+        pantoToggleWasDown = pantoToggle;
+    }
+
+    /** Which pantograph the pantograph keys act on, for the panel to highlight. */
+    public static int selectedPantograph() {
+        return selectedPantograph;
     }
 
     /** The position the train is believed to be actually in. */
@@ -207,13 +339,42 @@ public final class TrainControlInput {
      * clear the selection in one press, and it passes through no intermediate state that
      * could be mistaken for "still pending".
      */
-    private static int moveHandle(int from, int delta, int engaged) {
+    private static int moveHandle(int from, int delta, int engaged, Train train) {
         TrainGear[] values = TrainGear.values();
         int next = from + delta;
+        // Step past positions that cannot be selected rather than stopping on them. A dead detent
+        // that silently does nothing reads as a broken key; skipping means the handle always lands
+        // somewhere the train can actually obey.
+        while (next >= 0 && next < values.length && !available(train, next))
+            next += delta;
         if (next < 0 || next >= values.length)
-            return from;   // already at an end of the lever; a detent does not wrap
+            return from;   // no selectable position that way; a detent does not wrap
         selectedGear = (next == engaged) ? null : values[next];
         return next;
+    }
+
+    /**
+     * Whether a lever position may be selected right now.
+     *
+     * <p>Asks the same question the server asks, from the same synced supply state, so the handle
+     * cannot be moved to a position the server would then refuse - which would show the driver
+     * their handle moving and then snapping back on the next sync.
+     *
+     * <p>The three positions that command traction need power. The brake and the power-off position
+     * do not, and must not be gated: the friction brake is what a driver without supply actually
+     * has, and the emergency brake is a DRIVEN-MOTOR brake here, so it is unavailable with no
+     * power for the same reason traction is.
+     */
+    private static boolean available(Train train, int gearIndex) {
+        TrainGear[] values = TrainGear.values();
+        if (gearIndex < 0 || gearIndex >= values.length)
+            return false;
+        // While the controls are locked nothing on the panel may be moved, so no position is
+        // available - not even the brake. The server refuses every command in this state, and
+        // offering one here would move the handle and then snap it back on the next sync.
+        if (TrainHudData.controlsLocked(train.id))
+            return false;
+        return TrainHudData.gearAvailable(train.id, values[gearIndex]);
     }
 
     /** Commit the handle's position: this is what moves the train. */

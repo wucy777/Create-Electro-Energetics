@@ -51,6 +51,10 @@ public class CTrains extends ConfigBase {
     public final ConfigBool electricTrainGradeResistance = b(true, "electricTrainGradeResistance",
             "Apply gradient resistance. Uphill raises the force needed and lowers the sustainable speed; downhill lets gravity assist so less power is drawn.");
 
+    public final ConfigFloat electricTrainHandoverSpeed = f(28f, 0.05f, "electricTrainHandoverSpeed",
+            "Speed at or below which an electric train with no working pantograph is handed back to Create's own controls, in Blocks/Second. Above this the train keeps this mod's brake and vigilance timer and coasts down on running resistance and gradient, because Create clamps its target speed rather than the train's and ramps towards it at a rate tuned for a 28 Blocks/Second design ceiling - so handing it a train still doing 100 Blocks/Second would leave it dragging that speed down for a very long time, with every electric readout meaningless. 28 Blocks/Second is Create's own unpowered ceiling, which guarantees the receiving scheme can hold the train. Lower it to keep electric control for longer, at the cost of a longer coast before the handover. [in Blocks / Second]");
+
+
     // ------------------------------------------------------------------
     // Accumulator and pantograph settings
     // ------------------------------------------------------------------

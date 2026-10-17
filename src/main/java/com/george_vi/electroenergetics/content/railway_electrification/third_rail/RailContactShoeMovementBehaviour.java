@@ -2,6 +2,8 @@ package com.george_vi.electroenergetics.content.railway_electrification.third_ra
 
 import com.george_vi.electroenergetics.CEEPartialModels;
 import com.george_vi.electroenergetics.client.WireRenderer;
+import com.george_vi.electroenergetics.content.railway_electrification.TrainHudData;
+import com.george_vi.electroenergetics.content.railway_electrification.pantograph.SyncTrainPantographsPacket;
 import com.george_vi.electroenergetics.content.railway_electrification.pantograph.TrainPantographEntry;
 import com.george_vi.electroenergetics.foundation.nodes.InWorldNodeConnection;
 import com.george_vi.electroenergetics.mixin_interfaces.IPantographList;
@@ -10,6 +12,7 @@ import com.mojang.blaze3d.vertex.PoseStack;
 import com.simibubi.create.api.behaviour.movement.MovementBehaviour;
 import com.simibubi.create.content.contraptions.behaviour.MovementContext;
 import com.simibubi.create.content.contraptions.render.ContraptionMatrices;
+import com.simibubi.create.content.trains.entity.Carriage;
 import com.simibubi.create.content.trains.entity.CarriageContraptionEntity;
 import com.simibubi.create.foundation.virtualWorld.VirtualRenderWorld;
 import net.createmod.catnip.animation.AnimationTickHolder;
@@ -32,22 +35,51 @@ public class RailContactShoeMovementBehaviour implements MovementBehaviour {
         if (!(context.contraption.entity instanceof CarriageContraptionEntity e))
             return;
 
-        boolean prevDisabled = context.data.getBoolean("Disabled");
         if (!context.data.contains("Forward")) {
             TrainPantographEntry pantographState = ((IPantographList) e.getCarriage()).getPantographState(context.localPos);
             if (pantographState != null)
                 context.data.putBoolean("Forward", pantographState.facingForward);
         }
-        if (context.disabled) {
-            if (!prevDisabled)
-                ((IPantographList) e.getCarriage()).changePantographState(context.localPos, false);
+
+        // The shoe follows the driver's handle exactly as the overhead pantograph does. It does NOT
+        // set it.
+        //
+        // This used to be the other way round, pushing Create's controls-block state into the entry's
+        // `active` flag. That is gone for the pantograph and had to go here too, and leaving it would
+        // have been worse than an omission: a rail contact shoe is in the SAME list, appears in the
+        // same driver's panel, and counts toward `hasWorkingPantograph` - so a shoe that raised
+        // itself would silently undo the driver lowering it, and on a third-rail consist the driver
+        // would have had no way to take the train off the current at all.
+        //
+        // Create's controls block is still honoured as a physical override, because it is a real
+        // block a player may have fitted and silently ignoring it would be worse than obeying it.
+        //
+        // A NULL entry means one of two very different things, and they must not be confused.
+        //
+        // ON THE SERVER it means a crosswise-mounted shoe, which CarriageContraptionMixin
+        // deliberately leaves out of the list (:79-87). Not in the driver's control, never collects
+        // current, but still a real block that used to follow the rail whenever the controls block
+        // allowed - so it keeps the old behaviour.
+        //
+        // ON THE CLIENT it is the NORMAL case for EVERY shoe, and that is the trap. A client carriage
+        // is built from AddTrainPacket (Carriage.STREAM_CODEC), which carries only the bogeys and the
+        // spacing - it never goes through Carriage.read, the only thing that populates the list. So
+        // the client's list is empty and this lookup returns null for a shoe the server knows is
+        // lowered, and the contact block would sit pressed against the third rail regardless.
+        //
+        // The client's only source of per-shoe truth is the state the server syncs to the driver, so
+        // that is asked before falling back.
+        boolean raised;
+        TrainPantographEntry entry = ((IPantographList) e.getCarriage())
+                .getPantographState(context.localPos);
+        if (entry != null) {
+            raised = entry.active && !context.disabled;
         } else {
-            if (prevDisabled) {
-                ((IPantographList) e.getCarriage()).changePantographState(context.localPos, true);
-            }
+            Boolean synced = syncedActive(e, context);
+            raised = (synced == null || synced) && !context.disabled;
         }
 
-        if (context.world.isClientSide && !context.disabled) {
+        if (context.world.isClientSide && raised) {
             Vec3 distance = null;
 
             float halfPantoReach = 0.5f;
@@ -73,6 +105,10 @@ public class RailContactShoeMovementBehaviour implements MovementBehaviour {
             context.data.putDouble("PrevDistanceY", context.data.getDouble("DistanceY"));
             context.data.putDouble("DistanceY", distance == null ? (Math.min(0.05, context.data.getDouble("DistanceY") + 0.05)) : distance.y);
         } else if (context.world.isClientSide) {
+            // Lowered, or the controls block has disabled it: retract. The same expression as the
+            // "nothing in reach" case above, which is what the shoe did before whenever it had no
+            // rail to press against - so a lowered shoe looks exactly like one that has run out of
+            // third rail, which is the honest picture either way.
             context.data.putDouble("PrevDistanceY", context.data.getDouble("DistanceY"));
             context.data.putDouble("DistanceY", (Math.min(0.05, context.data.getDouble("DistanceY") + 0.05)));
         }
@@ -82,6 +118,32 @@ public class RailContactShoeMovementBehaviour implements MovementBehaviour {
     @Override
     public boolean mustTickWhileDisabled() {
         return true;
+    }
+
+    /**
+     * What the server last said this shoe's handle position is, or null if it has not said.
+     *
+     * <p>Only needed on the client, where the carriage carries no list of its own. The server sends
+     * the driver one entry per shoe, keyed by the carriage's index in the consist and by the same
+     * local position {@code IPantographList} keys on, so the two sides agree on identity even after
+     * the train is reassembled.
+     *
+     * <p>Null means "no answer yet", which the caller treats as the old behaviour rather than as
+     * "lowered": on the tick between a carriage appearing and the first sync arriving, folding every
+     * shoe would be a visible twitch on every train that enters view.
+     */
+    private static Boolean syncedActive(CarriageContraptionEntity e, MovementContext context) {
+        Carriage carriage = e.getCarriage();
+        if (carriage == null || carriage.train == null)
+            return null;
+        int index = carriage.train.carriages.indexOf(carriage);
+        if (index < 0)
+            return null;
+        for (SyncTrainPantographsPacket.Entry s : TrainHudData.pantographs(carriage.train.id)) {
+            if (s.carriageIndex() == index && s.localPos().equals(context.localPos))
+                return s.active();
+        }
+        return null;
     }
 
     Vec3 checkCatenary(Vec3 start, Vec3 end, Vec3 pantographPos, MovementContext context, float halfPantoReach) {

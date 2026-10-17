@@ -38,6 +38,8 @@ import com.george_vi.electroenergetics.content.railway_electrification.ElectricT
 import com.george_vi.electroenergetics.content.railway_electrification.TrainDriverState;
 import com.george_vi.electroenergetics.content.railway_electrification.TrainGear;
 import com.george_vi.electroenergetics.mixin_interfaces.ICEETrainExtension;
+import com.george_vi.electroenergetics.mixin_interfaces.IPantographList;
+import com.george_vi.electroenergetics.content.railway_electrification.pantograph.TrainPantographEntry;
 import net.minecraft.server.MinecraftServer;
 import com.simibubi.create.Create;
 import com.simibubi.create.content.trains.entity.Carriage;
@@ -257,12 +259,25 @@ public class GameEvents {
             // see. Counting only while moving also means the clock measures time spent
             // RUNNING unattended, which is the hazard the device exists for.
             //
+            // And only while the train has a SUPPLY, which is the `commanded` term in the
+            // ownership test below. With every pantograph down the driver cannot select a
+            // position that commands traction at all, so a warning about not acknowledging
+            // would ask them to answer for a train they cannot drive. See the comment there.
+            //
             // The threshold matches the "at a stand" tests used elsewhere (the trip
             // release and the end-of-track park), so all three agree on what stopped
             // means. A train creeping at the 1e-4 Blocks/tick the tests treat as rest is
             // not a train that needs a vigilance alarm.
             boolean moving = Math.abs(train.speed) > 1e-4d;
-            boolean owned = driver.underGearControl();
+            // The clock only runs while the train can actually be driven, which requires a supply.
+            //
+            // With every pantograph down the train is coasting and the driver cannot command
+            // traction at all - the three positions that would are refused. Warning them about
+            // failing to acknowledge a train they cannot command would be a demand they have no way
+            // to satisfy, and it would trip a train that is merely rolling to a halt. The clock
+            // therefore stops, and starts again from zero once the wire is back.
+            boolean commanded = data.isPowered || data.hasCreativeSource;
+            boolean owned = driver.underGearControl() && commanded;
 
             // Releasing a trip is NOT gated on moving: the trip's job is to stop the
             // train, so once the train is at a stand the trip has succeeded and must be
@@ -307,6 +322,25 @@ public class GameEvents {
                 // one, or one parked up. Drop the clock and any trip, because a train
                 // this mode does not own must not be pinned by a warning raised for
                 // somebody else - and must not trip itself every 36 seconds forever.
+                //
+                // This branch ALSO catches an electric train whose supply has failed, because
+                // `owned` requires `commanded` and an unpowered train cannot be commanded. That is
+                // deliberate, and it was chosen rather than overlooked: the clock RESETS to zero
+                // instead of freezing at its accumulated value.
+                //
+                // The consequence is that dropping the pantographs and raising them again resets
+                // the clock, and that can be repeated so the trip never fires. It looks like a way
+                // around a safety device, but the device is there to catch a driver who has stopped
+                // responding, and a driver who just pressed two keys is demonstrably present and
+                // acting. The reset is earned by an explicit action rather than by the passage of
+                // time, and that is the distinction that matters.
+                //
+                // If this is ever changed to freeze instead, the test cannot be `underGearControl()`
+                // alone. That method answers "is this train this mode's to drive", and an unpowered
+                // train still answers yes to it - but so would any train this mode still owns, and
+                // a freeze condition built on it would have to distinguish a failed supply from the
+                // other reasons `commanded` can be false (creative source absent, CREATE handover).
+                // It needs its own explicit test and its own reasoning, not a reuse of this one.
                 driver.confirmWaiting = 0;
                 driver.clearTrip();
                 driver.tripTicks = 0;
@@ -328,13 +362,24 @@ public class GameEvents {
             // has no supply to lose, and a train nobody has ever driven is not ours to
             // reconfigure.
             boolean hasSupply = data.isPowered || data.hasCreativeSource;
-            if (driver.underGearControl() && data.hasTractionMotors) {
+            // Only while this mod actually owns the train. Once it has been handed to Create there
+            // is no lever of ours to drop - the driver is on Create's controls and its state is
+            // Create's to manage.
+            if (driver.underGearControl() && data.underElectricControl()) {
                 if (!hasSupply && !driver.powerLossCoasted) {
                     // Only from a position that commands traction: dropping COAST to COAST
                     // is a no-op, and overwriting the BRAKE would release a train that is
                     // deliberately held.
                     if (driver.gear.appliesTraction())
                         driver.gear = TrainGear.COAST;
+
+                    // An emergency brake in progress is deliberately NOT cancelled here. It is a
+                    // decision that has been made, and the operator's rule is that it stops the
+                    // train whether or not there is power - what changes without supply is only how
+                    // the braking is produced, the motors no longer being drivable, so the train
+                    // finishes the stop on friction. The motor share of the brake is scaled by the
+                    // supply, so that happens on its own.
+
                     driver.powerLossCoasted = true;
                 } else if (hasSupply) {
                     // Rearm on the way back, so the next neutral section drops it again.
@@ -346,10 +391,125 @@ public class GameEvents {
 
             // Emergency brake application, and the speed cap it leaves behind until
             // the next station call.
-            if (driver.emergencyTicks > 0)
-                driver.emergencyTicks--;
-            if (driver.emergencyPenalty && train.getCurrentStation() != null)
-                driver.clearPenalty();
+            //
+            // The application runs until the train is AT A STAND, not until a timer expires. It used
+            // to run for EMERGENCY_APPLY_TICKS (5 seconds), which released the brake long before a
+            // train at line speed had stopped - a 100 m/s train needs roughly 40 seconds at the
+            // emergency rate. The backstop below is only there for a train that genuinely cannot
+            // stop at all, such as one sliding down a gradient the friction brake cannot hold.
+            //
+            // Releasing at a stand rather than on a timer is what makes this a decision that cannot
+            // be withdrawn. A loss of supply does NOT release it: the motor share of the brake is
+            // scaled by the supply, so the train simply finishes the stop on friction, which is the
+            // behaviour asked for.
+            if (driver.emergencyArmed) {
+                boolean atStand = Math.abs(train.speed) < 1e-4d;
+                if (atStand || ++driver.emergencyTicks > TrainDriverState.EMERGENCY_BACKSTOP_TICKS) {
+                    driver.emergencyArmed = false;
+                    driver.emergencyTicks = 0;
+
+                    // The stop is finished, so the pantographs come down.
+                    //
+                    // This is what makes the emergency brake's aftermath well defined: the train
+                    // ends up with no working pantograph, so it is handed to Create, and the speed
+                    // cap that survives the handover is enforced where Create will actually read it
+                    // (Train.maxSpeed) rather than in this mod's gear law, which stops running.
+                    //
+                    // Without this a powered train would finish the stop with its pantograph still
+                    // up, stay in ELECTRIC, and the penalty would be enforced by a code path that
+                    // only this mod reaches - leaving the handover, and with it the whole premise,
+                    // untested and untrue.
+                    //
+                    // Only on the transition out of the emergency application, never every tick:
+                    // re-lowering unconditionally would fight a driver who had raised one, and the
+                    // lock already prevents that until the next station anyway.
+                    for (Carriage carriage : train.carriages) {
+                        if (!(carriage instanceof IPantographList list))
+                            continue;
+                        for (TrainPantographEntry pe : list.electroEnergetics$getPantographList())
+                            pe.active = false;
+                    }
+                }
+            }
+
+            // The panel lock is released on its own short tail once the stop has finished, and NOT
+            // with the speed penalty below.
+            //
+            // They were cleared together, gated on `currentStation != null`, which a train assembled
+            // away from any station and never given a schedule can never satisfy: `currentStation` is
+            // written only by assembly at a station (StationBlockEntity:888) and by Train.arriveAt,
+            // which needs a schedule destination - and applying a schedule itself requires being at a
+            // station (applyAutoSchedule needs `currentStation == station`). The two routes require
+            // each other, so neither is reachable.
+            //
+            // The consequence was a permanently dead panel: every key inert, forever, with reloading
+            // the world as the only way out. Not an immobilised train - Create's W/S still drove it -
+            // but exactly the kind of silent failure this feature has spent its whole development
+            // trying not to produce.
+            //
+            // So the two penalties are now split by what each is FOR:
+            //   * the speed cap punishes, and stays until the next station - it needs no interaction,
+            //     so it can never leave the driver stuck;
+            //   * the lock protects the stop from interference, and that requirement ends when the
+            //     train stands.
+            if (driver.controlsLocked && !driver.emergencyArmed) {
+                // `>=` with a post-increment, not `>` with a pre-increment: the pre-increment form
+                // released on tick 41, one past the 40 the constant names. One tick is 50 ms and
+                // nobody could notice, but a constant called LOCKOUT_TAIL_TICKS should mean what it
+                // says, and this way the very next reader does not have to work out the off-by-one.
+                if (++driver.lockoutTailTicks >= TrainDriverState.LOCKOUT_TAIL_TICKS)
+                    driver.releaseLockout();
+            } else if (!driver.controlsLocked) {
+                driver.lockoutTailTicks = 0;
+            }
+
+            // The post-emergency speed cap lifts once the train has REACHED a station, latched.
+            //
+            // It used to test `train.getCurrentStation() != null` every tick, which reads as "is the
+            // train standing at a station right now". That value is transient - Create's
+            // Train.leaveStation() clears it the moment the train departs - so the per-tick test only
+            // ever sees it during the dwell. Harmless in the ordinary case, but there is a way to make
+            // it unreachable, and the operator hit it:
+            //
+            //   TrainRelocator.relocate (the wrench) calls train.leaveStation() AND, when a
+            //   destination exists, train.navigation.cancelNavigation(). Arriving, in turn, requires a
+            //   DESTINATION: Train.frontSignalListener returns early unless
+            //   `navigation.destination == station`, and arriveAt - the only writer of currentStation -
+            //   is called from there. A free-driven train has no way to get a destination back, so
+            //   after a wrench relocation the cap could never clear: permanently, and across reloads,
+            //   because emergencyPenalty is persisted. What was added to stop a relog clearing the cap
+            //   had made the wrench the last way to be stuck with it.
+            //
+            // Recording the EVENT instead of sampling the state fixes it in both directions: the cap
+            // still lasts exactly as long as "the next station has not been reached", and it now also
+            // lasts through a relocation rather than becoming unendable. The latch is cleared when the
+            // cap is re-armed or cleared, so a later application starts its own leg.
+            if (driver.emergencyPenalty) {
+                if (train.getCurrentStation() != null)
+                    driver.penaltyStationReached = true;
+                if (driver.penaltyStationReached) {
+                    driver.clearPenalty();
+                } else if (Math.abs(train.speed) > 1e-4d) {
+                    // Distance backstop. The station test above is the rule; this exists so the rule
+                    // cannot become unendable again by some route neither of us has thought of.
+                    //
+                    // The failure it guards against is specific and was real: a wrench relocation
+                    // clears both currentStation and navigation.destination, and arriving requires a
+                    // destination, so a free-driven train could be left carrying this cap with no way
+                    // to ever satisfy the station test. Charging the cap per distance run instead
+                    // means any train that keeps moving eventually pays it off.
+                    //
+                    // Distance rather than time, because the punishment is about the journey: a train
+                    // parked in a yard for an hour has not travelled a leg, and a timer would forgive
+                    // it for standing still.
+                    //
+                    // Purely additive: when the station test fires first (the normal case) this never
+                    // runs, so ordinary play is unchanged.
+                    driver.penaltyDistance += Math.abs(train.speed);
+                    if (driver.penaltyDistance >= TrainDriverState.PENALTY_BACKSTOP_BLOCKS)
+                        driver.clearPenalty();
+                }
+            }
 
             // Park the train when it runs out of track.
             // Create stops the train at a buffer stop by zeroing its speed
@@ -412,8 +572,14 @@ public class GameEvents {
                 driver.autoArrive = false;
                 if (arrived)
                     driver.failSafe();
-                else
+                else if (data.gearAvailable(driver.autoArriveGear))
                     driver.gear = driver.autoArriveGear;
+                else
+                    // The remembered position commands traction and there is no supply to command
+                    // it with, so restoring it would put the handle on a dead detent. The power-off
+                    // position is what the train is actually doing, and the driver can re-engage a
+                    // traction position once the wire is back.
+                    driver.gear = TrainGear.COAST;
             }
 
             // The lever is deliberately NOT forced to the brake while a station is

@@ -45,7 +45,13 @@ public class KeyboardHandlerMixin {
             return;
         if (!TrainControlKeys.isCabKey(key))
             return;
-        if (!TrainControlInput.isDrivingElectricTrain())
+        // The wider test, not the lever's. The pantograph keys have to stay consumed after the train
+        // has been handed to Create - they are the only way back - and the narrower test would let
+        // them through to whatever else is bound to them at exactly the moment the driver needs them.
+        //
+        // Suppression is still limited to a player actually at the controls of an electric consist,
+        // so these keys behave normally everywhere else in the world.
+        if (!TrainControlInput.isAtElectricTrainControls())
             return;
         ci.cancel();
     }

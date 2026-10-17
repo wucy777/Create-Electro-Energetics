@@ -17,20 +17,101 @@ public class ElectricTrainData {
     public boolean isPowered = false;
 
     /**
-     * Whether this consist carries traction motors, regardless of whether they are
-     * energised right now.
+     * Whether this consist is an electric train at all.
      *
-     * <p>This is what decides that a train is an <i>electric</i> train and therefore
-     * lever-driven, as opposed to a fuel train, which keeps Create's controls. It is
-     * deliberately not {@link #isPowered}: a set that has run off the end of the
-     * catenary or flattened its accumulator is still an electric train, and it still
-     * needs its brake and its vigilance timer. Keying the control scheme on the
-     * supply instead would hand it back to Create's throttle-and-wheel scheme the
-     * moment the voltage dropped - a completely different set of controls appearing
-     * mid-journey, and the friction brake along with them. Latched once true, since
-     * a consist does not lose its motors.
+     * <p>Two conditions, both structural: at least one traction motor AND at least one
+     * pantograph, which may sit on different carriages. A set with motors but no way to
+     * collect current is not an electric train in any useful sense - it can never be
+     * energised - so it keeps Create's controls rather than showing a lever that could
+     * never do anything. The same applies in reverse.
+     *
+     * <p>This is what decides that a train is an <i>electric</i> train, as opposed to a
+     * fuel train. It is deliberately not {@link #isPowered}: a set that has run off the
+     * end of the catenary is still an electric train. Which control scheme is actually
+     * driving it is a separate and faster-moving question - see {@link #controlMode}.
+     *
+     * <p>Latched once true, since a consist does not lose its motors or its pantographs
+     * without being taken apart and reassembled.
      */
     public boolean hasTractionMotors = false;
+
+    /**
+     * Whether at least one pantograph is BOTH raised by the driver AND within reach of
+     * catenary right now.
+     *
+     * <p>This is the condition for the train being able to collect current at all. It is
+     * recomputed from geometry every solve, because the answer changes as the train moves:
+     * entering a neutral section makes it false without anything the driver did.
+     */
+    public boolean hasWorkingPantograph = false;
+
+    /**
+     * Which control scheme is driving this train right now.
+     *
+     * <p>Recomputed each solve. The distinction that matters is between the two states
+     * where this mod owns the train ({@link TrainControlMode#ELECTRIC} and
+     * {@link TrainControlMode#DEAD_COAST}) and {@link TrainControlMode#CREATE}, where
+     * nothing of this mod's driving remains.
+     */
+    public TrainControlMode controlMode = TrainControlMode.CREATE;
+
+    /**
+     * Whether this mod's traction model owns the train's speed this tick.
+     *
+     * <p>True in both of this mod's states. It is deliberately NOT {@code isPowered}: in
+     * {@link TrainControlMode#DEAD_COAST} there is no tractive effort but the brake and
+     * the vigilance clock are still this mod's, because losing the wire must not also
+     * lose the brake.
+     *
+     * <p>The single question the driving path should ask, so that the several places
+     * which gate on it cannot disagree.
+     */
+    public boolean underElectricControl() {
+        return hasTractionMotors && controlMode != TrainControlMode.CREATE;
+    }
+
+    /**
+     * Whether a lever position can be selected at all right now.
+     *
+     * <p>The three positions that command traction - ACCELERATE, CRUISE and REVERSE - need power
+     * to mean anything. With no supply the tractive effort computes to exactly zero (the supply
+     * scaling in {@code TrainTractionModel.powerScaleForVoltage} returns 0 below the minimum
+     * voltage, and the effort is multiplied by it), so selecting one would leave the driver holding
+     * a position that commands traction and gets none - a lever reading "accelerate" while the
+     * train coasts. Refusing the selection is the honest answer.
+     *
+     * <p>BRAKE and COAST are always available, and that is deliberate. The brake is friction plus,
+     * at most, the motor brake, and the friction part is pneumatic on a real train - it works
+     * whether or not the pantograph is up, which is precisely when a driver most needs it. COAST is
+     * the position that commands nothing, so it can never be wrong.
+     *
+     * <p>This is the single authority for the rule. The packet handler that receives a lever move
+     * and the panel that draws the positions both ask it, so a position cannot be offered in the
+     * cab and then refused by the server - which would show the driver their handle moving and then
+     * snapping back.
+     */
+    public boolean gearAvailable(TrainGear gear) {
+        if (gear.appliesTraction())
+            return isPowered || hasCreativeSource;
+        return true;
+    }
+
+    /**
+     * Whether the emergency brake may be TRIGGERED.
+     *
+     * <p>In this mod the emergency brake is NOT a separate air brake. It is reached through REVERSE
+     * and stops the train by driving the motors in reverse against the direction of travel, so it is
+     * a motor brake and triggering it needs the supply - the operator's point.
+     *
+     * <p>Note carefully that this governs TRIGGERING ONLY. Once pulled, an emergency application
+     * runs to a stand whatever happens to the supply: the motor share of the braking is scaled by
+     * the supply, so a train that loses its wire part-way through the stop finishes on friction.
+     * Nothing may cancel the application, which is why no power test is placed around it.
+     */
+    public boolean emergencyBrakeAvailable() {
+        return isPowered || hasCreativeSource;
+    }
+
     public double lastVoltage = 0d;
 
     public double lastSpeed;
@@ -91,4 +172,22 @@ public class ElectricTrainData {
     public double lastSyncedVoltage = 0;
     public double lastSyncedCurrent = 0;
     public int ticksSinceGaugeSync = 0;
+
+    /**
+     * Ticks since the pantograph and control-lock state was last sent to the driver.
+     *
+     * <p>Separate from {@link #ticksSinceGaugeSync} because the two travel on different paths: the
+     * gauge sync only happens while the train is connected, and the lock state must reach the
+     * driver precisely when it is NOT - a stop finished on friction, with the pantographs down.
+     */
+    public int ticksSincePantographSync = 0;
+
+    /**
+     * The lock state last sent, so a change can be delivered immediately.
+     *
+     * <p>Without this the driver would learn the controls are locked up to five ticks late, which
+     * is long enough to press a key and see nothing happen - the exact confusion the lock's
+     * message exists to prevent.
+     */
+    public boolean lastSyncedControlsLocked = false;
 }

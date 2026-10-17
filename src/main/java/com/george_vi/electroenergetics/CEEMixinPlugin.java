@@ -23,7 +23,20 @@ public class CEEMixinPlugin implements IMixinConfigPlugin {
 
     @Override
     public boolean shouldApplyMixin(String targetClassName, String mixinClassName) {
-        if ((mixinClassName.equals("com.george_vi.electroenergetics.mixins.SubLevelAssemblyHelper") ||
+        // Names here MUST match the entries in electroenergetics.mixins.json exactly.
+        //
+        // The SubLevelAssemblyHelper test compared against
+        // "com.george_vi.electroenergetics.mixins.SubLevelAssemblyHelper" - without the "Mixin"
+        // suffix - while the config registers "...SubLevelAssemblyHelperMixin". equals() therefore
+        // never matched, so this guard never fired. That class imports
+        // dev.ryanhcode.sable.api.SubLevelAssemblyHelper at the top level and declares
+        // @Mixin(SubLevelAssemblyHelper.class), so on a pack WITHOUT sable it cannot even be loaded:
+        // the intended protection was dead, and the mod would fail rather than skip the mixin.
+        //
+        // Verified against the config file rather than by eye; the entries are
+        //     SubLevelAssemblyHelperMixin
+        //     compat.ElectricFanBlockEntityMixin
+        if ((mixinClassName.equals("com.george_vi.electroenergetics.mixins.SubLevelAssemblyHelperMixin") ||
                 mixinClassName.equals("com.george_vi.electroenergetics.mixins.compat.ElectricFanBlockEntityMixin")) &&
                 LoadingModList.get().getModFileById("sable") == null)
             return false;

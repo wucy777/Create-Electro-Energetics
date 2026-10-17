@@ -72,6 +72,10 @@ public class CarriageContraptionEntityMixin {
         ElectricTrainData data = ((ICEETrainExtension) carriage.train).getElectricTrainData();
         if (data == null || !data.hasTractionMotors)
             return;
+        // Only while this mod actually owns the train. Once it has been handed to Create there is no
+        // lever of ours to orient, and Create computes the cab's direction for its own controls.
+        if (!data.underElectricControl())
+            return;
         data.driver.setDriverCabInverted(CabOrientation.isInverted(self, controlsLocalPos));
 
         // Track the space key for automatic station arrival.

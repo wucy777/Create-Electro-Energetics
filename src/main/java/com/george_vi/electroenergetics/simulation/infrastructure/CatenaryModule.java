@@ -3,10 +3,13 @@ package com.george_vi.electroenergetics.simulation.infrastructure;
 import com.george_vi.electroenergetics.CEERegistries;
 import com.george_vi.electroenergetics.config.CEEConfigs;
 import com.george_vi.electroenergetics.content.railway_electrification.ElectricTrainData;
+import com.george_vi.electroenergetics.content.railway_electrification.TrainControlMode;
+import com.george_vi.electroenergetics.content.railway_electrification.TrainControlModeLogic;
 import com.george_vi.electroenergetics.content.railway_electrification.TrainDriverState;
 import com.george_vi.electroenergetics.content.railway_electrification.TrainGear;
 import com.george_vi.electroenergetics.content.railway_electrification.TrainTractionModel;
 import com.george_vi.electroenergetics.content.railway_electrification.gauges.SyncTrainGaugeDataPacket;
+import com.george_vi.electroenergetics.content.railway_electrification.pantograph.SyncTrainPantographsPacket;
 import com.george_vi.electroenergetics.content.railway_electrification.pantograph.TrainPantographEntry;
 import com.george_vi.electroenergetics.content.railway_electrification.sound_effects.UpdateElectricTrainSoundPacket;
 import com.george_vi.electroenergetics.foundation.SendSparkPacket;
@@ -27,6 +30,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.SectionPos;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.util.Mth;
 import net.minecraft.world.phys.Vec3;
 
@@ -34,6 +38,15 @@ import java.util.*;
 
 public class CatenaryModule {
     private static final double GAUGE_SYNC_THRESHOLD = 0.05; // 5% change threshold for network sync
+
+    /**
+     * Ticks between keep-alive pantograph and control-lock syncs to the driver.
+     *
+     * <p>Five ticks, matching the gauge sync, because both feed the same panel and refreshing them
+     * at different rates would only make the two disagree on screen. A lock state CHANGE bypasses
+     * this interval entirely - see {@code syncPantographs}.
+     */
+    private static final int PANTOGRAPH_SYNC_INTERVAL = 5;
 
     final InfrastructureSavedData sd;
     final ServerLevel level;
@@ -52,20 +65,92 @@ public class CatenaryModule {
             allTrains.add(train);
             ICEETrainExtension trainExtension = (ICEETrainExtension)train;
             ElectricTrainData trainData = trainExtension.getElectricTrainData();
+
+            // STRUCTURAL FACTS FIRST, before any early return in this method.
+            //
+            // Whether this consist IS an electric train - motors and pantographs - is a property of
+            // how it was built, not of whether it is collecting current. Deciding it further down,
+            // after the "nothing is connected" early return, deadlocked the whole feature: a train
+            // assembled with every pantograph DOWN has nothing connected, so it would never be
+            // marked electric, so the driver's raise command would be refused as coming from
+            // someone not driving an electric train, so the pantograph could never go up. Raising a
+            // pantograph required being electric, and being electric required a raised pantograph.
+            //
+            // Computing it here breaks that: the train is electric from the moment it is built, and
+            // the pantographs are simply all down.
+            boolean trainHasMotor = false;
+            for (Carriage carriage : train.carriages) {
+                if (((IPantographList) carriage).electroEnergetics$hasElectricMotor()) {
+                    trainHasMotor = true;
+                    break;
+                }
+            }
+            // BOTH are required, and they may sit on different carriages. Motors without a
+            // pantograph can never be energised, and pantographs without a motor can never move the
+            // train; neither is an electric train in any useful sense, so neither gets the lever.
+            trainData.hasTractionMotors = trainHasMotor && !trainData.pantographs.isEmpty();
+
+            // The reach flags are cleared per carriage below, NOT for the whole consist here.
+            //
+            // A carriage in another level belongs to that level's solve: clearing it from here would
+            // be undone and redone in an order nobody controls, because every level's module sees
+            // every train. Each carriage therefore clears its own, once it is known to be this
+            // level's to evaluate.
+
             boolean connected = false;
             for (Carriage carriage : train.carriages) {
                 List<TrainPantographEntry> pantographs = ((IPantographList)carriage).electroEnergetics$getPantographList();
-                if (carriage.presentInMultipleDimensions() ||
-                        !carriage.getPresentDimensions().getFirst().equals(level.dimension()) ||
-                        !((IPantographList)carriage).electroEnergetics$hasElectricMotor())
+                // A carriage is skipped when it is not in this dimension, or when it is neither a
+                // motor car nor carries a pantograph - in which case there is nothing here to do.
+                //
+                // The motor test is deliberately paired with the pantograph test rather than used
+                // alone. Using it alone skipped every carriage that carries a pantograph but no
+                // motor, which meant such a pantograph's geometry was never evaluated: it could
+                // never be found within reach of catenary, so it could never be raised, and its
+                // automatic lowering never fired. Motors and pantographs are allowed to sit on
+                // different carriages, so that combination is a normal consist, not an edge case.
+                boolean carriageHasMotor =
+                        ((IPantographList)carriage).electroEnergetics$hasElectricMotor();
+
+                // A carriage spanning a dimension boundary is skipped by EVERY level's module, so
+                // nothing anywhere will evaluate its geometry. Its flags must therefore be cleared
+                // rather than left: whatever the last evaluated tick left behind would stand for
+                // ever, and `active && reachable` is exactly the test for a working pantograph. A
+                // stale true here would let a spanning carriage count as collecting current, and
+                // would authorise a driver's raise, for a pantograph that nothing ever looks at.
+                if (carriage.presentInMultipleDimensions()) {
+                    for (TrainPantographEntry pe : pantographs)
+                        pe.reachable = false;
+                    continue;
+                }
+
+                // A carriage in ANOTHER level is a different case and is deliberately left alone:
+                // that level's own module evaluates it, and clearing it from here would be undone
+                // and redone in an order nobody controls.
+                if (!carriage.getPresentDimensions().getFirst().equals(level.dimension()))
+                    continue;
+
+                // Nothing on this carriage to evaluate. The list is empty, so there is no flag to
+                // strand - this is the only skip that cannot leave a stale value behind.
+                if (!carriageHasMotor && pantographs.isEmpty())
                     continue;
 
                 Carriage.DimensionalCarriageEntity dce = carriage.getDimensional(carriage.getPresentDimensions().getFirst());
                 Vec3 positionVec = dce.rotationAnchors.getFirst();
                 Vec3 coupledVec = dce.rotationAnchors.getSecond();
                 //noinspection ConstantValue
-                if (positionVec == null || coupledVec == null)
+                if (positionVec == null || coupledVec == null) {
+                    // The anchors are not loaded, so no geometry can be evaluated for this carriage
+                    // and the loop below will not run. Its pantographs must still be brought to a
+                    // known state, or they keep whatever the last solvable tick left - and a stale
+                    // `reachable = true` is what authorises a driver's raise (SetPantographPacket)
+                    // and what the automatic lowering tests. Left alone, a pantograph whose carriage
+                    // had been unloaded would stay permanently "in reach of wire", so the driver
+                    // could raise it onto nothing and it would never come down again.
+                    for (TrainPantographEntry pe : pantographs)
+                        pe.reachable = false;
                     continue;
+                }
 
                 double diffX = positionVec.x - coupledVec.x;
                 double diffY = positionVec.y - coupledVec.y;
@@ -76,10 +161,25 @@ public class CatenaryModule {
 
                 Vec3 pivotPosition = carriage.isOnTwoBogeys() ? positionVec : VecHelper.lerp(0.5f, positionVec, coupledVec);
 
+                // Recomputed from scratch for THIS carriage's pantographs, immediately before the
+                // geometry that decides it. A stale true would let a driver raise a pantograph onto
+                // nothing, and would stop the automatic lowering from ever firing.
+                //
+                // Done here rather than at the top of the method so that a carriage in another level
+                // is left to that level's solve: every level's module sees every train, so clearing
+                // the whole consist from each of them would be an order nobody controls.
+                for (TrainPantographEntry pe : pantographs)
+                    pe.reachable = false;
+
                 PantographLoop:
                 for (TrainPantographEntry pantograph : pantographs) {
-                    if (!pantograph.active)
-                        continue;
+                    // NOTE: the geometry below is evaluated whether or not the driver has this
+                    // pantograph raised, because the answer is needed either way. "Is this
+                    // pantograph within reach of catenary" is what decides whether the driver is
+                    // ALLOWED to raise it, and what triggers the automatic lowering when the train
+                    // runs out from under the wire. Only the electrical connection step is gated
+                    // on `active`.
+                    boolean raised = pantograph.active;
 
                     Vec3 pantographPos = Vec3.atLowerCornerOf(pantograph.rotatedPos).add((pantograph.facingForward ? 1 : -1) * pantograph.type.backOffset, pantograph.type.reach / 2 + pantograph.type.topOffset, 0);
 
@@ -128,6 +228,19 @@ public class CatenaryModule {
                         float xTol = (float) ((distance.y + pantograph.type.reach / 2) * 0.2f + 0.125f);
                         if (Math.abs(distance.z()) < pantograph.type.sidewaysReach && Math.abs(distance.x()) < xTol && Math.abs(distance.y()) < pantograph.type.reach / 2) {
 
+                            // Catenary is within reach of this pantograph. Recorded regardless of
+                            // whether it is raised, because this is the fact that decides whether
+                            // the driver is ALLOWED to raise it.
+                            pantograph.reachable = true;
+
+                            // The electrical work below only applies to a raised pantograph. A
+                            // lowered one that happens to be under wire must NOT collect current,
+                            // which is the whole point of the driver's handle - and it must not set
+                            // `connected` either, or the train would be treated as energised with
+                            // nothing actually touching the wire.
+                            if (!raised)
+                                continue PantographLoop;
+
                             // If we have a handle, but it's from a different dimension, then invalidate it
                             // (we'll create a new one)
                             if (trainData.wireCutHandle != null && trainData.connectedWireState != levelWireSimulationState) {
@@ -173,6 +286,22 @@ public class CatenaryModule {
                     if (trainData.wireCutHandle != null && pantograph.node != null)
                         trainData.connectedWireState.removeCut(trainData.wireCutHandle, pantograph.node);
 
+                    // AUTOMATIC LOWERING. Nothing within reach and the driver still has this one
+                    // raised, so it comes down - the case of a driver approaching a neutral section
+                    // or the end of the electrified line who did not lower it in time. A real
+                    // pantograph cannot be left pressing against nothing, and the driver has
+                    // plainly lost the wire either way.
+                    //
+                    // There is deliberately NO automatic raising to match it. The operator's
+                    // decision is that how many pantographs are up is the driver's call, so a
+                    // pantograph only ever goes up because the driver asked for it - and only
+                    // while `reachable` is true, which is checked in the raise command.
+                    // (reachable has just been left false for this pantograph: it is cleared per
+                    // carriage before the loop and is set true only on a geometry match, which did
+                    // not happen for this one.)
+                    if (raised)
+                        pantograph.active = false;
+
                 }
             }
 
@@ -184,6 +313,22 @@ public class CatenaryModule {
             if (!connected || (trainData.pantographs.isEmpty() && trainData.accumulatorCharge <= 0.001)) {
                 trainData.groundNode = null;
                 trainData.trainNode = null;
+
+                // The control mode is still decided HERE, and this is not optional.
+                //
+                // "Nothing is connected" is exactly the case the handover exists for - a train with
+                // no working pantograph - so returning without deciding would leave such a train
+                // permanently in ELECTRIC, and neither the coast nor the handover to Create would
+                // ever happen. The rest of this method is about traction this train does not have,
+                // which is why it can be skipped; the mode is not.
+                trainData.hasWorkingPantograph = false;
+                TrainControlModeLogic.update(trainData, train.speed, false);
+
+                // The pantograph and lock state still has to reach the driver from here. This is the
+                // path taken when nothing is collecting current, which is exactly when the lock
+                // matters - see syncPantographs.
+                if (trainData.driver.isDriven())
+                    syncPantographs(train, trainData, trainData.driver);
 
                 continue;
             }
@@ -429,13 +574,34 @@ public class CatenaryModule {
             }
             float acceleration = (float) (trainSpeed - trainData.lastSpeed);
 
-            // Latched here, because this is where the motors are actually counted.
-            // It is what marks a train as electric for the control scheme, so it has
-            // to survive a loss of supply: this runs whether or not the train is
-            // energised, and the flag is never cleared, since a consist does not lose
-            // its motors.
-            if (motorCars > 0)
-                trainData.hasTractionMotors = true;
+            // (hasTractionMotors was decided at the TOP of this method, before the early returns -
+            // see the comment there. It is a structural fact about the consist and must not depend
+            // on whether anything is currently connected.)
+
+            // Whether anything is actually collecting current right now: a pantograph the driver has
+            // raised AND which is within reach of catenary. Recomputed every solve, because entering
+            // a neutral section makes it false without the driver doing anything.
+            //
+            // Deliberately not also requiring `node != null`: reaching that point in the loop above
+            // is what creates the node, so a raised pantograph over live wire always has one, and
+            // adding the test here would only introduce a way for the two to disagree.
+            boolean workingPantograph = false;
+            for (TrainPantographEntry pe : trainData.pantographs) {
+                if (pe.active && pe.reachable) {
+                    workingPantograph = true;
+                    break;
+                }
+            }
+            trainData.hasWorkingPantograph = workingPantograph;
+
+            // Which control scheme drives this train, and the handover between them. See
+            // TrainControlModeLogic for why the change is not immediate at speed. That method also
+            // owns the driver-state edges, so the two records of this fact cannot disagree.
+            //
+            // `active` is passed rather than read back from trainData.isPowered, because that field
+            // is only assigned further down this method - using it here would decide the mode from
+            // the previous tick's supply.
+            TrainControlModeLogic.update(trainData, train.speed, active);
 
             for (Map.Entry<Integer, Vec3> ce : positions.entrySet()) {
                 Integer carriageID = ce.getKey();
@@ -558,7 +724,8 @@ public class CatenaryModule {
                                         trainData.cruiseState.ordinal(),
                                         trainData.regenPower > 0d,
                                         driver.autoArrive, driver.unmanned,
-                                        (float) TrainTractionModel.designMaxSpeed())
+                                        (float) TrainTractionModel.designMaxSpeed(),
+                                        trainData.controlMode.ordinal())
                         );
                         trainData.lastSyncedVoltage = voltage;
                         trainData.lastSyncedCurrent = totalCurrent;
@@ -567,7 +734,79 @@ public class CatenaryModule {
                 }
             }
 
+            // Pantograph list, to the driver only.
+            //
+            // Kept out of the broadcast above for two reasons: the list is only actionable by the
+            // person at the controls, and it carries `reachable`, which changes as the train moves
+            // and therefore cannot be sent on change alone without going stale. Addressing one
+            // player keeps the traffic a small packet every few ticks for the only person who can
+            // act on it, and nothing at all is sent while nobody is driving.
+            //
+            // Ride on the same throttle as the gauge sync: the driver's panel reads both together,
+            // so refreshing them at different rates would only make the two disagree on screen.
+            if (shouldSync && driver.isDriven())
+                syncPantographs(train, trainData, driver);
+
         }
+    }
+
+    /**
+     * Send the driver the pantograph list and the control-lock state, if it is worth sending.
+     *
+     * <h2>Why this is its own method, called from two places</h2>
+     *
+     * <p>This has to run on the "nothing is connected" path as well as the powered one. That path
+     * returns early because there is no traction to compute, but a train with every pantograph down
+     * is exactly the case the lock message exists for: the driver has just finished an emergency
+     * stop on friction, their whole panel is inert, and without this packet they would be shown an
+     * unlocked cab and press keys that do nothing.
+     *
+     * <h2>Throttling</h2>
+     *
+     * <p>A lock state CHANGE is sent immediately, because the driver is about to press something and
+     * a five-tick delay is long enough to press it and conclude the cab is broken. Otherwise it is
+     * a keep-alive every {@link #PANTOGRAPH_SYNC_INTERVAL} ticks, which is what keeps the reach
+     * flags current as the train moves under the wire.
+     *
+     * <p>Sent to the DRIVER ONLY, never broadcast: it is actionable by one person, and the reach
+     * flags change as the train moves, so a per-player packet a few times a second is far cheaper
+     * than keeping every nearby client's copy fresh. Nothing is sent while nobody is driving.
+     */
+    private void syncPantographs(Train train, ElectricTrainData trainData, TrainDriverState driver) {
+        trainData.ticksSincePantographSync++;
+        boolean lockChanged = trainData.lastSyncedControlsLocked != driver.controlsLocked;
+        if (!lockChanged && trainData.ticksSincePantographSync < PANTOGRAPH_SYNC_INTERVAL)
+            return;
+
+        // Walked from the level rather than the server's player list: the driver is by definition
+        // in the level this solve belongs to, and it avoids assuming anything about the server
+        // object here.
+        ServerPlayer driverPlayer = null;
+        for (ServerPlayer candidate : level.players()) {
+            if (candidate.getUUID().equals(driver.driverId)) {
+                driverPlayer = candidate;
+                break;
+            }
+        }
+        if (driverPlayer == null)
+            return;
+
+        List<SyncTrainPantographsPacket.Entry> entries = new ArrayList<>();
+        for (int i = 0; i < train.carriages.size(); i++) {
+            Carriage carriage = train.carriages.get(i);
+            if (!(carriage instanceof IPantographList list))
+                continue;
+            for (TrainPantographEntry pe : list.electroEnergetics$getPantographList()) {
+                entries.add(new SyncTrainPantographsPacket.Entry(
+                        i, pe.originalPos, pe.active, pe.reachable));
+            }
+        }
+
+        CatnipServices.NETWORK.sendToClient(driverPlayer,
+                new SyncTrainPantographsPacket(train.id, driver.controlsLocked, entries));
+
+        trainData.ticksSincePantographSync = 0;
+        trainData.lastSyncedControlsLocked = driver.controlsLocked;
     }
 
     /** Voltage the catenary is nominally at; used for creative-supply trains. */

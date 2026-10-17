@@ -43,7 +43,7 @@ public final class TrainHudData {
     public record Sample(float maxSpeed, float power, float voltage, double grade,
                          boolean powered, int carriages, int motorCars,
                          float powerPerCarriage, boolean manualFullSpeed,
-                         float designMaxSpeed) {}
+                         float designMaxSpeed, int controlMode) {}
 
     private static final Map<UUID, Sample> SAMPLES = new ConcurrentHashMap<>();
 
@@ -79,9 +79,62 @@ public final class TrainHudData {
     public static void update(UUID trainId, float maxSpeed, float power, float voltage,
                               double grade, boolean powered, int carriages, int motorCars,
                               float powerPerCarriage, boolean manualFullSpeed,
-                              float designMaxSpeed) {
+                              float designMaxSpeed, int controlMode) {
         SAMPLES.put(trainId, new Sample(maxSpeed, power, voltage, grade, powered,
-                carriages, motorCars, powerPerCarriage, manualFullSpeed, designMaxSpeed));
+                carriages, motorCars, powerPerCarriage, manualFullSpeed, designMaxSpeed,
+                controlMode));
+    }
+
+    /**
+     * Whether this train is currently driven by this mod rather than handed to Create.
+     *
+     * <p>Sent over the wire because the client cannot work it out: the decision depends on whether
+     * a pantograph is within reach of catenary, which is server-side geometry the client never
+     * sees. A client that guessed would show the electric panel to a driver whose train Create is
+     * actually driving, and their lever keys would do nothing.
+     */
+    public static boolean electricControl(UUID trainId) {
+        Sample s = SAMPLES.get(trainId);
+        return s != null && s.controlMode() != TrainControlMode.CREATE.ordinal();
+    }
+
+    /**
+     * Whether the emergency brake can be used right now.
+     *
+     * <p>Read from the synced sample so the cab and the server agree: the emergency brake is a
+     * driven-motor brake in this mod, so it needs the supply, and the client cannot determine the
+     * supply itself.
+     */
+    public static boolean emergencyBrakeAvailable(UUID trainId) {
+        Sample s = SAMPLES.get(trainId);
+        return s != null && s.powered();
+    }
+
+    /**
+     * Whether a lever position may be selected, judged from the synced supply.
+     *
+     * <p>Mirrors {@code ElectricTrainData.gearAvailable} on the client side. Both exist because the
+     * server is the authority while the panel must not offer a position that would be refused.
+     */
+    public static boolean gearAvailable(UUID trainId, TrainGear gear) {
+        if (!gear.appliesTraction())
+            return true;
+        Sample s = SAMPLES.get(trainId);
+        return s != null && s.powered();
+    }
+
+    /**
+     * Whether the server last reported this train as having a supply.
+     *
+     * <p>The server's own verdict, not a client-side guess: it already folds in the creative source
+     * and the minimum-voltage test, neither of which the client can evaluate.
+     *
+     * <p>False when no sample has arrived, which is the conservative direction - a train whose
+     * supply state is unknown is not claimed to be powered.
+     */
+    public static boolean powered(UUID trainId) {
+        Sample s = SAMPLES.get(trainId);
+        return s != null && s.powered();
     }
 
     public static void updateGear(UUID trainId, int gear, boolean confirmDue, int vigilanceStage,
@@ -160,12 +213,96 @@ public final class TrainHudData {
      */
     public static boolean leverDriven(UUID trainId) {
         Sample s = SAMPLES.get(trainId);
-        return s != null && s.motorCars() > 0 && GEARS.containsKey(trainId);
+        if (s == null || s.motorCars() <= 0 || !GEARS.containsKey(trainId))
+            return false;
+        // Handed to Create: its controls are in charge, so the lever panel must not be shown and
+        // the cab must not take the movement keys. This is the same question `electricControl`
+        // answers, asked here so the several callers that gate on leverDriven cannot disagree
+        // about it.
+        return s.controlMode() != TrainControlMode.CREATE.ordinal();
+    }
+
+    /**
+     * The control mode the server last reported, or {@code null} when it has sent no sample.
+     *
+     * <p>Needed by the panel, which has to say WHICH of the three states the train is in. The
+     * numeric value was already crossing the wire - it is what {@link #leverDriven} and
+     * {@link #electricControl} test - but nothing displayed it, so a driver in DEAD_COAST saw a
+     * lever that refused to engage traction with no explanation of why. "No working pantograph" and
+     * "supply below the minimum" both land in that same state, and neither is something the client
+     * can work out for itself: reach is server-side geometry and the voltage is server-side
+     * simulation.
+     *
+     * <p>Returns null rather than a default, because a mode the server has not yet stated is not
+     * the same as one it has stated as ELECTRIC, and the panel says nothing at all in that case
+     * rather than asserting something false.
+     */
+    public static TrainControlMode controlMode(UUID trainId) {
+        Sample s = SAMPLES.get(trainId);
+        if (s == null)
+            return null;
+        int ordinal = s.controlMode();
+        TrainControlMode[] modes = TrainControlMode.values();
+        return ordinal >= 0 && ordinal < modes.length ? modes[ordinal] : null;
     }
 
     /** Drop samples for trains that no longer exist, so the map cannot grow forever. */
     public static void retain(java.util.function.Predicate<UUID> keep) {
         SAMPLES.keySet().removeIf(id -> !keep.test(id));
         GEARS.keySet().removeIf(id -> !keep.test(id));
+        PANTOGRAPHS.keySet().removeIf(id -> !keep.test(id));
+        PANTOGRAPH_LOCKED.removeIf(id -> !keep.test(id));
+    }
+
+    // ------------------------------------------------------------------
+    // Pantographs
+    // ------------------------------------------------------------------
+
+    /**
+     * The train's pantographs as the server last reported them, or an empty list.
+     *
+     * <p>Needed on the client because a client-side carriage carries no pantograph list at all:
+     * carriages are filled in by {@code Carriage.read}/{@code setContraption}, both server-only,
+     * while the client builds its carriages from {@code AddTrainPacket}. Without this the cab would
+     * have nothing to name or operate.
+     *
+     * <p>Each entry's {@code reachable} is an affordance only - it decides whether the panel offers
+     * the raise action. The server re-checks it before acting, so a stale copy cannot authorise a
+     * raise.
+     */
+    private static final Map<UUID, java.util.List<
+            com.george_vi.electroenergetics.content.railway_electrification.pantograph
+                    .SyncTrainPantographsPacket.Entry>> PANTOGRAPHS = new ConcurrentHashMap<>();
+
+    /**
+     * Whether raising is barred until the next station, per train.
+     *
+     * <p>Set by the emergency brake. Kept apart from the entry list because it is a rule about the
+     * driver rather than about any pantograph, and because it has to be readable even when the list
+     * is momentarily empty - the panel needs to explain why a raise did nothing.
+     */
+    private static final java.util.Set<UUID> PANTOGRAPH_LOCKED =
+            java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    /** The train's pantographs, in carriage order; empty when the server has sent none. */
+    public static java.util.List<
+            com.george_vi.electroenergetics.content.railway_electrification.pantograph
+                    .SyncTrainPantographsPacket.Entry> pantographs(UUID trainId) {
+        return PANTOGRAPHS.getOrDefault(trainId, java.util.List.of());
+    }
+
+    /** Whether raising a pantograph is barred until the next station. */
+    public static boolean controlsLocked(UUID trainId) {
+        return PANTOGRAPH_LOCKED.contains(trainId);
+    }
+
+    public static void updatePantographs(UUID trainId, boolean locked, java.util.List<
+            com.george_vi.electroenergetics.content.railway_electrification.pantograph
+                    .SyncTrainPantographsPacket.Entry> entries) {
+        PANTOGRAPHS.put(trainId, java.util.List.copyOf(entries));
+        if (locked)
+            PANTOGRAPH_LOCKED.add(trainId);
+        else
+            PANTOGRAPH_LOCKED.remove(trainId);
     }
 }

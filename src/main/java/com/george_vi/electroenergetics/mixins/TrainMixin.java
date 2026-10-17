@@ -73,6 +73,29 @@ public class TrainMixin implements ICEETrainExtension {
         tag.putDouble("CEEAccumulatorActualVoltage", electroenergetics$electricTrainData.accumulatorActualVoltage);
         tag.putBoolean("CEECreativeSource", electroenergetics$electricTrainData.hasCreativeSource);
         tag.putDouble("CEELastVoltage", electroenergetics$electricTrainData.lastVoltage);
+
+        // The post-emergency penalty, which is defined as lasting UNTIL THE NEXT STATION - a span a
+        // player can outlast by quitting and coming back, so it has to be persisted to mean anything.
+        //
+        // It matters more than it used to. The penalty used to be enforced inside the gear law, which
+        // stops running the moment the train is Create's, so it only ever had to outlive the stop
+        // itself. It now lives on maxSpeed() precisely so that it *does* outlive the handover and caps
+        // the train under Create until the next station. A cap that can be dismissed by reloading the
+        // world is not that cap.
+        //
+        // Almost nothing else in the driver state is persisted, and that is deliberate: `gear`
+        // defaults to BRAKE, and `controlMode`, `createOwned` and `driverId` are all re-derived on the
+        // first solve, so saving them could only restore something stale. `emergencyArmed` is
+        // deliberately excluded too - on load the train is at a stand and the application is over.
+        //
+        // `controlsLocked` is deliberately NOT persisted, even though it is released by the same
+        // station call. It locks the driver out of the whole panel, and the ONLY thing that ever
+        // releases it is arriving at a station (clearPenalty, from GameEvents). A train with no
+        // station and no schedule therefore never releases it - a defect reported separately - and
+        // persisting it would turn "stuck until you find a station" into "stuck forever", surviving
+        // the one action a player has left. Saving the penalty alone keeps the speed cap honest while
+        // leaving the panel lock recoverable.
+        tag.putBoolean("CEEEmergencyPenalty", electroenergetics$electricTrainData.driver.emergencyPenalty);
         return tag;
     }
 
@@ -96,6 +119,8 @@ public class TrainMixin implements ICEETrainExtension {
         electricTrainData.accumulatorActualVoltage = tag.getDouble("CEEAccumulatorActualVoltage");
         electricTrainData.hasCreativeSource = tag.getBoolean("CEECreativeSource");
         electricTrainData.lastVoltage = tag.getDouble("CEELastVoltage");
+        // The post-emergency speed cap, restored so quitting cannot clear it. See write().
+        electricTrainData.driver.emergencyPenalty = tag.getBoolean("CEEEmergencyPenalty");
         return originalTrain;
     }
 
@@ -136,33 +161,96 @@ public class TrainMixin implements ICEETrainExtension {
         // synced ceiling was added for.
         Train self = (Train) (Object) this;
 
-        if (electricTrainData.hasTractionMotors) {
+        float ceiling;
+        if (electricTrainData.underElectricControl()) {
             boolean oursToDrive = electricTrainData.isPowered
                     || electricTrainData.driver.underGearControl();
             if (!oursToDrive)
-                return original.call();
+                return electroEnergetics$withPenalty(original.call(), self, electricTrainData);
 
             // maxSpeed is in Blocks/Second, maxSpeed() must return Blocks/Tick.
             float synced = TrainHudData.maxSpeedFor(self.id);
             if (synced > 0f)
-                return synced / 20f;
+                return electroEnergetics$withPenalty(synced / 20f, self, electricTrainData);
             if (electricTrainData.maxSpeed > 0f)
-                return electricTrainData.maxSpeed / 20f;
+                return electroEnergetics$withPenalty(electricTrainData.maxSpeed / 20f, self,
+                        electricTrainData);
             // Before the electrical solve has produced a figure, fall back to the
             // configured design ceiling so a driven train is not briefly capped by
             // Create while the first circuit build is still pending.
-            return (float) (TrainTractionModel.designMaxSpeed() / 20d);
+            return electroEnergetics$withPenalty(
+                    (float) (TrainTractionModel.designMaxSpeed() / 20d), self, electricTrainData);
         }
 
-        // Not an electric train on this side. On the client that is the NORMAL case for an
-        // electric train, so the answer has to come from the synced sample before falling
-        // back to Create. maxSpeedFor returns 0 for a consist with no motors, so a fuel
-        // train still reaches Create's figure.
-        float syncedHere = TrainHudData.maxSpeedFor(self.id);
-        if (syncedHere > 0f)
-            return syncedHere / 20f;
+        // Not under this mod's control ON THIS SIDE. Two quite different situations land here.
+        //
+        // On the SERVER that means a fuel train, or an electric train whose pantographs are all
+        // down and which has been handed to Create - and in the second case the answer must be
+        // Create's own figure, with nothing of this mod's left on it. That is the whole point of
+        // the handover, so the electric ceiling must NOT be applied from `maxSpeedFor` here.
+        //
+        // On the CLIENT `hasTractionMotors` is always false, because the electrical simulation
+        // never runs there - so this branch is the NORMAL path for a working electric train, and
+        // dropping it would cap a 100 Blocks/Second train at Create's figure and put the speed bar
+        // on the wrong denominator. That is the bug the synced ceiling was originally added for.
+        //
+        // The two are told apart by the synced control mode, which the server sends and which
+        // answers "is this train under electric control" for a side that cannot work it out
+        // locally. It is also exactly what `leverDriven` reads, so the ceiling and the controls
+        // cannot disagree about which mode the train is in.
+        if (TrainHudData.electricControl(self.id)) {
+            float syncedHere = TrainHudData.maxSpeedFor(self.id);
+            if (syncedHere > 0f)
+                return electroEnergetics$withPenalty(syncedHere / 20f, self, electricTrainData);
+        }
 
-        return original.call();
+        return electroEnergetics$withPenalty(original.call(), self, electricTrainData);
+    }
+
+    /**
+     * Applies the post-emergency speed cap on top of whatever ceiling was resolved.
+     *
+     * <p>This exists because the penalty has to survive the HANDOVER. Once an emergency stop has
+     * finished the train has no pantograph up, so it is handed to Create - and the 40 km/h cap was
+     * previously enforced only inside this mod's gear law, which stops running at that moment. A
+     * penalty that disappears exactly when it starts to matter is not a penalty: the driver would
+     * use the emergency brake and then drive the rest of the leg at Create's full speed.
+     *
+     * <p>Applied here, on {@code maxSpeed()}, because that is the one figure both control schemes
+     * ask - Create computes {@code topSpeed = maxSpeed() * modifier * throttle} from it, and this
+     * mod's own paths read it too. Capping it in one place is what makes the penalty unavoidable
+     * rather than something each scheme has to remember.
+     *
+     * <p>It is a ceiling on the TARGET, not a clamp on the speed. Nothing in either scheme clamps
+     * {@code train.speed}, so a train already above the cap is brought down by its brake rather
+     * than teleported - the same treatment the emergency penalty already had in the gear law.
+     */
+    @Unique
+    private static float electroEnergetics$withPenalty(float ceiling, Train self,
+                                                       ElectricTrainData data) {
+        // The flag lives on the driver state, which only the SERVER ever writes: it is set when the
+        // emergency brake is pulled (SetTrainGearPacket) and restored from the train tag on load.
+        // Nothing on the client assigns it, so reading it alone made this cap a no-op on the client.
+        //
+        // That matters because maxSpeed() is not server-only. Create's own HUD computes
+        // `|speed| / (maxSpeed() * manualTrainSpeedModifier)` on the CLIENT (TrainHUD:65), so without
+        // the cap here the server held the train to 40 km/h while the driver's speed bar divided by
+        // the electric ceiling - the bar would sit near empty at the penalty speed, which is the same
+        // class of denominator mismatch the speed-bar fix exists to prevent.
+        //
+        // The synced sample already carries the answer, because the penalty is part of the per-train
+        // state the server sends for the panel. Falling back to it makes both sides agree by
+        // construction rather than asking the client to know something it is never told.
+        boolean penalty = data.driver.emergencyPenalty;
+        if (!penalty) {
+            TrainHudData.GearState synced = TrainHudData.gear(self.id);
+            penalty = synced != null && synced.emergencyPenalty();
+        }
+        if (!penalty)
+            return ceiling;
+        // The cap has to be able to lower a ceiling, never raise one: if Create's own figure is
+        // already below 40 km/h, that smaller figure is the honest answer.
+        return Math.min(ceiling, (float) (TrainDriverState.PENALTY_SPEED / 20d));
     }
 
     /**
@@ -189,8 +277,10 @@ public class TrainMixin implements ICEETrainExtension {
     public float electroEnergetics$maxTurnSpeed(Operation<Float> original) {
         ElectricTrainData electricTrainData = electroenergetics$electricTrainData;
 
-        // Not an electric train: Create's own figure, untouched.
-        if (!electricTrainData.hasTractionMotors)
+        // Not under this mod's control: Create's own figure, untouched. That includes a train
+        // handed back to Create because it has no working pantograph, which must take curves by
+        // Create's rules like any fuel train.
+        if (!electricTrainData.underElectricControl())
             return original.call();
 
         // Create returns Blocks/Tick here, and maxSpeed() already returns Blocks/Tick, so
@@ -270,7 +360,7 @@ public class TrainMixin implements ICEETrainExtension {
         // driver would recognise. The vigilance clock still runs while unmanned and
         // still brakes the train at TRIP_TICKS, so this defers the stop, it does not
         // remove it.
-        if (data.hasTractionMotors && data.driver.underGearControl()) {
+        if (data.underElectricControl() && data.driver.underGearControl()) {
             applyGearLaw(self, data);
             return;
         }
@@ -385,8 +475,11 @@ public class TrainMixin implements ICEETrainExtension {
                 signedSpeedMs, gradeToPlusX, carriages, data.powerScale,
                 effectiveGear, cruiseCommand,
                 TrainTractionModel.frictionBrake(),
-                st.emergencyTicks > 0 && st.emergencyArmed,
-                st.emergencyPenalty, data.gearStep);
+                // Just the latch. It used to also require emergencyTicks > 0, which was correct
+                // when that field counted DOWN from a fixed duration - but it now counts UP from
+                // zero as a backstop, so on the tick the handle is pulled it is still zero and the
+                // emergency brake would not have applied until a tick later.
+                st.emergencyArmed, data.gearStep);
 
         // Back out of the mirror: the law worked in the cab's frame, and the speed it
         // writes is the train's own.
@@ -417,8 +510,8 @@ public class TrainMixin implements ICEETrainExtension {
         // sees the handle move to CRUISE, which is the honest report of what the train
         // is now doing.
         if (st.gear == TrainGear.ACCELERATE && !st.vigilanceTripped && !st.autoArrive
-                && TrainTractionModel.atDesignCeiling(Math.abs(next) * 20d, carriages,
-                        st.emergencyPenalty)) {
+                && !st.emergencyArmed
+                && TrainTractionModel.atDesignCeiling(Math.abs(next) * 20d, carriages)) {
             st.gear = TrainGear.CRUISE;
             // Cruise holds the speed it is engaged at, which is where the train just
             // arrived. Captured here because this lever move did not come from a packet,
@@ -487,7 +580,7 @@ public class TrainMixin implements ICEETrainExtension {
         // allowed to run as well then BOTH write train.speed every tick and the train
         // accelerates at twice the correct rate. This is the second half of the pair -
         // missing it would have made the unmanned feature look like a physics bug.
-        if (data.hasTractionMotors && data.driver.underGearControl())
+        if (data.underElectricControl() && data.driver.underGearControl())
             return;
 
         // Cleared here, once, before any branch can return early. The flag is read

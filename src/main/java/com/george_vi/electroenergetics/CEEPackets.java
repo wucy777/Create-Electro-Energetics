@@ -53,6 +53,10 @@ public enum CEEPackets implements BasePacketPayload.PacketTypeProvider {
     SET_PANEL_ATTACHMENT_OPTIONS(SetPanelAttachmentOptionsPacket.class, SetPanelAttachmentOptionsPacket.STREAM_CODEC),
     SET_TRAIN_GEAR(com.george_vi.electroenergetics.content.railway_electrification.SetTrainGearPacket.class,
             com.george_vi.electroenergetics.content.railway_electrification.SetTrainGearPacket.STREAM_CODEC),
+    SET_PANTOGRAPH(com.george_vi.electroenergetics.content.railway_electrification.pantograph.SetPantographPacket.class,
+            com.george_vi.electroenergetics.content.railway_electrification.pantograph.SetPantographPacket.STREAM_CODEC),
+    SYNC_TRAIN_PANTOGRAPHS(com.george_vi.electroenergetics.content.railway_electrification.pantograph.SyncTrainPantographsPacket.class,
+            com.george_vi.electroenergetics.content.railway_electrification.pantograph.SyncTrainPantographsPacket.STREAM_CODEC),
     ;
 
     private final CatnipPacketRegistry.PacketType<?> type;

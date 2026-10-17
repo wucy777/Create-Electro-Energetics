@@ -57,7 +57,7 @@ public record SyncTrainGaugeDataPacket(UUID trainId, double voltage, double curr
                                        boolean emergencyArmed,
                                        boolean emergencyPenalty, int cruiseState,
                                        boolean regen, boolean autoArrive, boolean unmanned,
-                                       float designMaxSpeed)
+                                       float designMaxSpeed, int controlMode)
         implements ClientboundPacketPayload {
 
     public static final StreamCodec<ByteBuf, SyncTrainGaugeDataPacket> STREAM_CODEC = new StreamCodec<>() {
@@ -82,6 +82,7 @@ public record SyncTrainGaugeDataPacket(UUID trainId, double voltage, double curr
             int flags = buffer.readUnsignedByte();
             int cruiseState = buffer.readByte();
             float designMaxSpeed = buffer.readFloat();
+            int controlMode = buffer.readByte();
             boolean confirmDue = (flags & 1) != 0;
             boolean emergencyArmed = (flags & 2) != 0;
             boolean emergencyPenalty = (flags & 4) != 0;
@@ -92,7 +93,7 @@ public record SyncTrainGaugeDataPacket(UUID trainId, double voltage, double curr
             return new SyncTrainGaugeDataPacket(trainId, voltage, current, maxSpeed, power,
                     grade, powered, carriages, motorCars, powerPerCarriage, manualFullSpeed,
                     gear, confirmDue, vigilanceStage, emergencyArmed, emergencyPenalty,
-                    cruiseState, regen, autoArrive, unmanned, designMaxSpeed);
+                    cruiseState, regen, autoArrive, unmanned, designMaxSpeed, controlMode);
         }
 
         @Override
@@ -116,6 +117,10 @@ public record SyncTrainGaugeDataPacket(UUID trainId, double voltage, double curr
             buffer.writeByte(flags);
             buffer.writeByte(p.cruiseState);
             buffer.writeFloat(p.designMaxSpeed);
+            // Which control scheme the server has this train in. Without it the client cannot know
+            // whether to show the electric panel, because the decision depends on whether a
+            // pantograph is within reach of catenary - server-side geometry the client never sees.
+            buffer.writeByte(p.controlMode);
         }
     };
 
@@ -124,7 +129,8 @@ public record SyncTrainGaugeDataPacket(UUID trainId, double voltage, double curr
     public void handle(LocalPlayer player) {
         ClientTrainGaugeData.update(trainId, voltage, current);
         TrainHudData.update(trainId, maxSpeed, power, (float) voltage, grade, powered,
-                carriages, motorCars, powerPerCarriage, manualFullSpeed, designMaxSpeed);
+                carriages, motorCars, powerPerCarriage, manualFullSpeed, designMaxSpeed,
+                controlMode);
         TrainHudData.updateGear(trainId, gear, confirmDue, vigilanceStage, emergencyArmed,
                 emergencyPenalty, cruiseState, regen, autoArrive, unmanned);
     }

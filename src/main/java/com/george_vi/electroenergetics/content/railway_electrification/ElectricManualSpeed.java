@@ -121,7 +121,7 @@ public final class ElectricManualSpeed {
         // "is this an electric train" is answered from the latched motor count. Being
         // unpowered is a separate fact, and it is already handled where it belongs - the
         // tractive effort is scaled by the supply voltage.
-        if (data.hasTractionMotors) {
+        if (data.underElectricControl()) {
             // Drive rules for an electric train, supply or not.
             CServer config = CEEConfigs.server();
             boolean waived = config != null
@@ -134,6 +134,21 @@ public final class ElectricManualSpeed {
         TrainHudData.Sample sample = TrainHudData.get(train.id);
         if (sample == null || sample.motorCars() <= 0)
             return new Traction(false, false);
+
+        // Handed to Create. The waiver does NOT follow the train there.
+        //
+        // The waiver exists so this mod's own traction model is not strangled by a handicap written
+        // for fuel trains. Once the train is Create's, there is no traction model to protect: Create
+        // drives it with its own throttle and its own ceiling, which is what TrainControlMode.CREATE
+        // promises - "exactly as for a fuel train". Leaving the waiver on left the speed bar scaled
+        // by a factor that no longer matched the ceiling the train was obeying, because maxSpeed()
+        // switches back to Create's figure at the same moment (TrainMixin) while this did not.
+        //
+        // The sample's manualFullSpeed is a server config value, not a statement about this train's
+        // current mode, so it cannot be used alone here.
+        if (!TrainHudData.electricControl(train.id))
+            return new Traction(false, false);
+
         return new Traction(true, sample.manualFullSpeed());
     }
 }

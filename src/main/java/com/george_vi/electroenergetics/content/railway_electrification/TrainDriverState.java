@@ -112,10 +112,29 @@ public class TrainDriverState {
      *
      * <p>The single question every caller should ask, rather than {@link #isDriven}: a
      * driverless electric train is still this mode's responsibility.
+     *
+     * <p>False once the train has been handed to Create ({@link #createOwned}). This is checked
+     * here, in the one place, rather than at each of the dozen call sites that ask this question -
+     * so that "Create is driving now" cannot be half-applied. A site that missed the check would
+     * keep writing the train's speed from the electric law while Create also wrote it, and the
+     * train would accelerate at twice the correct rate. That exact doubling bug has happened in
+     * this file before, when a second writer was added without gating it.
      */
     public boolean underGearControl() {
+        if (createOwned)
+            return false;
         return isDriven() || unmanned;
     }
+
+    /**
+     * Whether this train has been handed to Create's own controls and nothing of this mod's
+     * driving applies.
+     *
+     * <p>Written only by {@link #releaseToCreate()} and {@link #retakeFromCreate()}, which are
+     * called on the two edges of the control-mode transition, so it always agrees with
+     * {@code ElectricTrainData.controlMode}.
+     */
+    public boolean createOwned = false;
 
     /** Hand the train back to Create's automation, so this mode stops driving it. */
     public void releaseUnmanned() {
@@ -239,11 +258,87 @@ public class TrainDriverState {
     /** Speed cruise is holding, in Blocks/Second. Captured when cruise is selected. */
     public double cruiseSpeed = 0d;
 
-    /** Whether the emergency brake is armed (reverse selected while moving). */
+    /**
+     * Whether the emergency brake is IN FORCE.
+     *
+     * <p>Latched, and deliberately not cancellable by anything except the train reaching a stand.
+     * Once the driver pulls it the train stops, whether or not there is still power: the emergency
+     * brake is a decision that has been made, not a request that can be withdrawn by circumstance.
+     *
+     * <p>It is also NOT released by a loss of supply, which is the case that matters. What changes
+     * without power is only HOW the braking is produced - the motors can no longer be driven
+     * against the direction of travel, so the train finishes the stop on friction alone. See
+     * {@code TrainTractionModel.gearAcceleration}, where the motor share is scaled by the supply.
+     */
     public boolean emergencyArmed = false;
 
-    /** Whether the emergency brake has been fired. Locks out traction until the next station. */
+    /**
+     * Whether the post-emergency speed cap is in force: 40 km/h until the next station.
+     *
+     * <p>This is the penalty for using the emergency brake, and it applies in BOTH control schemes.
+     * It has to: once the train has stopped it is handed to Create (there is no pantograph up, so
+     * the speed gate has certainly been met), and a penalty that vanished at the handover would not
+     * be a penalty at all. Create's own driving is capped by {@code Train.maxSpeed()} returning
+     * this figure while the flag is set.
+     *
+     * <p>It also blocks raising a pantograph. The operator's rule: having used the emergency brake,
+     * the driver may not bring the motors back to finish the stop with, and may not collect current
+     * again until the next station.
+     */
     public boolean emergencyPenalty = false;
+
+    /**
+     * Set once this train has been seen AT a station while carrying the speed cap.
+     *
+     * <p>This exists because "the cap clears at the next station" cannot be tested by asking whether
+     * {@code currentStation} is non-null right now. That value is transient: Create clears it the
+     * moment the train departs (`Train.leaveStation`, called from `approachTargetSpeed`), so a
+     * per-tick test only ever sees it during the dwell. Worse, there is a way to make it never come
+     * back at all: relocating the train with Create's wrench calls `Train.leaveStation()` AND
+     * `navigation.cancelNavigation()`, and arriving at a station requires a destination
+     * (`Train.frontSignalListener` returns early when `navigation.destination != station`). A
+     * free-driven train has no way to obtain a destination again, so after a relocation the cap could
+     * never clear - permanently, since it is persisted across reloads.
+     *
+     * <p>So the event to record is "a station was reached", latched, rather than "a station is being
+     * stood at", sampled. The latch is set the first time the cap and a station coincide, and cleared
+     * only when the cap itself is cleared or re-armed.
+     *
+     * <p>Not persisted. It is derived state that can only ever be set by an event occurring in the
+     * current session; a cap restored from NBT is cleared by the same station test as a fresh one,
+     * because the station test does not depend on this flag's history.
+     */
+    public boolean penaltyStationReached = false;
+
+    /**
+     * Distance run, in Blocks, while the speed cap was in force.
+     *
+     * <p>Only advanced while {@link #emergencyPenalty} is set and the train is moving. Cleared with
+     * the cap.
+     *
+     * <p>This is the cap's backstop, and it exists because the station test alone had a hole that the
+     * operator found in play: relocating a capped train with Create's wrench clears both
+     * {@code currentStation} and {@code navigation.destination}, and reaching a station requires a
+     * destination - so a free-driven train could carry the cap with no way to ever satisfy the test,
+     * permanently, since the cap is persisted.
+     *
+     * <p>Distance rather than elapsed time on purpose: the punishment is "the rest of this leg at
+     * 40 km/h", and a train standing in a yard has not travelled a leg. A timer would forgive it for
+     * standing still, which is not the behaviour being punished.
+     */
+    public double penaltyDistance = 0d;
+
+    /**
+     * Distance after which the speed cap clears regardless of stations [Blocks].
+     *
+     * <p>Long enough to be a real punishment and to never pre-empt the ordinary rule, short enough
+     * that a player who has been stranded by it notices it lifting rather than giving up.
+     *
+     * <p>At the cap itself (11.1 Blocks/s) 10 000 Blocks is 900 s, fifteen minutes of running. An
+     * ordinary leg between stations is a fraction of that, so in normal play the station test always
+     * fires first; this only ever decides the case where it cannot.
+     */
+    public static final double PENALTY_BACKSTOP_BLOCKS = 10_000d;
 
     /**
      * Ticks since the driver last acknowledged, counted up from zero.
@@ -286,8 +381,28 @@ public class TrainDriverState {
      */
     public static final int TRIP_BRAKE_TICKS = 15 * 20;
 
-    /** Ticks of emergency-brake application remaining, while it is slowing the train. */
+    /**
+     * Ticks of emergency-brake application remaining.
+     *
+     * <p>No longer a timer that ends the application. It is kept only as a safety backstop for a
+     * train that somehow cannot stop at all, and the application itself runs until the train is at
+     * a stand - see {@link #EMERGENCY_BACKSTOP_TICKS}.
+     */
     public int emergencyTicks = 0;
+
+    /**
+     * The backstop that gives up on an emergency brake which cannot stop the train.
+     *
+     * <p>Long enough that reaching it means something is genuinely wrong - a train sliding down a
+     * gradient the friction brake cannot hold, for instance. It exists for the same reason the
+     * vigilance trip has one: a rule that latches forever on a train that cannot satisfy it would
+     * leave that train unusable, and there would be no way for the driver to recover it.
+     *
+     * <p>The previous value was 100 ticks (5 seconds), which was NOT a backstop - it was the actual
+     * duration, and it released the brake long before a train at line speed had stopped. A 100 m/s
+     * train needs roughly 40 seconds at the emergency rate.
+     */
+    public static final int EMERGENCY_BACKSTOP_TICKS = 90 * 20;
 
     /**
      * Speed cap applied while the emergency penalty is in force [Blocks/Second].
@@ -296,17 +411,124 @@ public class TrainDriverState {
      */
     public static final double PENALTY_SPEED = 40d / 3.6d;   // 40 km/h
 
-    /** Reset the per-leg state when a scheduled stop is reached. */
-    public void clearPenalty() {
-        emergencyPenalty = false;
+    /**
+     * Ticks the panel stays locked after an emergency stop has finished [ticks].
+     *
+     * <p>This is the whole of the lockout's duration, and separating it from the speed penalty is
+     * deliberate - see {@link #releaseLockout()}. Two seconds is long enough that the driver cannot
+     * notch the lever while the train is still settling, and short enough that nobody reads the inert
+     * panel as a broken mod.
+     */
+    public static final int LOCKOUT_TAIL_TICKS = 2 * 20;
+
+    /**
+     * Release the panel lock and the "no second emergency application" latch, keeping the speed
+     * penalty.
+     *
+     * <p>THE LOCK AND THE SPEED CAP ARE TWO DIFFERENT PENALTIES and used to be cleared together by
+     * {@link #clearPenalty()}, whose only gate is {@code train.getCurrentStation() != null}. That gate
+     * is unreachable for a train assembled away from any station and never given a schedule:
+     * {@code currentStation} is written only by assembly at a station ({@code StationBlockEntity:888})
+     * and by {@code Train.arriveAt}, which needs a schedule destination - and a schedule can itself
+     * only be applied at a station ({@code applyAutoSchedule} requires {@code currentStation ==
+     * station}). The two routes need each other, so neither can happen.
+     *
+     * <p>The result was a permanently inert panel. Not an immobilised train - Create's own W/S still
+     * drove it - but a driver pressing keys at a panel that never answers, whose only way out was to
+     * reload the world. That is the worst kind of bug: silent, and with a workaround nobody would
+     * guess.
+     *
+     * <p>The fix keeps the punitive half and bounds the operational half:
+     * <ul>
+     *   <li><b>Speed cap stays</b> until the next station, exactly as before. It costs the driver
+     *       something real - the rest of the leg at 40 km/h - and it needs no interaction, so it
+     *       cannot become a stuck panel.</li>
+     *   <li><b>The lock lifts</b> a short moment after the train has come to a stand. It exists to
+     *       guarantee the emergency stop runs to completion without the driver interfering, and that
+     *       requirement ends when the train stops.</li>
+     * </ul>
+     *
+     * <p>A driver cannot farm this: pulling the emergency brake again only stops the train again and
+     * re-locks the panel for another {@link #LOCKOUT_TAIL_TICKS}, while the speed cap is untouched by
+     * either action - {@link #emergencyPenalty} is still cleared only by {@link #clearPenalty()}.
+     */
+    public void releaseLockout() {
+        controlsLocked = false;
         emergencyArmed = false;
-        emergencyTicks = 0;
+        lockoutTailTicks = 0;
     }
 
-    /** Drop the lever to the brake and cancel anything in progress. */
+    /**
+     * Ticks elapsed since the emergency stop finished, counted only while the panel is locked.
+     *
+     * <p>Counted rather than stored as a deadline so it needs no world clock and cannot be affected
+     * by a paused server. Reset whenever the lock is off, so the next application starts fresh.
+     */
+    public int lockoutTailTicks = 0;
+
+    /**
+     * Reset the per-leg state when a scheduled stop is reached.
+     *
+     * <p>Deliberately does NOT clear {@link #emergencyArmed}. Reaching a station is not the same
+     * event as coming to a stand under the emergency brake, and the operator's rule is that an
+     * emergency application runs until the train has stopped and cannot be cut short. Clearing the
+     * flag here would have been a way to interrupt it: arrive at a platform while the stop is still
+     * in progress and the brake would be released. The application is released by one thing only -
+     * the standstill test in GameEvents.
+     *
+     * <p>This now clears only the SPEED penalty. The panel lock is released by
+     * {@link #releaseLockout()} when the stop finishes, because tying it to a station made it
+     * permanent for any train that never reaches one.
+     */
+    public void clearPenalty() {
+        emergencyPenalty = false;
+        emergencyTicks = 0;
+        penaltyStationReached = false;
+        penaltyDistance = 0d;
+    }
+
+    /**
+     * Whether the driver is barred from ALL controls while an emergency stop is running, and briefly
+     * after it finishes.
+     *
+     * <p>Set when the emergency brake is used, and it covers everything: the lever positions and
+     * the pantographs. The operator's flow is that a triggered emergency brake runs to a stand
+     * without accepting any input at all, so this is not merely "no traction" - the driver's whole
+     * panel is inert until the stop has finished and control has passed to Create.
+     *
+     * <p>For the lever the lockout is enforced inside {@code SetTrainGearPacket}, which refuses
+     * every command while {@code emergencyArmed}. For the pantographs it is this flag, which also
+     * has to outlive the brake application: it stays set past the end of the brake, so that a driver
+     * whose supply failed part-way through the stop cannot raise a pantograph and finish the stop on
+     * the motors, which is exactly what the rule forbids.
+     *
+     * <p>BOTH places that arm the emergency brake set this flag: the emergency button, and throwing
+     * the lever into reverse at speed. Until they did, this paragraph claimed the two flags "are set
+     * together, so the brake cannot be running while the panel is live" - which was true for the
+     * lever, whose lockout reads {@code emergencyArmed}, and false for the pantographs, whose lockout
+     * reads only this flag. Slam the handle into reverse at speed and a pantograph could still be
+     * raised mid-stop.
+     *
+     * <p>Released by {@link #releaseLockout()} a short {@link #LOCKOUT_TAIL_TICKS} after the stop has
+     * finished, NOT at the next station. It used to be released only by {@link #clearPenalty()}, whose
+     * gate a train can never satisfy if it was assembled away from any station and has no schedule -
+     * which left the panel dead forever. The lock exists to protect the stop, and that requirement
+     * ends when the train stands; the speed penalty is what lasts to the next station.
+     */
+    public boolean controlsLocked = false;
+
+    /**
+     * Drop the lever to the brake and cancel anything in progress - EXCEPT the emergency brake.
+     *
+     * <p>The emergency application is deliberately left alone. This method is called by the
+     * vigilance trip and by the automatic-arrival finish, and clearing {@link #emergencyArmed} here
+     * meant either of those could cancel an emergency stop that was still in progress - a lapsed
+     * vigilance clock would silently release the very brake the driver had pulled. The operator's
+     * rule is that a triggered emergency brake runs until the train is at a stand and is not
+     * cancellable, so nothing but reaching a stand (or the backstop) may clear it.
+     */
     public void failSafe() {
         gear = TrainGear.BRAKE;
-        emergencyArmed = false;
     }
 
     /**
@@ -336,5 +558,60 @@ public class TrainDriverState {
         if (confirmWaiting < WARN_RED_TICKS)
             return 1;
         return 2;
+    }
+
+    /**
+     * Hand the train to Create, discarding everything of this mod's driving.
+     *
+     * <p>Called on the one-way transition into {@code TrainControlMode.CREATE}. The user's
+     * instruction is explicit that the electric machinery must not follow the train into that
+     * state: Create behaves as it always has, with no lever, no vigilance timer and no electric
+     * ceiling imposed on it.
+     *
+     * <p>So this releases the train rather than freezing it. {@link #unmanned} is the wrong thing
+     * to leave set, because it means "this mod still drives a train whose driver walked away" and
+     * would keep the gear law running. {@link #wasDriven} is cleared with it so a later re-raise
+     * starts clean rather than latching unmanned on the first tick nobody is at the controls.
+     *
+     * <p>The vigilance clock is zeroed rather than left mid-count, so that if a pantograph is
+     * later raised the driver gets a full window instead of inheriting a countdown that ran while
+     * Create was in charge and they had no way to acknowledge it.
+     */
+    public void releaseToCreate() {
+        createOwned = true;
+        unmanned = false;
+        wasDriven = false;
+        confirmWaiting = 0;
+        vigilanceTripped = false;
+        tripTicks = 0;
+        // emergencyArmed is deliberately NOT cleared here. This runs on the transition into
+        // CREATE, which for an emergency stop happens the moment the train reaches a stand - and
+        // clearing the flag there would race the very code that lowers the pantographs on the same
+        // transition, leaving a powered train with its pantograph still up and therefore not
+        // actually handed over. The emergency release is owned solely by the standstill test in
+        // GameEvents, so there is one writer and no ordering to get wrong.
+        autoArrive = false;
+        spaceTicks = 0;
+        powerLossCoasted = false;
+        blockedParked = false;
+    }
+
+    /**
+     * Take the train back from Create, leaving the lever where it should resume.
+     *
+     * <p>Called when a pantograph is raised again onto live wire. The lever goes to
+     * {@link TrainGear#COAST} rather than resuming its previous position: the driver has been
+     * driving under Create's W/S controls, so the old position is stale and could command traction
+     * the instant control returns. COAST does nothing until the driver asks for something, which
+     * is the safe way to resume - and it is what the user described, as engaging the one clutch
+     * while the other is cut.
+     */
+    public void retakeFromCreate() {
+        createOwned = false;
+        gear = TrainGear.COAST;
+        confirmWaiting = 0;
+        vigilanceTripped = false;
+        tripTicks = 0;
+        emergencyArmed = false;
     }
 }

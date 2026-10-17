@@ -73,7 +73,25 @@ public final class TrainControlKeys {
             "key.electroenergetics.train_emergency",
             InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_K, CATEGORY);
 
-    private static final KeyMapping[] ALL = {LEVER_UP, LEVER_DOWN, CONFIRM, ENGAGE, EMERGENCY};
+    /**
+     * Step through the consist's pantographs, choosing which one the other two keys act on.
+     *
+     * <p>A selection key rather than one key per pantograph: the number of pantographs is whatever
+     * the player built, so a fixed set of keys could not address them, and number keys are already
+     * the hotbar. Stepping through them also means the driver can see which one they are about to
+     * move before they move it, which matters because the wrong one drops the train's supply.
+     */
+    public static final KeyMapping PANTOGRAPH_NEXT = new KeyMapping(
+            "key.electroenergetics.pantograph_next",
+            InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_N, CATEGORY);
+
+    /** Raise or lower the selected pantograph, depending on how it currently stands. */
+    public static final KeyMapping PANTOGRAPH_TOGGLE = new KeyMapping(
+            "key.electroenergetics.pantograph_toggle",
+            InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_M, CATEGORY);
+
+    private static final KeyMapping[] ALL = {LEVER_UP, LEVER_DOWN, CONFIRM, ENGAGE, EMERGENCY,
+            PANTOGRAPH_NEXT, PANTOGRAPH_TOGGLE};
 
     private TrainControlKeys() {}
 
