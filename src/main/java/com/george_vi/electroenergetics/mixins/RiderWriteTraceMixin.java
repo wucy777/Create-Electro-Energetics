@@ -156,6 +156,17 @@ public class RiderWriteTraceMixin {
     private static double electroEnergetics$prevX;
     @Unique
     private static double electroEnergetics$prevZ;
+    /** Previous Y, for the vertical component of each write - the floor pass-through is vertical. */
+    @Unique
+    private static double electroEnergetics$prevY;
+
+    /** Total lines printed this session, so the log cannot be flooded. */
+    @Unique
+    private static int electroEnergetics$printed;
+
+    /** Hard cap on printed lines. See the note at the print site. */
+    @Unique
+    private static final int MAX_PRINTED = 20_000;
     @Unique
     private static boolean electroEnergetics$hasPrev;
     /**
@@ -311,8 +322,10 @@ public class RiderWriteTraceMixin {
             double fromPrev = electroEnergetics$hasPrev
                     ? Math.hypot(x - electroEnergetics$prevX, z - electroEnergetics$prevZ)
                     : 0d;
+            double dY = y - electroEnergetics$prevY;
             electroEnergetics$prevX = x;
             electroEnergetics$prevZ = z;
+            electroEnergetics$prevY = y;
             electroEnergetics$hasPrev = true;
 
             // Per-tick travel, taken from the FIRST write of this tick.
@@ -352,16 +365,59 @@ public class RiderWriteTraceMixin {
             }
 
             electroEnergetics$sb.setLength(0);
+            // Everything needed to diagnose the carry in ONE line, printed for EVERY write.
+            //
+            // The operator's standing instruction is one output line per executed step, and the
+            // previous design broke it: writes went into a ring and only surfaced when a heuristic
+            // fired. That heuristic had three separate bugs, so most of the time there was no output
+            // at all, and the carry could not be watched while it happened. The heuristic is gone from
+            // this path; what is printed is the write itself.
+            //
+            // Fields, and why each one is needed:
+            //
+            //   p      where the write put the player
+            //   d      how far this write moved them, from the previous write
+            //   dY     the vertical component alone - the floor pass-through is vertical
+            //   pax    whether they were still a passenger on this write
+            //   veh    the vehicle id, so a write during a dismount is recognisable
+            //   sp     whether the player is standing on the ground, per vanilla
+            //   np     NO PHYSICS - the flag that makes Entity.move skip every collision
+            //   onC    whether the player's box is currently inside a carriage's collider
+            //
+            // `np` is the one that decides the whole question: if the carry's collision test is what
+            // clips movement, then `d` will be small while a large target was computed, and `np` will
+            // be false. If `np` is true and `d` is still large, collision is not involved at all.
             electroEnergetics$sb.append("p=(")
                     .append(fmt(x)).append(',').append(fmt(y)).append(',').append(fmt(z))
                     .append(") d=").append(String.format("%.3f", fromPrev))
+                    .append(" dY=").append(String.format("%.3f", dY))
                     .append(" pax=").append(player.isPassenger() ? "1" : "0")
                     .append(" veh=").append(player.getVehicle() == null ? "-"
                             : String.valueOf(player.getVehicle().getId()))
+                    .append(" sp=").append(player.onGround() ? "1" : "0")
+                    .append(" np=").append(player.isNoPhysics() ? "1" : "0")
+                    .append(" own=(").append(fmt(player.getDeltaMovement().x)).append(',')
+                    .append(fmt(player.getDeltaMovement().y)).append(',')
+                    .append(fmt(player.getDeltaMovement().z)).append(')')
                     .append(" CALLER=").append(electroEnergetics$caller());
 
             String entry = "t=" + tick + " #" + electroEnergetics$seq + " "
                     + electroEnergetics$sb;
+
+            // Print it. Every write while armed, no heuristic in between.
+            //
+            // A hard cap on total lines, not a per-second throttle: throttling would drop exactly the
+            // writes that matter (a burst IS the event), while a cap only stops the run once the
+            // evidence is already far beyond sufficient. 20000 lines is about a full minute of the
+            // carry at 20 writes per tick, which is more than any single investigation needs.
+            if (electroEnergetics$printed < MAX_PRINTED) {
+                electroEnergetics$printed++;
+                electroEnergetics$LOG.info("W {}", entry);
+            } else if (electroEnergetics$printed == MAX_PRINTED) {
+                electroEnergetics$printed++;
+                electroEnergetics$LOG.info("W ... line cap reached, {} writes since; no more lines",
+                        electroEnergetics$seq);
+            }
 
             electroEnergetics$ring[electroEnergetics$ringIdx] = entry;
             electroEnergetics$ringIdx = (electroEnergetics$ringIdx + 1) % CAP;
@@ -410,13 +466,14 @@ public class RiderWriteTraceMixin {
             // constant had at low speed). It is a floor on the INPUT: no measured travel means no
             // displacement to call anomalous, so the dump test is skipped entirely. The window is
             // still recorded, so the history leading into a later anomaly is intact.
-            if (electroEnergetics$tickTravel < MIN_TRAVEL)
-                return;
-
-            double threshold = electroEnergetics$tickTravel * DUMP_FACTOR;
-
-            if (fromPrev >= threshold && electroEnergetics$dumps < MAX_DUMPS)
-                electroEnergetics$dump(tick, fromPrev, entry);
+            // NO GATE HERE. Every armed write is already printed above, line by line, which is the
+            // operator's standing instruction and the only thing that made the carry observable at
+            // all. The threshold machinery that used to decide whether a write was "interesting" had
+            // three separate calibration bugs and suppressed the output in exactly the cases worth
+            // reading; it is not consulted on this path any more.
+            //
+            // The dump-on-anomaly path is kept for the flight recorder, which has its own, independent
+            // trigger. Here the raw stream is the evidence.
         } catch (Throwable ignored) {
             // A tracer must never be the thing that breaks the client.
         }

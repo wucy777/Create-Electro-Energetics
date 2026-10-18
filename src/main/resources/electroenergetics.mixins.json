@@ -24,7 +24,6 @@
     "defaultRequire": 1
   },
   "mixins": [
-    "AbstractContraptionEntityCarryMixin",
     "BlockStateBaseMixin",
     "CarriageContraptionEntityMixin",
     "CarriageContraptionMixin",
