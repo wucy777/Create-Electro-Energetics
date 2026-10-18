@@ -1,5 +1,6 @@
 package com.george_vi.electroenergetics.content.railway_electrification;
 
+import com.george_vi.electroenergetics.CEEPantographTypes;
 import com.george_vi.electroenergetics.content.railway_electrification.pantograph.TrainPantographEntry;
 import com.george_vi.electroenergetics.foundation.nodes.AttachedNode;
 import com.george_vi.electroenergetics.simulation.infrastructure.WireSimulationState;

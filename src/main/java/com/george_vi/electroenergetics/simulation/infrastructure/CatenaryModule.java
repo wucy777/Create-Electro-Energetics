@@ -1,5 +1,6 @@
 package com.george_vi.electroenergetics.simulation.infrastructure;
 
+import com.george_vi.electroenergetics.CEEPantographTypes;
 import com.george_vi.electroenergetics.CEERegistries;
 import com.george_vi.electroenergetics.config.CEEConfigs;
 import com.george_vi.electroenergetics.content.railway_electrification.ElectricTrainData;
