@@ -45,6 +45,16 @@ public class KeyboardHandlerMixin {
             return;
         if (!TrainControlKeys.isCabKey(key))
             return;
+        // A screen is open: leave every key alone.
+        //
+        // This was always the right test, but it became load-bearing when pantograph selection moved
+        // onto the LEFT/RIGHT arrows. Those are unbound in the world, but they navigate lists and
+        // slots in vanilla's own menus; suppressing them while a driver has their inventory open
+        // would make the arrow keys silently dead in every screen for as long as they sit in a cab.
+        // The lever keys have the same problem (UP/DOWN are also menu navigation), so this closes the
+        // class rather than one instance of it.
+        if (net.minecraft.client.Minecraft.getInstance().screen != null)
+            return;
         // The wider test, not the lever's. The pantograph keys have to stay consumed after the train
         // has been handed to Create - they are the only way back - and the narrower test would let
         // them through to whatever else is bound to them at exactly the moment the driver needs them.

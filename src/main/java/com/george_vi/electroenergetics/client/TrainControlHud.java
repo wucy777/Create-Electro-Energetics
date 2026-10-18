@@ -267,7 +267,7 @@ public class TrainControlHud implements LayeredDraw.Layer {
         // Positioned through TrainControlLayout rather than by adding offsets to a hard-coded base.
         // The base used to be `ph - FOOTER_H + 4`, which put the pantograph row's last glyph 2.75 px
         // below the panel's bottom edge - the row was drawn outside the card. See FOOTER_INSET_TOP.
-        drawSmall(graphics, font, hintText(), x + 5,
+        drawSmall(graphics, font, hintText(TrainHudData.pantographs(train.id).size()), x + 5,
                 TrainControlLayout.footerRowY(y, TrainControlLayout.FOOTER_ROW_HINTS), TEXT_DIM);
 
         // The lock outranks everything on the status line. While the emergency brake is running -
@@ -473,6 +473,12 @@ public class TrainControlHud implements LayeredDraw.Layer {
                     .SyncTrainPantographsPacket.Entry> pantographs) {
         if (TrainHudData.controlsLocked(train.id))
             return tr("electroenergetics.train.panto.locked");
+        // The switch outranks the per-arm state on this line when it is ON, because it changes what
+        // the per-arm state MEANS: with it on, a lowered arm will be raised again by the next solve,
+        // so "this one is down" is not something the driver can act on. Saying AUTO makes that
+        // obvious instead of leaving them pressing raise and watching it revert.
+        if (TrainHudData.autoRaise(train.id))
+            return tr("electroenergetics.train.panto.autoOn");
         var sel = pantographs.get(Math.min(TrainControlInput.selectedPantograph(),
                 pantographs.size() - 1));
         if (sel.active())
@@ -487,6 +493,8 @@ public class TrainControlHud implements LayeredDraw.Layer {
                     .SyncTrainPantographsPacket.Entry> pantographs) {
         if (TrainHudData.controlsLocked(train.id))
             return DANGER;
+        if (TrainHudData.autoRaise(train.id))
+            return ACCENT;
         var sel = pantographs.get(Math.min(TrainControlInput.selectedPantograph(),
                 pantographs.size() - 1));
         if (sel.active())
@@ -574,11 +582,30 @@ public class TrainControlHud implements LayeredDraw.Layer {
      *
      * <p>Only the engage key is named, because that one is not obvious from a glyph - and
      * it is the key that actually does something, the arrows only move the handle.
+     *
+     * <p>The pantograph half appears ONLY when there are two or more arms to choose between. With
+     * one arm the arrows do nothing, and advertising a control that cannot act is worse than saying
+     * nothing: the driver presses it, nothing happens, and they conclude the cab is broken.
+     *
+     * <p>Two rows' worth of text does not fit on one 94-pixel line - measured, not assumed: the lever
+     * half alone is 73.5 px in Chinese and 93.0 px in English before the pantograph half starts. So
+     * when there is something to select, the lever half gives up its engage hint and the row becomes
+     * "↑↓ 换挡   ←→ 选弓   M升降". The engage key is named on its own row whenever the train has one
+     * arm, and it is the one piece of this line the driver can also discover from the lever moving.
      */
-    private static String hintText() {
-        return "\u2191\u2193 " + tr("electroenergetics.train.hint.move")
-                + "   " + key(TrainControlKeys.ENGAGE)
-                + tr("electroenergetics.train.hint.engage");
+    private static String hintText(int pantographCount) {
+        String lever = "\u2191\u2193 " + tr("electroenergetics.train.hint.move");
+        if (pantographCount < 2) {
+            // No selection to make: keep the original line, including the engage key.
+            return lever + "   " + key(TrainControlKeys.ENGAGE)
+                    + tr("electroenergetics.train.hint.engage");
+        }
+        // Selection is available, so it takes the room. The toggle key is named because raising the
+        // wrong arm drops the supply, which is the one thing on this panel worth being explicit about.
+        return lever
+                + "  \u2190\u2192 " + tr("electroenergetics.train.hint.selectPanto")
+                + "  " + key(TrainControlKeys.PANTOGRAPH_TOGGLE)
+                + tr("electroenergetics.train.hint.raiseLower");
     }
 
     /** A binding's key name, in the player's language. */

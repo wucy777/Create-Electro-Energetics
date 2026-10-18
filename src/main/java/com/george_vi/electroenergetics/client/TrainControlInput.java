@@ -33,8 +33,11 @@ public final class TrainControlInput {
     private static boolean confirmWasDown;
     private static boolean engageWasDown;
     private static boolean emergencyWasDown;
+    private static boolean pantoPrevWasDown;
     private static boolean pantoNextWasDown;
     private static boolean pantoToggleWasDown;
+    /** Edge state of the automatic-raise switch, so holding the key toggles once. */
+    private static boolean pantoAutoWasDown;
 
     /**
      * Which pantograph the pantograph keys act on, as an index into the server's list.
@@ -134,7 +137,11 @@ public final class TrainControlInput {
         if (train == null)
             return false;
         return TrainHudData.leverDriven(train.id)
-                || !TrainHudData.pantographs(train.id).isEmpty();
+                // An OVERHEAD pantograph, not merely a non-empty list. A rail-shoe train's list is not
+                // empty - the shoe shares the collector plumbing - so testing isEmpty() here gave a
+                // metro the electric cab: the panel appeared, the cab keys were consumed, and the
+                // driver was offered controls that the server, correctly, refuses it.
+                || TrainHudData.hasOverheadPantograph(train.id);
     }
 
     /**
@@ -207,8 +214,10 @@ public final class TrainControlInput {
             confirmWasDown = confirm;
             engageWasDown = engage;
             emergencyWasDown = emergency;
+            pantoPrevWasDown = TrainControlKeys.isDown(TrainControlKeys.PANTOGRAPH_PREV);
             pantoNextWasDown = TrainControlKeys.isDown(TrainControlKeys.PANTOGRAPH_NEXT);
             pantoToggleWasDown = TrainControlKeys.isDown(TrainControlKeys.PANTOGRAPH_TOGGLE);
+            pantoAutoWasDown = TrainControlKeys.isDown(TrainControlKeys.PANTOGRAPH_AUTO);
             return;
         }
 
@@ -257,20 +266,22 @@ public final class TrainControlInput {
      * the toggle acts once, rather than firing every tick they are held.
      */
     private static void tickPantographs() {
+        boolean pantoPrev = TrainControlKeys.isDown(TrainControlKeys.PANTOGRAPH_PREV);
         boolean pantoNext = TrainControlKeys.isDown(TrainControlKeys.PANTOGRAPH_NEXT);
         boolean pantoToggle = TrainControlKeys.isDown(TrainControlKeys.PANTOGRAPH_TOGGLE);
+        boolean pantoAuto = TrainControlKeys.isDown(TrainControlKeys.PANTOGRAPH_AUTO);
 
         // Not at the controls of an electric consist: drop the edge state, so a key held while
         // walking up to the train does not fire the moment the panel appears.
         if (!isAtElectricTrainControls()) {
-            pantoNextWasDown = pantoToggleWasDown = false;
+            pantoPrevWasDown = pantoNextWasDown = pantoToggleWasDown = pantoAutoWasDown = false;
             selectedPantograph = 0;
             return;
         }
 
         Train train = drivenTrain();
         if (train == null) {
-            pantoNextWasDown = pantoToggleWasDown = false;
+            pantoPrevWasDown = pantoNextWasDown = pantoToggleWasDown = pantoAutoWasDown = false;
             return;
         }
 
@@ -281,6 +292,16 @@ public final class TrainControlInput {
         java.util.List<com.george_vi.electroenergetics.content.railway_electrification.pantograph
                 .SyncTrainPantographsPacket.Entry> pantographs = TrainHudData.pantographs(train.id);
 
+        // The auto-raise switch is deliberately OUTSIDE the `!pantographs.isEmpty()` test below. It is
+        // a property of the train's operation rather than of any one arm, and a consist whose list is
+        // momentarily empty must still be able to turn it off - which is the safe direction.
+        if (!locked && pantoAuto && !pantoAutoWasDown) {
+            CatnipServices.NETWORK.sendToServer(
+                    new com.george_vi.electroenergetics.content.railway_electrification
+                            .pantograph.SetAutoRaisePacket(train.id,
+                            !TrainHudData.autoRaise(train.id)));
+        }
+
         if (!locked && !pantographs.isEmpty()) {
             // Clamped rather than wrapped blindly: the server's list can shrink when a carriage is
             // removed, and a selection left pointing past the end would make the toggle key do
@@ -288,8 +309,17 @@ public final class TrainControlInput {
             if (selectedPantograph >= pantographs.size())
                 selectedPantograph = 0;
 
-            if (pantoNext && !pantoNextWasDown)
-                selectedPantograph = (selectedPantograph + 1) % pantographs.size();
+            // Selection only does something when there is a choice to make. With a single pantograph
+            // the arrow keys are left alone entirely - not consumed and not wrapped - so a train with
+            // one arm behaves exactly as it did before these keys existed, and a stray press cannot
+            // move a selection that has only one value.
+            int count = pantographs.size();
+            if (count > 1) {
+                if (pantoNext && !pantoNextWasDown)
+                    selectedPantograph = (selectedPantograph + 1) % count;
+                if (pantoPrev && !pantoPrevWasDown)
+                    selectedPantograph = (selectedPantograph - 1 + count) % count;
+            }
 
             if (pantoToggle && !pantoToggleWasDown) {
                 var target = pantographs.get(selectedPantograph);
@@ -304,8 +334,10 @@ public final class TrainControlInput {
             }
         }
 
+        pantoPrevWasDown = pantoPrev;
         pantoNextWasDown = pantoNext;
         pantoToggleWasDown = pantoToggle;
+        pantoAutoWasDown = pantoAuto;
     }
 
     /** Which pantograph the pantograph keys act on, for the panel to highlight. */

@@ -252,6 +252,7 @@ public final class TrainHudData {
         GEARS.keySet().removeIf(id -> !keep.test(id));
         PANTOGRAPHS.keySet().removeIf(id -> !keep.test(id));
         PANTOGRAPH_LOCKED.removeIf(id -> !keep.test(id));
+        AUTO_RAISE.removeIf(id -> !keep.test(id));
     }
 
     // ------------------------------------------------------------------
@@ -291,12 +292,51 @@ public final class TrainHudData {
         return PANTOGRAPHS.getOrDefault(trainId, java.util.List.of());
     }
 
+    /**
+     * Whether this train carries at least one real OVERHEAD pantograph, as opposed to only rail shoes.
+     *
+     * <p>The distinction decides whether the driver has electric controls at all. A rail-shoe train
+     * keeps upstream's behaviour - Create's W/S - so the cab must not appear on it, and the server
+     * reports it as CREATE mode to make that automatic. This predicate is what the client uses to keep
+     * a shoe's entry out of the "is there anything to operate" test, because a shoe in the list would
+     * otherwise make {@code isAtElectricTrainControls} true and draw a pantograph panel for a train
+     * that has no pantographs.
+     *
+     * <p>Empty list counts as false: no collector is not the same as a pantograph.
+     */
+    public static boolean hasOverheadPantograph(UUID trainId) {
+        for (var entry : pantographs(trainId)) {
+            if (!entry.railShoe())
+                return true;
+        }
+        return false;
+    }
+
     /** Whether raising a pantograph is barred until the next station. */
     public static boolean controlsLocked(UUID trainId) {
         return PANTOGRAPH_LOCKED.contains(trainId);
     }
 
-    public static void updatePantographs(UUID trainId, boolean locked, java.util.List<
+    /**
+     * Whether the driver's automatic-raise switch is on, per train.
+     *
+     * <p>Kept apart from the entry list for the same reason as {@link #PANTOGRAPH_LOCKED}: it is a
+     * property of the train's operation, not of any one arm, and the panel has to display it even
+     * while the list is momentarily empty.
+     *
+     * <p>Absent means OFF, which is the default and the safe direction: a train whose state has not
+     * arrived yet must not be drawn as if it were raising itself.
+     */
+    private static final java.util.Set<UUID> AUTO_RAISE =
+            java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    /** Whether the driver has turned automatic raising on for this train. */
+    public static boolean autoRaise(UUID trainId) {
+        return AUTO_RAISE.contains(trainId);
+    }
+
+    public static void updatePantographs(UUID trainId, boolean locked, boolean autoRaise,
+                                         java.util.List<
             com.george_vi.electroenergetics.content.railway_electrification.pantograph
                     .SyncTrainPantographsPacket.Entry> entries) {
         PANTOGRAPHS.put(trainId, java.util.List.copyOf(entries));
@@ -304,5 +344,9 @@ public final class TrainHudData {
             PANTOGRAPH_LOCKED.add(trainId);
         else
             PANTOGRAPH_LOCKED.remove(trainId);
+        if (autoRaise)
+            AUTO_RAISE.add(trainId);
+        else
+            AUTO_RAISE.remove(trainId);
     }
 }

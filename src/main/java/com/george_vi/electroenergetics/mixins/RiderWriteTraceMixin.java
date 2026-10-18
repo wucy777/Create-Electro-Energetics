@@ -55,9 +55,9 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  *
  * <h2>Cost</h2>
  *
- * <p>The proximity test is the only expensive part and is cached per tick, so it runs once per tick
- * rather than once per write. A stack frame is taken per write while a carriage is within
- * {@link #NEAR} Blocks - a few per tick - which is acceptable for a diagnostic build and is the
+ * <p>The arming test is the only expensive part and is cached per tick, so it runs once per tick
+ * rather than once per write. A stack frame is taken per write while the player is riding a carriage
+ * or has just left one - a few per tick - which is acceptable for a diagnostic build and is the
  * reason every line in the window can name its caller. Read-only: it never modifies a position or
  * a velocity.
  */
@@ -66,10 +66,6 @@ public class RiderWriteTraceMixin {
 
     @Unique
     private static final Logger electroEnergetics$LOG = LoggerFactory.getLogger("CEE-WRITE");
-
-    /** Recording radius in Blocks. Outside this the tracer does nothing at all. */
-    @Unique
-    private static final double NEAR = 24d;
 
     /**
      * A write dumps when it exceeds this multiple of the rider's own per-tick speed.
@@ -182,7 +178,69 @@ public class RiderWriteTraceMixin {
     private static final StringBuilder electroEnergetics$sb = new StringBuilder();
 
     /**
-     * Reports the write that just happened, if the local player is near a train carriage.
+     * Whether the tracer should record anything this tick.
+     *
+     * <p>Two cases only, and the second is the one the whole instrument exists for:
+     *
+     * <ul>
+     *   <li>the player IS a passenger on a carriage - the ordinary riding case;</li>
+     *   <li>the player WAS a passenger very recently - the dismount tick, which is when the throw
+     *       happens. A test on {@code isPassenger()} alone would switch the tracer off at exactly the
+     *       moment it needs to be watching, because the throw occurs on the tick the seat is given up:
+     *       {@code absMoveTo} runs after the passenger flag is already false.</li>
+     * </ul>
+     *
+     * <h2>Why proximity alone was wrong</h2>
+     *
+     * <p>The first version armed whenever a carriage was within 24 Blocks. On a real save
+     * that is most of the time - the log it produced had 4073 lines with {@code pax=0} against 127 with
+     * {@code pax=1} - and every one of those records was a player WALKING near a train, being nudged by
+     * {@code ContraptionCollider}'s contact push. At walking speed the scaled threshold is about
+     * 0.4 Blocks (2 x the per-tick travel), which an ordinary contact push exceeds, so the tracer
+     * dumped 70 times for displacements of 0.07 to 0.51 Blocks and not once for the anomaly it was
+     * built to catch. The budget was being spent on people walking past trains.
+     *
+     * <p>The dismount window is measured in ticks because the throw is a same-tick or next-tick event:
+     * {@link #DISMOUNT_WATCH_TICKS} covers the tick the seat is released plus a margin for the order in
+     * which the client applies the relocation.
+     */
+    @Unique
+    private static boolean electroEnergetics$shouldArm(LocalPlayer player) {
+        long tick = player.level().getGameTime();
+
+        if (player.isPassenger() && player.getVehicle()
+                instanceof com.simibubi.create.content.trains.entity.CarriageContraptionEntity) {
+            electroEnergetics$lastRidingTick = tick;
+            return true;
+        }
+
+        // Was riding moments ago: the dismount tick and the few after it. This is the window the
+        // instrument exists for, so it must survive the passenger flag going false.
+        if (electroEnergetics$lastRidingTick != Long.MIN_VALUE
+                && tick - electroEnergetics$lastRidingTick <= DISMOUNT_WATCH_TICKS) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Last tick at which the player was a passenger on a carriage.
+     *
+     * <p>{@code Long.MIN_VALUE} means "never, this session". Tested before subtracting, because
+     * {@code MIN_VALUE} is the one value that makes {@code tick - last} overflow into a small positive
+     * number and arm the tracer forever - the same sentinel trap this codebase has hit before.
+     */
+    @Unique
+    private static long electroEnergetics$lastRidingTick = Long.MIN_VALUE;
+
+    /** How long after leaving a seat the tracer keeps watching, in ticks. */
+    @Unique
+    private static final long DISMOUNT_WATCH_TICKS = 20L;
+
+    /**
+     * Reports the write that just happened, while the local player is riding a carriage or has just
+     * left one.
      *
      * <p>At RETURN, so the values reported are the ones actually applied.
      */
@@ -199,9 +257,7 @@ public class RiderWriteTraceMixin {
             // Proximity is the only costly part, so it is resolved once per tick and remembered.
             if (tick != electroEnergetics$cachedTick) {
                 electroEnergetics$cachedTick = tick;
-                electroEnergetics$armed = !player.level().getEntitiesOfClass(
-                        com.simibubi.create.content.trains.entity.CarriageContraptionEntity.class,
-                        player.getBoundingBox().inflate(NEAR)).isEmpty();
+                electroEnergetics$armed = electroEnergetics$shouldArm(player);
             }
             if (!electroEnergetics$armed)
                 return;

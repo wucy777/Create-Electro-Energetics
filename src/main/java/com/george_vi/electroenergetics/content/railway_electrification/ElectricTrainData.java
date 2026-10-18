@@ -46,6 +46,42 @@ public class ElectricTrainData {
     public boolean hasWorkingPantograph = false;
 
     /**
+     * The driver's AUTOMATIC-RAISE switch, which restores upstream's behaviour while it is on.
+     *
+     * <p>Off by default, and that default is the feature: how many pantographs are up is the driver's
+     * call, and the only writer of a raise was the driver's packet. This switch is the one deliberate
+     * exception, and it is a switch the driver holds.
+     *
+     * <p>It exists because a rigid carriage on a curve cannot keep its pantograph under the wire.
+     * The operator's track is a compact loop: heading into a bend the arm loses the contact, the
+     * automatic lowering fires, and by the time the train is straight again the speed has already
+     * fallen. Selective manual raising cannot fix that - it is not a decision problem, it is a
+     * frequency problem - so upstream's "raise whenever there is wire in reach" is the right
+     * behaviour for that track, and the driver should be able to ask for it.
+     *
+     * <p>When on, the raise condition is exactly upstream's: wire in reach, no further test. The
+     * automatic LOWERING that is already kept then completes the pair, so on a bendy line the arm
+     * rides the wire instead of dropping off it. A manual lowering while the switch is on does not
+     * stick - the next solve raises it again, which is what "automatic" means and is why the switch is
+     * the thing the driver turns off.
+     *
+     * <p>Deliberately NOT persisted per train: it is an operating habit, not a property of the
+     * consist, and a train reassembled should not inherit a mode nobody chose again. See the config
+     * default for the default.
+     */
+    public boolean autoRaisePantographs = false;
+
+    /**
+     * What {@link #autoRaisePantographs} was when the driver was last sent a sync.
+     *
+     * <p>Exists so the sender can tell "the switch just moved" from "nothing happened", and send
+     * immediately on the former. Same purpose as {@code lastSyncedControlsLocked}: a driver who
+     * pressed a key is looking at the panel, and a quarter-second of disagreement reads as a broken
+     * key rather than as latency.
+     */
+    public boolean lastSyncedAutoRaisePantographs = false;
+
+    /**
      * Which control scheme is driving this train right now.
      *
      * <p>Recomputed each solve. The distinction that matters is between the two states
@@ -67,7 +103,37 @@ public class ElectricTrainData {
      * which gate on it cannot disagree.
      */
     public boolean underElectricControl() {
-        return hasTractionMotors && controlMode != TrainControlMode.CREATE;
+        return hasTractionMotors && !railShoeOnly() && controlMode != TrainControlMode.CREATE;
+    }
+
+    /**
+     * Whether this train collects current through a RAIL CONTACT SHOE and nothing else.
+     *
+     * <p>Such a train keeps upstream's behaviour entirely: Create's W/S drive it, its speed bar is
+     * Create's, and none of this mod's lever, vigilance clock, traction model or ceiling apply. That
+     * is the operator's ruling, and the reasoning is that the two systems are not the same vehicle:
+     * "弓就是动车，靴就是地铁" - a pantograph is a mainline train, a third-rail shoe is a metro. A metro
+     * does not need a 350 km/h traction model, and imposing one on it would change how an upstream
+     * feature behaves for anyone who builds one.
+     *
+     * <p>Computed from the pantograph list rather than stored as a flag, so it cannot drift: a
+     * carriage added, removed or reassembled changes the answer on the next solve with no maintenance.
+     * A list is shoe-only when it is non-empty and EVERY entry is a rail shoe; an empty list is not
+     * this case at all (that train has no collector, so it is not an electric train and is handled by
+     * {@link #hasTractionMotors} being false).
+     *
+     * <p>Mixed consists resolve to the LEVER: "有受电弓就算我的". The operator does not build them - a
+     * train is either an EMU or a metro - but one had to be chosen, and a train carrying a pantograph
+     * is a mainline train with an odd extra collector, not a metro.
+     */
+    public boolean railShoeOnly() {
+        if (pantographs.isEmpty())
+            return false;
+        for (TrainPantographEntry entry : pantographs) {
+            if (entry.type != CEEPantographTypes.RAIL_CONTACT_SHOE.get())
+                return false;
+        }
+        return true;
     }
 
     /**

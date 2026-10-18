@@ -53,9 +53,13 @@ import java.util.UUID;
  *               been used. Sent separately from each entry's state because it is a rule about the
  *               driver rather than about any one pantograph, and the panel has to be able to say
  *               WHY a raise did nothing - otherwise the key appears broken.
+ * @param autoRaise the driver's automatic-raise switch. Sent because the panel has to show whether it
+ *                  is on: with it on, a manual lowering does not stick, and a driver who saw the
+ *                  switch state nowhere would read that as the key being broken.
  * @param entries one per pantograph, in carriage order
  */
-public record SyncTrainPantographsPacket(UUID trainId, boolean locked, List<Entry> entries)
+public record SyncTrainPantographsPacket(UUID trainId, boolean locked, boolean autoRaise,
+                                         List<Entry> entries)
         implements ClientboundPacketPayload {
 
     /**
@@ -65,8 +69,10 @@ public record SyncTrainPantographsPacket(UUID trainId, boolean locked, List<Entr
      * @param localPos the pantograph's position in its carriage's local space
      * @param active whether the driver has it raised
      * @param reachable whether catenary is within reach of it right now
+     * @param railShoe whether this is a rail contact shoe rather than an overhead pantograph
      */
-    public record Entry(int carriageIndex, BlockPos localPos, boolean active, boolean reachable) {}
+    public record Entry(int carriageIndex, BlockPos localPos, boolean active, boolean reachable,
+                        boolean railShoe) {}
 
     /**
      * Written by hand rather than composed: the payload is a variable-length list of records, which
@@ -78,28 +84,35 @@ public record SyncTrainPantographsPacket(UUID trainId, boolean locked, List<Entr
         public SyncTrainPantographsPacket decode(ByteBuf buffer) {
             UUID trainId = UUIDUtil.STREAM_CODEC.decode(buffer);
             boolean locked = buffer.readBoolean();
+            // Read in the same order it is written. Placed next to `locked` rather than folded into
+            // the per-entry flags, because it is a property of the TRAIN (one switch for the whole
+            // consist) exactly as `locked` is - putting a train-level flag inside the per-pantograph
+            // byte would mean repeating it on every entry and inviting the copies to disagree.
+            boolean autoRaise = buffer.readBoolean();
             int count = buffer.readUnsignedByte();
             List<Entry> entries = new ArrayList<>(count);
             for (int i = 0; i < count; i++) {
                 int carriageIndex = buffer.readUnsignedByte();
                 BlockPos localPos = BlockPos.STREAM_CODEC.decode(buffer);
                 int flags = buffer.readUnsignedByte();
-                entries.add(new Entry(carriageIndex, localPos, (flags & 1) != 0, (flags & 2) != 0));
+                entries.add(new Entry(carriageIndex, localPos, (flags & 1) != 0,
+                        (flags & 2) != 0, (flags & 4) != 0));
             }
-            return new SyncTrainPantographsPacket(trainId, locked, entries);
+            return new SyncTrainPantographsPacket(trainId, locked, autoRaise, entries);
         }
 
         @Override
         public void encode(ByteBuf buffer, SyncTrainPantographsPacket p) {
             UUIDUtil.STREAM_CODEC.encode(buffer, p.trainId);
             buffer.writeBoolean(p.locked);
+            buffer.writeBoolean(p.autoRaise);
             // A consist with more than 255 pantographs does not exist; clamped rather than
             // growing the field, since the count is what every other field's size depends on.
             buffer.writeByte(Math.min(255, p.entries.size()));
             for (Entry e : p.entries) {
                 buffer.writeByte(e.carriageIndex & 0xFF);
                 BlockPos.STREAM_CODEC.encode(buffer, e.localPos);
-                buffer.writeByte((e.active ? 1 : 0) | (e.reachable ? 2 : 0));
+                buffer.writeByte((e.active ? 1 : 0) | (e.reachable ? 2 : 0) | (e.railShoe ? 4 : 0));
             }
         }
     };
@@ -107,7 +120,7 @@ public record SyncTrainPantographsPacket(UUID trainId, boolean locked, List<Entr
     @Override
     @OnlyIn(Dist.CLIENT)
     public void handle(LocalPlayer player) {
-        TrainHudData.updatePantographs(trainId, locked, entries);
+        TrainHudData.updatePantographs(trainId, locked, autoRaise, entries);
     }
 
     @Override

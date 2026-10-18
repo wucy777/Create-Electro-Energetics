@@ -81,17 +81,54 @@ public final class TrainControlKeys {
      * the hotbar. Stepping through them also means the driver can see which one they are about to
      * move before they move it, which matters because the wrong one drops the train's supply.
      */
+    /**
+     * Step the selected pantograph DOWN the list (towards the first carriage).
+     *
+     * <p>Left/right rather than letter keys, because the arrow cluster is already the cab's control
+     * surface: up/down notch the lever, so left/right choosing WHICH pantograph those keys and the
+     * toggle key act on is the same gesture in a second axis. It also frees N, which was an
+     * arbitrary letter.
+     *
+     * <p>A is taken - it steers trains at junctions, and that is Create's own binding, not this
+     * mod's to move. So selection is the arrow keys only, and the whole cluster reads as one control
+     * panel: up/down the lever, left/right the pantograph, Enter to engage.
+     */
+    public static final KeyMapping PANTOGRAPH_PREV = new KeyMapping(
+            "key.electroenergetics.pantograph_prev",
+            InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_LEFT, CATEGORY);
+
+    /** Step the selected pantograph UP the list (towards the last carriage). */
     public static final KeyMapping PANTOGRAPH_NEXT = new KeyMapping(
             "key.electroenergetics.pantograph_next",
-            InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_N, CATEGORY);
+            InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_RIGHT, CATEGORY);
 
     /** Raise or lower the selected pantograph, depending on how it currently stands. */
     public static final KeyMapping PANTOGRAPH_TOGGLE = new KeyMapping(
             "key.electroenergetics.pantograph_toggle",
             InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_M, CATEGORY);
 
+    /**
+     * Turn automatic raising on or off FOR THIS TRAIN.
+     *
+     * <p>Per train, not global: the switch lives on the train's own {@code ElectricTrainData}, so two
+     * consists in the same world keep their own settings and a driver who turns it on for the bendy
+     * loop does not silently change every other train on the map.
+     *
+     * <p>A switch, not an action, and that is why it is a third key rather than a mode of the
+     * existing two. On, it restores upstream's behaviour - wire in reach, therefore up - which is
+     * what a compact line with curves needs: a rigid carriage loses the contact laterally on every
+     * bend, and manual raising cannot be pressed often enough. Off is the default and the operator's
+     * original rule: how many pantographs are up is the driver's call.
+     *
+     * <p>Comma rather than a letter: the letters around the movement hand are taken by the cab and by
+     * the pack, and comma does not collide with either. It is rebindable like every other cab key.
+     */
+    public static final KeyMapping PANTOGRAPH_AUTO = new KeyMapping(
+            "key.electroenergetics.pantograph_auto",
+            InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_COMMA, CATEGORY);
+
     private static final KeyMapping[] ALL = {LEVER_UP, LEVER_DOWN, CONFIRM, ENGAGE, EMERGENCY,
-            PANTOGRAPH_NEXT, PANTOGRAPH_TOGGLE};
+            PANTOGRAPH_PREV, PANTOGRAPH_NEXT, PANTOGRAPH_TOGGLE, PANTOGRAPH_AUTO};
 
     private TrainControlKeys() {}
 

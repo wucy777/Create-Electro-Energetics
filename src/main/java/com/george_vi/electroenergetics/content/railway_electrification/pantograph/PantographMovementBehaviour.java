@@ -35,6 +35,21 @@ import static net.minecraft.world.level.block.HorizontalDirectionalBlock.FACING;
 
 public class PantographMovementBehaviour implements MovementBehaviour {
 
+    /**
+     * Sideways tolerance for finding catenary, in Blocks - client side.
+     *
+     * <p>Must equal {@code CEEPantographTypes.CONTACT_HALF_WIDTH} and therefore the server's
+     * {@code sidewaysReach}. Written as its own constant rather than imported because the type
+     * registry is loaded from a datapack registry on the client too, but reading it here would mean
+     * a lookup on a hot path (every catenary segment, every tick, for every arm) to fetch a number
+     * that is fixed by the model.
+     *
+     * <p>The coupling is deliberate and asserted by {@code _cache/check_pantograph_reach.py}: if the
+     * two ever drift, the visible symptom is an arm dropping into a bend while the train is still
+     * drawing current, which is exactly the bug this constant replaced.
+     */
+    private static final float CONTACT_HALF_WIDTH = 3.0f;
+
     @Override
     public void tick(MovementContext context) {
         float targetExtensionState = context.blockEntityData.getFloat("ExtensionState");
@@ -428,7 +443,6 @@ public class PantographMovementBehaviour implements MovementBehaviour {
     }
 
     Vec3 checkCatenary(Vec3 start, Vec3 end, Vec3 pantographPos, MovementContext context, float halfPantoReach) {
-
         double t = 0;
 
         Vec3 ab = end.subtract(start);
@@ -447,7 +461,16 @@ public class PantographMovementBehaviour implements MovementBehaviour {
         Vec3 distance = pantographPos.subtract(closest);
         distance = VecHelper.rotate(distance, -context.contraption.entity.getViewYRot(0), Direction.Axis.Y);
         float xTol = (float) ((distance.y + halfPantoReach) * 0.2f + 0.125f);
-        if (Math.abs(distance.z) < 1.5 && Math.abs(distance.x) < xTol && Math.abs(distance.y) < halfPantoReach)
+        // The sideways tolerance must be the SAME as the server's `sidewaysReach`, or the arm is drawn
+        // as having lost the wire while the train is still collecting from it.
+        //
+        // It used to be a hard-coded 1.5, which was narrower than the server's 2.0 and narrower than
+        // the strip itself - so the two sides disagreed twice over, and the visible symptom was an arm
+        // dropping into a bend while power was still flowing. Now both read the same type field, so a
+        // future change to the type cannot leave the client behind again.
+        float sideways = CONTACT_HALF_WIDTH;
+        if (Math.abs(distance.z) < sideways && Math.abs(distance.x) < xTol
+                && Math.abs(distance.y) < halfPantoReach)
             return closest;
 
         return null;

@@ -88,7 +88,15 @@ public class CatenaryModule {
             // BOTH are required, and they may sit on different carriages. Motors without a
             // pantograph can never be energised, and pantographs without a motor can never move the
             // train; neither is an electric train in any useful sense, so neither gets the lever.
+            //
+            // A train that collects ONLY through rail contact shoes is still an electric train in the
+            // sense that it runs on this mod's electricity, but the operator's ruling is that it keeps
+            // UPSTREAM's behaviour: Create's W/S, Create's speed bar, none of this mod's lever,
+            // vigilance clock, traction model or ceiling - "弓就是动车，靴就是地铁". So it is recorded as
+            // an electric train for the electrical solve, and `underElectricControl()` refuses it,
+            // which is the single gate every driving path asks.
             trainData.hasTractionMotors = trainHasMotor && !trainData.pantographs.isEmpty();
+            boolean railShoeOnly = trainData.railShoeOnly();
 
             // The reach flags are cleared per carriage below, NOT for the whole consist here.
             //
@@ -233,6 +241,33 @@ public class CatenaryModule {
                             // the driver is ALLOWED to raise it.
                             pantograph.reachable = true;
 
+                            // AUTOMATIC RAISING, behind the driver's switch - and it is the mirror
+                            // image of the automatic lowering further down.
+                            //
+                            // Off by default, because "how many pantographs are up is the driver's
+                            // call". On, it restores upstream's behaviour exactly: wire in reach,
+                            // therefore up, with no further test.
+                            //
+                            // The reason the switch exists at all is a rigid carriage on a curve. The
+                            // arm is fixed in the carriage's frame while the catenary follows the
+                            // arc, so on a tight enough bend the contact leaves reach laterally; the
+                            // lowering below then drops it, and by the time the track straightens the
+                            // train has already lost speed. That is not something the driver can fix
+                            // by pressing raise at the right moment - it would need pressing on every
+                            // bend - so it is a switch rather than a key.
+                            //
+                            // Setting `active` here makes this the second writer of a raise in the
+                            // mod, which is exactly what the single-writer invariant was protecting.
+                            // It is allowed because it is not a silent raise: the driver turned the
+                            // switch on. The invariant is now "no raise without either the driver's
+                            // packet or the driver's switch", and both are the driver.
+                            if (!raised && trainData.autoRaisePantographs)
+                                pantograph.active = true;
+
+                            // A raised this tick (by the driver earlier, or by the switch just above)
+                            // is what the electrical work below requires.
+                            raised = pantograph.active;
+
                             // The electrical work below only applies to a raised pantograph. A
                             // lowered one that happens to be under wire must NOT collect current,
                             // which is the whole point of the driver's handle - and it must not set
@@ -292,10 +327,8 @@ public class CatenaryModule {
                     // pantograph cannot be left pressing against nothing, and the driver has
                     // plainly lost the wire either way.
                     //
-                    // There is deliberately NO automatic raising to match it. The operator's
-                    // decision is that how many pantographs are up is the driver's call, so a
-                    // pantograph only ever goes up because the driver asked for it - and only
-                    // while `reachable` is true, which is checked in the raise command.
+                    // Its counterpart, automatic RAISING, is not here: it lives where `reachable` is
+                    // set true, and only runs behind the driver's own switch. See that site.
                     // (reachable has just been left false for this pantograph: it is cleared per
                     // carriage before the loop and is set true only on a geometry match, which did
                     // not happen for this one.)
@@ -322,7 +355,14 @@ public class CatenaryModule {
                 // ever happen. The rest of this method is about traction this train does not have,
                 // which is why it can be skipped; the mode is not.
                 trainData.hasWorkingPantograph = false;
-                TrainControlModeLogic.update(trainData, train.speed, false);
+                // Same rule on this path: a rail-shoe-only train is Create's, unconditionally. Deciding
+                // it here as well as on the connected path is not redundancy - this is the path a
+                // shoe train takes whenever it is between rails, and leaving it out would put the
+                // train back under this mod's controls for the length of every gap.
+                if (railShoeOnly)
+                    trainData.controlMode = TrainControlMode.CREATE;
+                else
+                    TrainControlModeLogic.update(trainData, train.speed, false);
 
                 // The pantograph and lock state still has to reach the driver from here. This is the
                 // path taken when nothing is collecting current, which is exactly when the lock
@@ -601,7 +641,17 @@ public class CatenaryModule {
             // `active` is passed rather than read back from trainData.isPowered, because that field
             // is only assigned further down this method - using it here would decide the mode from
             // the previous tick's supply.
-            TrainControlModeLogic.update(trainData, train.speed, active);
+            //
+            // A rail-shoe-only train is reported as CREATE, unconditionally. That is not a hack to
+            // suppress the panel: CREATE is exactly the state "Create's controls are in charge and
+            // nothing of this mod's driving machinery applies", which is the operator's ruling for
+            // these trains. Reporting it here means every consumer - the server's gear law and
+            // maxSpeed, and the client's panel and key handling - agrees without each having to learn
+            // a new special case, and it keeps the two sides from ever disagreeing about it.
+            if (railShoeOnly)
+                trainData.controlMode = TrainControlMode.CREATE;
+            else
+                TrainControlModeLogic.update(trainData, train.speed, active);
 
             for (Map.Entry<Integer, Vec3> ce : positions.entrySet()) {
                 Integer carriageID = ce.getKey();
@@ -775,7 +825,13 @@ public class CatenaryModule {
     private void syncPantographs(Train train, ElectricTrainData trainData, TrainDriverState driver) {
         trainData.ticksSincePantographSync++;
         boolean lockChanged = trainData.lastSyncedControlsLocked != driver.controlsLocked;
-        if (!lockChanged && trainData.ticksSincePantographSync < PANTOGRAPH_SYNC_INTERVAL)
+        // The switch state is sent on change for the same reason the lock is: the driver pressed a key
+        // and is looking at the panel. Waiting for the five-tick keep-alive would leave the indicator
+        // disagreeing with the key for a quarter of a second, which reads as the key not having worked.
+        boolean autoRaiseChanged =
+                trainData.lastSyncedAutoRaisePantographs != trainData.autoRaisePantographs;
+        if (!lockChanged && !autoRaiseChanged
+                && trainData.ticksSincePantographSync < PANTOGRAPH_SYNC_INTERVAL)
             return;
 
         // Walked from the level rather than the server's player list: the driver is by definition
@@ -798,15 +854,18 @@ public class CatenaryModule {
                 continue;
             for (TrainPantographEntry pe : list.electroEnergetics$getPantographList()) {
                 entries.add(new SyncTrainPantographsPacket.Entry(
-                        i, pe.originalPos, pe.active, pe.reachable));
+                        i, pe.originalPos, pe.active, pe.reachable,
+                        pe.type == CEEPantographTypes.RAIL_CONTACT_SHOE.get()));
             }
         }
 
         CatnipServices.NETWORK.sendToClient(driverPlayer,
-                new SyncTrainPantographsPacket(train.id, driver.controlsLocked, entries));
+                new SyncTrainPantographsPacket(train.id, driver.controlsLocked,
+                        trainData.autoRaisePantographs, entries));
 
         trainData.ticksSincePantographSync = 0;
         trainData.lastSyncedControlsLocked = driver.controlsLocked;
+        trainData.lastSyncedAutoRaisePantographs = trainData.autoRaisePantographs;
     }
 
     /** Voltage the catenary is nominally at; used for creative-supply trains. */
