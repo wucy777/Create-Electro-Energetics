@@ -17,6 +17,7 @@
     "MultiPlayerGameModeMixin",
     "RiderFlightRecorderMixin",
     "RiderWriteTraceMixin",
+    "SeatRotationTraceMixin",
     "SchematicRendererMixin",
     "TrainHUDMixin"
   ],
