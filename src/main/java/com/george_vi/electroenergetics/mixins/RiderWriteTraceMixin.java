@@ -395,7 +395,7 @@ public class RiderWriteTraceMixin {
                     .append(" veh=").append(player.getVehicle() == null ? "-"
                             : String.valueOf(player.getVehicle().getId()))
                     .append(" sp=").append(player.onGround() ? "1" : "0")
-                    .append(" np=").append(player.isNoPhysics() ? "1" : "0")
+                    .append(" np=").append(player.noPhysics ? "1" : "0")
                     .append(" own=(").append(fmt(player.getDeltaMovement().x)).append(',')
                     .append(fmt(player.getDeltaMovement().y)).append(',')
                     .append(fmt(player.getDeltaMovement().z)).append(')')
