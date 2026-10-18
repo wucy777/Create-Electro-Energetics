@@ -5,13 +5,16 @@ import com.george_vi.electroenergetics.content.railway_electrification.ElectricM
 import com.george_vi.electroenergetics.content.railway_electrification.ElectricTrainData;
 import com.george_vi.electroenergetics.mixin_interfaces.ICEETrainExtension;
 import com.llamalad7.mixinextras.injector.ModifyExpressionValue;
+import com.simibubi.create.content.contraptions.AbstractContraptionEntity;
 import com.simibubi.create.content.trains.entity.Carriage;
 import com.simibubi.create.content.trains.entity.CarriageContraptionEntity;
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Player;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.ModifyVariable;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 import java.util.Collection;
@@ -90,5 +93,59 @@ public class CarriageContraptionEntityMixin {
         // further reports, and there is no event to catch. See TrainDriverState.tickSpace.
         if (heldControls.contains(4))
             data.driver.setSpaceHeld();
+    }
+
+    /**
+     * Carry a seated player without the collision test, on a train faster than Create's design.
+     *
+     * <h2>The defect this fixes</h2>
+     *
+     * <p>Create positions riders through {@code AbstractContraptionEntity.positionRider}, which hands
+     * the target position to a {@code MoveFunction}. Vanilla's is collision-aware - that is what makes
+     * a passenger slide along a wall instead of through it, and on an ordinary contraption moving a
+     * Block or two a tick it is exactly right.
+     *
+     * <p>At this mod's speeds it is not. A carriage at 100 Blocks/Second advances 5 Blocks per tick
+     * against a player box 0.6 x 1.8 x 0.6, so a 5-Block step resolves as "you have run into
+     * something" and the move is clipped or refused. Measured on a live session at 80 Blocks/Second:
+     * rider displacement pinned at 0.90 Blocks per tick while the carriage moved 4.03, and then, on the
+     * tick the seat was left, a 16.08 Block jump as the accumulated deficit settled at once. That is
+     * the throw. The same clipping lets a player walk through the floor and walls at speed, and makes
+     * jumping appear to drift backwards: own velocity 4-5 Blocks/s against a train's 60-80.
+     *
+     * <h2>What this does</h2>
+     *
+     * <p>Replaces the callback with a direct {@code setPos}, for an electric train only and only for
+     * the seated player. The destination comes from {@code contraption.getSeatOf}, so the rider is
+     * inside the carriage by construction - there is nothing for a collision test to resolve except
+     * the carriage's own boxes, which is what it kept hitting.
+     *
+     * <p>Applied to the callback argument rather than to the resulting position, so ordinary Create
+     * trains keep vanilla behaviour unchanged.
+     *
+     * <p>{@code hasTractionMotors} rather than {@code underElectricControl}: the carry must stay rigid
+     * while the train is coasting or handed to Create as well, because those are the states in which a
+     * player is most likely aboard at speed. A fuel train has no motors and is untouched.
+     */
+    @ModifyVariable(
+            method = "positionRider(Lnet/minecraft/world/entity/Entity;"
+                    + "Lnet/minecraft/world/entity/Entity$MoveFunction;)V",
+            at = @At("HEAD"),
+            argsOnly = true,
+            index = 2,
+            remap = false)
+    private Entity.MoveFunction electroEnergetics$carryWithoutCollision(
+            Entity.MoveFunction original,
+            Entity passenger,
+            CarriageContraptionEntity self) {
+        if (!(passenger instanceof Player))
+            return original;
+        Carriage carriage = self.getCarriage();
+        if (carriage == null || carriage.train == null)
+            return original;
+        ElectricTrainData data = ((ICEETrainExtension) carriage.train).getElectricTrainData();
+        if (data == null || !data.hasTractionMotors)
+            return original;
+        return (entity, x, y, z) -> entity.setPos(x, y, z);
     }
 }
