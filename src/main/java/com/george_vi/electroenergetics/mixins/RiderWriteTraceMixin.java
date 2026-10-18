@@ -323,13 +323,32 @@ public class RiderWriteTraceMixin {
             // positionRider sets the position directly and never touches the passenger's velocity. A
             // threshold built on that reads 0, and every write would dump.
             //
-            // The first write of a tick is the ordinary carry (positionRider), so the distance from the
-            // previous tick's last position to it IS the travel per tick - measured, from the same data
-            // the anomaly is measured from. Later writes in the same tick are compared against it.
+            // <h2>The self-calibration trap, and why the first write is now judged too</h2>
+            //
+            // The first write of an ordinary tick is the carry, so the distance from the previous
+            // tick's last position to it IS the travel per tick. But on the tick that matters it is not
+            // the carry: it IS the throw. Measured on a live session, the dismount tick's first write
+            // moved the player 11.95 Blocks, so this line set tickTravel = 11.95, the threshold became
+            // 23.90, and the 11.95 was below it - the anomaly raised the bar that was meant to catch it.
+            //
+            // That is the third form of the same mistake in this instrument: calibrating the
+            // observation with the thing being observed. (First: a constant equal to the top-speed
+            // carry. Second: a threshold that a stopped train could drive to zero.)
+            //
+            // So the FIRST write is now judged like every other write, against the previous tick's
+            // travel, and a first write that already exceeds the bound does not become the new
+            // baseline. The carry of the next tick re-establishes it.
             if (electroEnergetics$seq == 1) {
-                electroEnergetics$tickTravel = electroEnergetics$hasPrevTick
+                double measured = electroEnergetics$hasPrevTick
                         ? Math.hypot(x - electroEnergetics$prevTickX, z - electroEnergetics$prevTickZ)
                         : 0d;
+                // Keep the previous tick's figure when this first write is itself an outlier, so an
+                // anomaly cannot define the scale it is compared against.
+                double previous = electroEnergetics$tickTravel;
+                if (previous < MIN_TRAVEL || measured < previous * DUMP_FACTOR) {
+                    electroEnergetics$tickTravel = measured;
+                }
+                // else: leave tickTravel at the previous tick's value - this write is the anomaly.
             }
 
             electroEnergetics$sb.setLength(0);
