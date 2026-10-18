@@ -97,7 +97,6 @@ public class CatenaryModule {
             // an electric train for the electrical solve, and `underElectricControl()` refuses it,
             // which is the single gate every driving path asks.
             trainData.hasTractionMotors = trainHasMotor && !trainData.pantographs.isEmpty();
-            boolean railShoeOnly = trainData.railShoeOnly();
 
             // The reach flags are cleared per carriage below, NOT for the whole consist here.
             //
@@ -360,7 +359,7 @@ public class CatenaryModule {
                 // it here as well as on the connected path is not redundancy - this is the path a
                 // shoe train takes whenever it is between rails, and leaving it out would put the
                 // train back under this mod's controls for the length of every gap.
-                if (railShoeOnly)
+                if (trainData.railShoeOnly())
                     trainData.controlMode = TrainControlMode.CREATE;
                 else
                     TrainControlModeLogic.update(trainData, train.speed, false);
@@ -649,7 +648,13 @@ public class CatenaryModule {
             // these trains. Reporting it here means every consumer - the server's gear law and
             // maxSpeed, and the client's panel and key handling - agrees without each having to learn
             // a new special case, and it keeps the two sides from ever disagreeing about it.
-            if (railShoeOnly)
+            //
+            // Asks the predicate rather than a local variable, for a reason found the hard way: this
+            // block is OUTSIDE the per-train loop, so a variable declared inside that loop is not in
+            // scope here, and the first version of this code did not compile on CI. The predicate is
+            // a pure function of the train's own data, so calling it is both simpler and immune to
+            // that mistake.
+            if (trainData.railShoeOnly())
                 trainData.controlMode = TrainControlMode.CREATE;
             else
                 TrainControlModeLogic.update(trainData, train.speed, active);
