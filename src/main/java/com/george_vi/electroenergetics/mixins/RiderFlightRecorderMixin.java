@@ -200,8 +200,23 @@ public class RiderFlightRecorderMixin {
             if (electroEnergetics$ringCount < CAP)
                 electroEnergetics$ringCount++;
 
-            if (!why.isEmpty())
+            if (!why.isEmpty()) {
+                // WHO moved the player, printed with the anomaly rather than reconstructed afterwards.
+                //
+                // This recorder samples position once per tick, at RETURN, so a tick that teleports the
+                // player out and back looks like no movement at all, and a tick that teleports them in
+                // one direction looks like one anonymous step. Three separate attempts to attribute
+                // that step by reading code were wrong, because the write happens inside the tick and
+                // leaves no trace at the tick boundary.
+                //
+                // The stack frame at the moment the step is observed is the only thing that names the
+                // writer without guessing. The writer is not necessarily on THIS stack - the step may
+                // have been applied earlier in the same tick - so this prints what it can see and says
+                // so, rather than implying the top frame is the culprit.
+                String frames = electroEnergetics$frames();
+                why += " | STACK@" + frames;
                 electroEnergetics$dump(why.trim(), tick);
+            }
 
             electroEnergetics$wasPassenger = player.isPassenger();
             electroEnergetics$lastPos = player.position();
@@ -262,5 +277,37 @@ public class RiderFlightRecorderMixin {
             if (entry != null)
                 electroEnergetics$LOG.info("   -{} {}", back, entry);
         }
+    }
+
+    /**
+     * A short stack trace, taken where the anomaly is observed.
+     *
+     * <p>Names the code that was running, which is the one piece of evidence the position snapshots
+     * cannot carry: a teleport applied earlier in the same tick is invisible at the tick boundary.
+     *
+     * <p>Starts above this class and above the mixin plumbing, and stops at the first five frames that
+     * are not reflection or logger internals - enough to name a caller chain without filling the log.
+     */
+    @Unique
+    private static String electroEnergetics$frames() {
+        StackTraceElement[] stack = new Throwable().getStackTrace();
+        StringBuilder sb = new StringBuilder();
+        int taken = 0;
+        for (StackTraceElement e : stack) {
+            String cls = e.getClassName();
+            if (cls.startsWith("com.george_vi.electroenergetics.mixins.RiderFlightRecorderMixin"))
+                continue;
+            if (cls.startsWith("java.lang.Thread") || cls.startsWith("org.slf4j")
+                    || cls.startsWith("java.lang.Throwable"))
+                continue;
+            if (taken > 0)
+                sb.append(" <- ");
+            sb.append(cls.substring(cls.lastIndexOf('.') + 1))
+              .append(':').append(e.getLineNumber())
+              .append('(').append(e.getMethodName()).append(')');
+            if (++taken >= 5)
+                break;
+        }
+        return sb.length() == 0 ? "?" : sb.toString();
     }
 }

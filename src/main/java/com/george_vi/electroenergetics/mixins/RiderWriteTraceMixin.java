@@ -208,10 +208,30 @@ public class RiderWriteTraceMixin {
     private static boolean electroEnergetics$shouldArm(LocalPlayer player) {
         long tick = player.level().getGameTime();
 
-        if (player.isPassenger() && player.getVehicle()
-                instanceof com.simibubi.create.content.trains.entity.CarriageContraptionEntity) {
-            electroEnergetics$lastRidingTick = tick;
-            return true;
+        // Riding: any passenger state at all, at first, and then narrowed.
+        //
+        // The first version required `getVehicle() instanceof CarriageContraptionEntity`, and on a real
+        // session it armed ZERO times: not one line in the log, while the flight recorder sitting in
+        // the same tick recorded `pax=1 veh=183` from the same player. Whatever the vehicle is at that
+        // instant - and `setPosRaw` runs at several points inside a tick, including during the
+        // dismount - the narrower test did not match it.
+        //
+        // So the riding test is now the same one the flight recorder already proves works: a passenger
+        // whose vehicle is a contraption entity. `AbstractContraptionEntity` is the supertype of every
+        // carriage entity and of nothing this should exclude, and it is checked by CLASS NAME rather
+        // than by importing Create's exact type, so a subclass or a Create-side wrapper still matches.
+        if (player.isPassenger() && player.getVehicle() != null) {
+            Entity vehicle = player.getVehicle();
+            if (vehicle instanceof com.simibubi.create.content.contraptions.AbstractContraptionEntity
+                    || vehicle.getClass().getName().contains("ContraptionEntity")) {
+                electroEnergetics$lastRidingTick = tick;
+                if (!electroEnergetics$reportedFirstArm) {
+                    electroEnergetics$reportedFirstArm = true;
+                    electroEnergetics$LOG.info("ARMED on vehicle class {} id={}",
+                            vehicle.getClass().getSimpleName(), vehicle.getId());
+                }
+                return true;
+            }
         }
 
         // Was riding moments ago: the dismount tick and the few after it. This is the window the
@@ -233,6 +253,17 @@ public class RiderWriteTraceMixin {
      */
     @Unique
     private static long electroEnergetics$lastRidingTick = Long.MIN_VALUE;
+
+    /**
+     * Whether the tracer has announced arming once, so the log proves it armed at all.
+     *
+     * <p>Added after a session produced ZERO tracer lines while the player was demonstrably riding: the
+     * arming predicate had been rejecting every tick, and nothing in the output said so. "No output" is
+     * ambiguous between "never armed" and "armed but saw nothing worth dumping", and one line at the
+     * first successful arm removes that ambiguity for good - at the cost of a single log line.
+     */
+    @Unique
+    private static boolean electroEnergetics$reportedFirstArm = false;
 
     /** How long after leaving a seat the tracer keeps watching, in ticks. */
     @Unique
