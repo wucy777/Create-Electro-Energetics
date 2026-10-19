@@ -24,7 +24,7 @@
     "defaultRequire": 1
   },
   "mixins": [
-    "ChunkTickTraceMixin",
+    "ServerMoveTraceMixin",
     "CarriageChunkProbeMixin",
     "BlockStateBaseMixin",
     "CarriageContraptionEntityMixin",
