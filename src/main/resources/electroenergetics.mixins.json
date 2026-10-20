@@ -24,7 +24,7 @@
     "defaultRequire": 1
   },
   "mixins": [
-    "SeatGapTraceMixin",
+    "DismountLocationMixin",
     "CarriageChunkProbeMixin",
     "BlockStateBaseMixin",
     "CarriageContraptionEntityMixin",
