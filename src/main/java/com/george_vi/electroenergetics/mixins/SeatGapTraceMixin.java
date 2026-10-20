@@ -14,49 +14,62 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
- * Measures the gap between where the seat says the player should be and where the player actually is,
- * on both sides, every tick.
+ * Measures whether a carry actually lands the rider on the seat, by comparing the position the carry
+ * asks for with the position the rider has AFTER the carry has run.
  *
- * <h2>The measurement this replaces, and why it failed</h2>
+ * <h2>What the previous probe proved, and what it left</h2>
  *
- * <p>Watching the move packet showed nothing: across 330 samples the server's position for the rider
- * agreed with the client's packet to within 0.152 Blocks, and the player was a passenger in every one.
- * So no correction packet is being sent, and the throw is not a server disagreement.
+ * <p>Measuring the gap BEFORE the carry showed it climbing from about 1.7 Blocks to 7-10.5 Blocks on the
+ * client while staying at 1.9-2.2 on the server, and it showed that the seat position equals the
+ * carriage anchor exactly (offset 0.00 on every sample). So the seat computation is not drifting - the
+ * rider simply is not arriving at the seat.
  *
- * <p>The throw is still there, and it is still about three ticks of carriage travel. Which means the
- * seat position and the player's position drift apart WITHIN the tick, and only the dismount reveals it -
- * the carry keeps overwriting the player to the seat, so the gap is invisible until the carry stops.
+ * <p>A gap that grows across ticks means each carry moves the rider LESS than the carriage advanced. The
+ * carry runs (a later sample exists), it is asked for the right destination, and the rider ends up short.
  *
- * <p>So this prints the gap itself, before and after the carry runs:
+ * <h2>Why this measures AFTER</h2>
+ *
+ * <p>Capturing the same rider's position immediately after {@code positionRider} returns, and comparing
+ * it with the destination printed on entry, separates the two remaining possibilities in one line:
  *
  * <pre>
- *   SEATGAP side=CLIENT|SERVER seat=(x,y,z) player=(x,y,z) gap=.. anchor=(x,y,z) partial=..
+ *   CARRY side=.. target=(..) arrived=(..) short=.. gapBefore=..
  * </pre>
  *
- * <p>{@code seat} is {@code getPassengerPosition(player, 1)} - the destination the carry will use.
- * {@code gap} is the distance from that destination to where the player currently is. On a healthy tick
- * it is the ordinary carry distance; if it is several multiples of that, the seat is describing a
- * position several ticks away and the carry is being asked to teleport.
+ * <p>{@code short} is how far short of the target the rider actually ended up. Non-zero means the move
+ * itself is being clipped between the call and the result - which is what a collision-aware
+ * {@code MoveFunction} does when a single step is large. Zero means the rider arrived and the next tick's
+ * gap was opened somewhere else.
  *
  * <h2>Cost</h2>
  *
- * <p>One line per 20 ticks per rider, on both sides. Nothing is computed when there is no player
- * passenger. Removed once the cause is known.
+ * <p>Two position reads and a subtraction per 20 rider-ticks. Nothing when there is no player passenger.
  */
 @Mixin(value = AbstractContraptionEntity.class, remap = false)
 public class SeatGapTraceMixin {
 
     @Unique
-    private static final Logger electroEnergetics$LOG = LoggerFactory.getLogger("CEE-SEATGAP");
+    private static final Logger electroEnergetics$LOG = LoggerFactory.getLogger("CEE-CARRY");
 
     @Unique
     private static int electroEnergetics$n;
+
+    @Unique
+    private static Vec3 electroEnergetics$target;
+
+    @Unique
+    private static Vec3 electroEnergetics$before;
+
+    @Unique
+    private static boolean electroEnergetics$tracing;
 
     @Inject(
             method = "positionRider(Lnet/minecraft/world/entity/Entity;"
                     + "Lnet/minecraft/world/entity/Entity$MoveFunction;)V",
             at = @At("HEAD"), remap = false)
-    private void electroEnergetics$gap(Entity passenger, Entity.MoveFunction callback, CallbackInfo ci) {
+    private void electroEnergetics$onEnter(Entity passenger, Entity.MoveFunction callback,
+                                           CallbackInfo ci) {
+        electroEnergetics$tracing = false;
         try {
             if (!(passenger instanceof Player))
                 return;
@@ -66,22 +79,52 @@ public class SeatGapTraceMixin {
                 return;
 
             Vec3 seat = cce.getPassengerPosition(passenger, 1.0f);
+            electroEnergetics$target = seat;
+            electroEnergetics$before = passenger.position();
+            electroEnergetics$tracing = true;
+
             if (seat == null) {
-                electroEnergetics$LOG.info("SEATGAP side={} seat=NULL player={} partial=1.0",
-                        cce.level().isClientSide() ? "CLIENT" : "SERVER",
-                        fmt(passenger.position()));
-                return;
+                electroEnergetics$LOG.info("CARRY side={} target=NULL player={}",
+                        side(cce), fmt(passenger.position()));
             }
-            double gap = seat.distanceTo(passenger.position());
+        } catch (Throwable ignored) {
+        }
+    }
+
+    @Inject(
+            method = "positionRider(Lnet/minecraft/world/entity/Entity;"
+                    + "Lnet/minecraft/world/entity/Entity$MoveFunction;)V",
+            at = @At("RETURN"), remap = false)
+    private void electroEnergetics$onReturn(Entity passenger, Entity.MoveFunction callback,
+                                            CallbackInfo ci) {
+        try {
+            if (!electroEnergetics$tracing)
+                return;
+            electroEnergetics$tracing = false;
+
+            Vec3 target = electroEnergetics$target;
+            Vec3 before = electroEnergetics$before;
+            Vec3 after = passenger.position();
+            if (target == null)
+                return;
+
+            double shortBy = target.distanceTo(after);
+            double moved = before.distanceTo(after);
+            double needed = before.distanceTo(target);
 
             electroEnergetics$LOG.info(
-                    "SEATGAP side={} seat={} player={} gap={} anchor={}",
-                    cce.level().isClientSide() ? "CLIENT" : "SERVER",
-                    fmt(seat), fmt(passenger.position()), String.format("%.2f", gap),
-                    fmt(cce.position()));
+                    "CARRY side={} needed={} moved={} short={} before={} after={} target={}",
+                    side((CarriageContraptionEntity) (Object) this),
+                    String.format("%.2f", needed), String.format("%.2f", moved),
+                    String.format("%.2f", shortBy), fmt(before), fmt(after), fmt(target));
         } catch (Throwable ignored) {
             // A diagnostic must never be the thing that breaks the game.
         }
+    }
+
+    @Unique
+    private static String side(AbstractContraptionEntity e) {
+        return e.level().isClientSide() ? "CLIENT" : "SERVER";
     }
 
     @Unique
