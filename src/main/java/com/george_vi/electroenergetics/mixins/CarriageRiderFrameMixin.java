@@ -71,6 +71,13 @@ public class CarriageRiderFrameMixin {
 
     /** The carriage frame captured at the head of this tick, or null when not on an electric carriage. */
     @Unique
+    private static final org.slf4j.Logger electroEnergetics$LOG =
+            org.slf4j.LoggerFactory.getLogger("CEE-FRAME");
+
+    @Unique
+    private static int electroEnergetics$n;
+
+    @Unique
     private CarriageRiderFrame.Local electroEnergetics$pending;
 
     /**
@@ -87,6 +94,13 @@ public class CarriageRiderFrameMixin {
                 return;
 
             CarriageContraptionEntity carriage = CarriageRiderFrame.carriageOf(player);
+            if (electroEnergetics$n++ % 20 == 0) {
+                electroEnergetics$LOG.info("FRAME pax={} veh={} carriage={} electric={}",
+                        player.isPassenger(),
+                        player.getVehicle() == null ? "-" : player.getVehicle().getClass().getSimpleName(),
+                        carriage == null ? "-" : carriage.getId(),
+                        carriage != null && CarriageRiderFrame.isElectric(carriage));
+            }
             if (carriage == null) {
                 CarriageRiderFrame.forget(player);
                 return;
