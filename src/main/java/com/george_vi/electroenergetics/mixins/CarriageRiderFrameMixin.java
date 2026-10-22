@@ -54,12 +54,19 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * resolved at the END. It is never re-recorded between those two points, so the player's own movement is
  * applied exactly once - by the game - rather than being applied and then re-applied by this class.
  *
+ * <h2>Why the injection is on Player and not LivingEntity</h2>
+ *
+ * <p>Three builds hooked {@code LivingEntity.tick} and never ran. The player chain is
+ * {@code LocalPlayer.tick -> AbstractClientPlayer.tick -> Player.tick}, and {@code Player.tick} does not
+ * call {@code super.tick} - so {@code LivingEntity.tick} is never reached for a player at all. A mixin that
+ * looks correct, compiles, applies, logs nothing and changes nothing is exactly what that produces.
+ *
  * <h2>Cost</h2>
  *
- * <p>Two coordinate transforms per tick for a player on an electric carriage, both of which the game would
- * otherwise perform for its own carry. A player elsewhere pays one instanceof and one map miss.
+ * <p>Two coordinate transforms per tick for a player on an electric carriage. A player elsewhere pays one
+ * instanceof and one map miss.
  */
-@Mixin(value = LivingEntity.class, remap = false)
+@Mixin(value = net.minecraft.world.entity.player.Player.class, remap = false)
 public class CarriageRiderFrameMixin {
 
     /** The carriage frame captured at the head of this tick, or null when not on an electric carriage. */
