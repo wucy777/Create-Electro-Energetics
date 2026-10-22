@@ -8,54 +8,50 @@ import org.slf4j.LoggerFactory;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
-import org.spongepowered.asm.mixin.injection.Redirect;
+import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
- * Applies a small server position correction by interpolation instead of a hard set, so leaving a train
- * at speed eases the player across the gap instead of throwing them.
+ * Ignores a small server position correction for the local player, keeping the position the carry
+ * already gave them.
  *
- * <h2>How the real site was found</h2>
+ * <h2>Why easing was not enough</h2>
  *
- * <p>Six builds aimed at the dismount location stored in NBT. A consumer probe finally showed that tag sits
- * downstream of the move - it logged {@code seat=(336.50,-443.19) rider=(336.50,-443.19)}, identical.
+ * <p>The previous build routed the correction through {@code lerpTo}. The measured log showed it working
+ * as designed - {@code FORCED eased dist=14.87} - and the player still reported being thrown. That is the
+ * answer: smoothing changes how the 14.87 Blocks are traversed, not the fact that the client is being told
+ * to traverse them. The displacement itself is the problem.
  *
- * <p>A stack trace from the one server method every teleport funnels through named the sender as
- * {@code ServerEntity.sendChanges}, which forces one absolute-position packet on the tick a passenger is
- * released. That packet is a {@code ClientboundPlayerPositionPacket}: a hook on
- * {@code handleTeleportEntity}, written for the sibling packet class, never fired, while the write tracer
- * kept reporting {@code ClientPacketListener.handleMovePlayer} as the writer.
+ * <h2>Where the displacement comes from</h2>
  *
- * <p>Inside {@code handleMovePlayer} there is exactly ONE position write, at bytecode offset 287:
+ * <p>The server forces one absolute-position packet on the tick a passenger is released
+ * ({@code ServerEntity.sendChanges}, the {@code wasRiding} branch). Its payload is the SERVER's entity
+ * position. The client is drawing the rider from {@code positionRider} against an interpolated carriage,
+ * which trails the server by three to four ticks of travel - the same multiple measured on every build.
  *
- * <pre>
- *   player.setPos(x, y, z);
- *   player.setDeltaMovement(...);
- * </pre>
+ * <p>Both sides compute the ride correctly; they simply describe the carriage at different instants. The
+ * client is right about where the player appears, the server is right about where the player is, and the
+ * packet forces the client to jump between the two.
  *
- * <p>The previous-position fields are updated just before it, in both the relative and absolute branches,
- * so nothing downstream treats the change as motion - it is a hard set, and the player visibly jumps by
- * the entire correction.
+ * <h2>Why ignoring it is correct here</h2>
  *
- * <h2>What is changed</h2>
+ * <p>When the correction is small, the client is not wrong - it is merely behind. The carry has already
+ * placed the player on the seat, and the client's own carriage continues forward, so the player stays with
+ * the train without any help. Applying the packet moves them to a position the client will reach on its
+ * own a few ticks later, and it is exactly that forced move the player perceives as being thrown.
  *
- * <p>For the local player, when the correction is small, that {@code setPos} is replaced by
- * {@link Player#lerpTo} over three ticks. Vanilla already uses {@code lerpTo} for ordinary entity
- * movement; it eases an entity across a small position change and keeps input responsive, because the
- * client still owns the player's motion while the interpolation runs.
- *
- * <p>The correction being eased is the gap between the server's carriage position and the client's
- * interpolated one - measured at 3.9 ticks of travel, 15.33 Blocks at 3.91 Blocks/tick on the previous
- * build. A genuinely large relocation is far outside the bound and is applied exactly as vanilla does it.
+ * <p>When the correction is large, the client genuinely has to be relocated - a dimension change, a
+ * command, a teleport out of a stuck position. Those are far outside the bound and are applied normally.
  *
  * <h2>Bound</h2>
  *
- * <p>64 Blocks. The artefact is under 30 Blocks even at this mod's ceiling; an intentional teleport is
- * structurally elsewhere. The bound cannot catch the latter and cannot miss the former.
+ * <p>64 Blocks, matched to the artefact: it is the carriage's per-tick travel times a few ticks, under 30
+ * Blocks even at this mod's ceiling. An intentional relocation is structurally elsewhere.
  *
  * <h2>Cost</h2>
  *
- * <p>One distance calculation per position packet received for the local player. Such packets arrive on
- * dismounts, dimension changes and periodic resyncs - not per tick.
+ * <p>One distance calculation per position packet for the local player. Such packets arrive on dismounts,
+ * dimension changes and periodic resyncs - not per tick.
  */
 @Mixin(value = ClientPacketListener.class, remap = false)
 public class DismountTeleportMixin {
@@ -63,35 +59,39 @@ public class DismountTeleportMixin {
     @Unique
     private static final Logger electroEnergetics$LOG = LoggerFactory.getLogger("CEE-FORCED");
 
-    @Redirect(
-            method = "handleMovePlayer",
-            at = @At(value = "INVOKE",
-                    target = "Lnet/minecraft/world/entity/player/Player;setPos(DDD)V"),
-            remap = false)
-    private void electroEnergetics$easeInsteadOfSnap(Player player, double x, double y, double z) {
+    @Inject(method = "handleMovePlayer", at = @At("HEAD"), cancellable = true, remap = false)
+    private void electroEnergetics$ignoreSmallCorrection(
+            net.minecraft.network.protocol.game.ClientboundPlayerPositionPacket packet, CallbackInfo ci) {
         try {
-            if (player instanceof LocalPlayer local) {
-                double dx = x - player.getX();
-                double dy = y - player.getY();
-                double dz = z - player.getZ();
-                double dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+            LocalPlayer player = net.minecraft.client.Minecraft.getInstance().player;
+            if (player == null)
+                return;
 
-                if (dist > 0.05 && dist <= 64) {
-                    // Ease it. 3 ticks is what vanilla uses for an entity that moved; the player keeps
-                    // full control while the position catches up.
-                    local.lerpTo(x, y, z, local.getYRot(), local.getXRot(), 3);
-                    electroEnergetics$LOG.info("FORCED eased dist={} to=({},{},{})",
-                            String.format("%.2f", dist),
-                            String.format("%.2f", x), String.format("%.2f", y),
-                            String.format("%.2f", z));
-                    return;
-                }
-            }
-            // Out of range, or not the local player: apply it exactly as vanilla does.
-            player.setPos(x, y, z);
+            // The packet's target, resolved the same way vanilla does: relatives are added to the
+            // current position, absolutes are taken as-is.
+            var relatives = packet.getRelativeArguments();
+            double x = relatives.contains(net.minecraft.world.entity.RelativeMovement.X)
+                    ? player.getX() + packet.getX() : packet.getX();
+            double y = relatives.contains(net.minecraft.world.entity.RelativeMovement.Y)
+                    ? player.getY() + packet.getY() : packet.getY();
+            double z = relatives.contains(net.minecraft.world.entity.RelativeMovement.Z)
+                    ? player.getZ() + packet.getZ() : packet.getZ();
+
+            double dx = x - player.getX();
+            double dy = y - player.getY();
+            double dz = z - player.getZ();
+            double dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+
+            if (dist > 64)
+                return;                     // a real relocation: let vanilla apply it
+
+            electroEnergetics$LOG.info("FORCED ignored dist={} kept={}",
+                    String.format("%.2f", dist),
+                    String.format("(%.2f,%.2f,%.2f)", player.getX(), player.getY(), player.getZ()));
+            ci.cancel();
         } catch (Throwable ignored) {
-            // If anything is unexpected, fall back to vanilla behaviour.
-            player.setPos(x, y, z);
+            // If anything is unexpected, let vanilla handle the packet.
         }
     }
+
 }
