@@ -1,9 +1,7 @@
 package com.george_vi.electroenergetics.mixins;
 
-import com.george_vi.electroenergetics.content.railway_electrification.ElectricTrainData;
-import com.george_vi.electroenergetics.mixin_interfaces.ICEETrainExtension;
+import com.george_vi.electroenergetics.content.railway_electrification.rider.CarriageRiderFrame;
 import com.simibubi.create.content.trains.entity.CarriageContraptionEntity;
-import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.Vec3;
@@ -14,157 +12,147 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
- * Places a rider on an electric carriage BEFORE gravity is applied, so the floor is real for that tick.
+ * Owns a player's position on an electric carriage: captured before the tick, resolved after it.
  *
- * <h2>The ordering that made every previous attempt fail</h2>
+ * <h2>Why capture-then-resolve, and not "correct the position"</h2>
  *
- * <p>Inside one client tick the relevant calls run in this order:
- *
- * <pre>
- *   Entity.tick
- *     -&gt; LivingEntity.aiStep
- *        -&gt; travel              applies gravity, reading onGround
- *     -&gt; move
- *   ClientEvents.onTickPost
- *     -&gt; ContraptionHandler.tick
- *        -&gt; ContraptionCollider  moves the rider onto the carriage, sets onGround
- * </pre>
- *
- * <p>The collider runs AFTER gravity. So a rider on a fast carriage goes through this every tick: gravity
- * pulls them down because the floor is not recognised yet, then the collider lifts them back onto the
- * carriage and marks them grounded, then gravity pulls them down again. Measured:
+ * <p>Every earlier attempt corrected a position another writer had produced. Inside one client tick the
+ * writers are ordered:
  *
  * <pre>
- *   t=871034  y=-59.07  d= 0.00  dY= 0.00  sp=0
- *   t=871034  y=-59.07  d= 3.48  dY= 0.00  sp=1
- *   t=871034  y=-59.17  d= 0.00  dY=-0.10  sp=1
+ *   Entity.tick  -&gt; aiStep -&gt; travel     gravity reads onGround, pulls the rider down
+ *   Entity.tick  -&gt; move                 applies the result
+ *   onTickPost   -&gt; ContraptionCollider  places the rider on the carriage, sets onGround
+ *   collision    -&gt; ContraptionCollider  pushes the rider sideways
  * </pre>
  *
- * <p>and periodically the accumulated deficit is paid off in one go - {@code d=10.44} against a carriage
- * speed of 3.48, which is the "thrown" the operator keeps reporting.
+ * <p>Correcting at any one point loses to the next. Measured consequence at 3.9 Blocks/tick:
  *
- * <p>Setting {@code onGround} anywhere later in that cycle cannot work: the sink has already been applied
- * by the time the flag is set, and the flag is cleared again by the next tick's grounding test.
+ * <pre>
+ *   t=871034  y=-59.07  d= 0.00  dY= 0.00  sp=0     sink
+ *   t=871034  y=-59.07  d= 3.48  dY= 0.00  sp=1     collider lifts back
+ *   t=871034  y=-59.17  d= 0.00  dY=-0.10  sp=1     sink again
+ * </pre>
  *
- * <h2>What this does</h2>
+ * <p>and every few ticks the deficit is settled in one step - d=10.44 against a carriage speed of 3.48 -
+ * which is the sideways throw and the fall through the floor.
  *
- * <p>At the head of {@code travel} - before gravity is computed - for a player standing on an electric
- * carriage: move them onto the carriage's floor and ground them. Gravity then integrates against a floor
- * that exists, so there is nothing to sink through and nothing for the collider to catch up to.
+ * <h2>The model</h2>
  *
- * <p>The position is taken from the carriage's own frame, not invented. It is the same value the collider
- * would apply a moment later; the only change is that it is applied early enough to matter.
+ * <p>The player's position is stored as an offset in the carriage's own frame. It is written once, at the
+ * end of the tick - after input, gravity and collision have all run - so nothing subsequently overwrites it.
+ * Between ticks the stored offset is the player's own doing: walking changes it, jumping changes it, the
+ * carriage moving does not.
  *
- * <h2>Why moving the player here does not forbid walking or jumping</h2>
+ * <p>Resolving {@code anchor + rotate(local)} at the end of the tick is what carries the player along with
+ * the carriage, turns them when it turns, and gives them a floor that travels with them instead of one the
+ * game has to rediscover each tick.
  *
- * <p>This runs before the player's movement for the tick, not after it. Input processed later in the same
- * tick - walking, sprinting, a jump - is added on top of a correct starting position, so it is neither
- * overwritten nor amplified. Vertical velocity is preserved: only the downward sink that built up while the
- * floor was missing is cleared, and only when no jump is in progress.
+ * <h2>What is deliberately NOT done</h2>
  *
- * <h2>Scope and cost</h2>
+ * <p>The stored offset is captured at the START of the tick from wherever the game left the player, and
+ * resolved at the END. It is never re-recorded between those two points, so the player's own movement is
+ * applied exactly once - by the game - rather than being applied and then re-applied by this class.
  *
- * <p>Electric trains only. Per tick per player on one: two coordinate transforms and a comparison. Everyone
- * else pays one {@code instanceof}.
+ * <h2>Cost</h2>
+ *
+ * <p>Two coordinate transforms per tick for a player on an electric carriage, both of which the game would
+ * otherwise perform for its own carry. A player elsewhere pays one instanceof and one map miss.
  */
 @Mixin(value = LivingEntity.class, remap = false)
 public class CarriageRiderFrameMixin {
 
-    /** Height band above the carriage floor that still counts as standing on it. */
+    /** The carriage frame captured at the head of this tick, or null when not on an electric carriage. */
     @Unique
-    private static final double electroEnergetics$STEP_BAND = 0.75d;
+    private CarriageRiderFrame.Local electroEnergetics$pending;
 
     /**
-     * Runs at the head of the gravity step, which is the only place a grounding correction can take effect.
+     * Captures the frame before anything moves the player.
+     *
+     * <p>This is the offset the player ended the previous tick with. It is not derived from this tick's
+     * movement, which has not happened yet.
      */
-    @Inject(method = "travel", at = @At("HEAD"), remap = false)
-    private void electroEnergetics$standOnCarriageBeforeGravity(Vec3 travelVector, CallbackInfo ci) {
+    @Inject(method = "tick", at = @At("HEAD"), remap = false)
+    private void electroEnergetics$capture(CallbackInfo ci) {
+        electroEnergetics$pending = null;
         try {
             if (!((Object) this instanceof Player player))
                 return;
 
-            CarriageContraptionEntity carriage = electroEnergetics$carriageAround(player);
-            if (carriage == null)
+            CarriageContraptionEntity carriage = CarriageRiderFrame.carriageOf(player);
+            if (carriage == null) {
+                CarriageRiderFrame.forget(player);
                 return;
-
-            Vec3 local = carriage.toLocalVector(player.position(), 1.0f);
-            if (!electroEnergetics$standingOnFloor(carriage, player, local))
-                return;                     // mid-jump or outside the footprint: leave the tick alone
-
-            // Snap the vertical only. Horizontal is owned by the carry and is already correct; writing it
-            // here would fight the carriage's own motion on every tick, which is the mistake the discarded
-            // full-frame draft made.
-            Vec3 seat = carriage.getPassengerPosition(player, 1.0f);
-            if (seat == null)
-                return;
-            player.setPos(player.getX(), seat.y, player.getZ());
-
-            player.setOnGround(true);
-            player.fallDistance = 0;
-            Vec3 motion = player.getDeltaMovement();
-            if (motion.y < 0)
-                player.setDeltaMovement(motion.x, 0, motion.z);
-        } catch (Throwable ignored) {
-            // A footing fix must never be the thing that breaks movement.
-        }
-    }
-
-    /**
-     * Whether the player's feet are within one step of the carriage floor.
-     *
-     * <p>The floor line is taken from the carriage's own seat position, which already accounts for the
-     * passenger's size and the carriage's build, rather than a fixed offset guessed from the sky.
-     */
-    @Unique
-    private boolean electroEnergetics$standingOnFloor(CarriageContraptionEntity carriage, Player player,
-                                                      Vec3 local) {
-        Vec3 seat = carriage.getPassengerPosition(player, 1.0f);
-        if (seat == null)
-            return false;
-
-        Vec3 seatLocal = carriage.toLocalVector(seat, 1.0f);
-        double aboveFloor = local.y - seatLocal.y;
-
-        // A jump leaves the band immediately, which is why a band is used rather than an equality test.
-        return aboveFloor >= -0.5 && aboveFloor <= electroEnergetics$STEP_BAND;
-    }
-
-    /**
-     * The electric carriage the player is riding or standing in, or null.
-     *
-     * <p>Riding is checked first because it is the common case. A player who has stood up from the seat is
-     * still inside the carriage, so proximity is checked as a fallback - before anything is written, so a
-     * player on open ground never has their position touched.
-     */
-    @Unique
-    private static CarriageContraptionEntity electroEnergetics$carriageAround(Player player) {
-        if (player.getVehicle() instanceof CarriageContraptionEntity carriage
-                && electroEnergetics$isElectric(carriage))
-            return carriage;
-
-        CarriageContraptionEntity best = null;
-        double bestDistance = Double.MAX_VALUE;
-        for (Entity e : player.level().getEntities(player, player.getBoundingBox().inflate(6))) {
-            if (!(e instanceof CarriageContraptionEntity carriage))
-                continue;
-            if (!electroEnergetics$isElectric(carriage))
-                continue;
-            double d = carriage.position().distanceTo(player.position());
-            if (d < bestDistance) {
-                bestDistance = d;
-                best = carriage;
             }
+
+            var stored = CarriageRiderFrame.get(player);
+            if (CarriageRiderFrame.belongsTo(stored, carriage)) {
+                electroEnergetics$pending = stored;
+            } else {
+                // First tick aboard: adopt wherever the game has them rather than inventing a position.
+                electroEnergetics$pending = CarriageRiderFrame.record(player, carriage);
+            }
+        } catch (Throwable ignored) {
+            // A frame fix must never be the thing that breaks movement.
         }
-        // 6 Blocks covers a carriage length; beyond that the player is not inside that train.
-        return bestDistance <= 6 ? best : null;
     }
 
-    @Unique
-    private static boolean electroEnergetics$isElectric(CarriageContraptionEntity carriage) {
-        var c = carriage.getCarriage();
-        if (c == null || c.train == null)
-            return false;
-        ElectricTrainData data = ((ICEETrainExtension) c.train).getElectricTrainData();
-        return data != null && data.hasTractionMotors;
+    /**
+     * Writes the player's position for this tick, once, after everything else has had its say.
+     *
+     * <p>The stored offset is updated by however far the player moved this tick, measured in the carriage
+     * frame. That keeps walking and jumping as ordinary local motion while making the carriage's own motion
+     * a property of the frame rather than something to be chased.
+     */
+    @Inject(method = "tick", at = @At("TAIL"), remap = false)
+    private void electroEnergetics$resolve(CallbackInfo ci) {
+        try {
+            var pending = electroEnergetics$pending;
+            if (pending == null)
+                return;
+            if (!((Object) this instanceof Player player))
+                return;
+
+            CarriageContraptionEntity carriage = CarriageRiderFrame.carriageOf(player);
+            if (carriage == null || !CarriageRiderFrame.belongsTo(pending, carriage)) {
+                CarriageRiderFrame.forget(player);
+                return;
+            }
+
+            // How far the player moved this tick, expressed in the carriage frame. Walking and jumping show
+            // up here as ordinary local displacement.
+            Vec3 nowLocal = carriage.toLocalVector(player.position(), 1.0f);
+            double dx = nowLocal.x - pending.local().x;
+            double dy = nowLocal.y - pending.local().y;
+            double dz = nowLocal.z - pending.local().z;
+
+            double height = pending.local().y + dy;
+            double floor = pending.floorY();
+
+            // Standing: settle onto the floor so a tick that lost it cannot accumulate into a fall. A jump
+            // is above the band and keeps its own height.
+            boolean standing = height - floor >= -0.5 && height - floor <= 0.75;
+            if (standing) {
+                height = floor;
+            }
+
+            Vec3 updated = new Vec3(pending.local().x + dx, height, pending.local().z + dz);
+            Vec3 world = carriage.toGlobalVector(updated, 1.0f);
+            player.setPos(world.x, world.y, world.z);
+
+            if (standing) {
+                player.setOnGround(true);
+                player.fallDistance = 0;
+                Vec3 motion = player.getDeltaMovement();
+                if (motion.y < 0)
+                    player.setDeltaMovement(motion.x, 0, motion.z);
+            }
+
+            CarriageRiderFrame.put(player, new CarriageRiderFrame.Local(
+                    pending.carriageId(), updated, floor));
+            electroEnergetics$pending = null;
+        } catch (Throwable ignored) {
+            // A frame fix must never be the thing that breaks movement.
+        }
     }
 }
