@@ -2,67 +2,60 @@ package com.george_vi.electroenergetics.mixins;
 
 import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.client.player.LocalPlayer;
-import net.minecraft.network.protocol.game.ClientboundTeleportEntityPacket;
-import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.player.Player;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
-import org.spongepowered.asm.mixin.injection.Inject;
-import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+import org.spongepowered.asm.mixin.injection.Redirect;
 
 /**
- * Turns the forced post-dismount teleport into a short interpolation instead of a snap.
+ * Applies a small server position correction by interpolation instead of a hard set, so leaving a train
+ * at speed eases the player across the gap instead of throwing them.
  *
- * <h2>The chain, established over six builds</h2>
+ * <h2>How the real site was found</h2>
  *
- * <p>The dismount position is written twice into NBT and read twice. Four builds tried to change it there;
- * the consumer probe showed why none could work - it logged
- * {@code seat=(336.50,-443.19) rider=(336.50,-443.19)}, identical, so the player had ALREADY arrived and
- * the tag is downstream of the move.
+ * <p>Six builds aimed at the dismount location stored in NBT. A consumer probe finally showed that tag sits
+ * downstream of the move - it logged {@code seat=(336.50,-443.19) rider=(336.50,-443.19)}, identical.
  *
- * <p>A stack trace from the single method every server teleport funnels through named the sender:
+ * <p>A stack trace from the one server method every teleport funnels through named the sender as
+ * {@code ServerEntity.sendChanges}, which forces one absolute-position packet on the tick a passenger is
+ * released. That packet is a {@code ClientboundPlayerPositionPacket}: a hook on
+ * {@code handleTeleportEntity}, written for the sibling packet class, never fired, while the write tracer
+ * kept reporting {@code ClientPacketListener.handleMovePlayer} as the writer.
  *
- * <pre>
- *   TELEPORT target=(336.50,-57.98,-463.93) pax=false vehicle=-
- *   caller = ... teleport &lt;- ServerEntity:95(lambda$sendChanges$0)
- * </pre>
- *
- * <p>{@code ServerEntity.sendChanges} contains:
+ * <p>Inside {@code handleMovePlayer} there is exactly ONE position write, at bytecode offset 287:
  *
  * <pre>
- *   if (teleportDelay &gt; 400 || wasRiding || wasOnGround != entity.onGround())
- *       packet = new ClientboundTeleportEntityPacket(entity);   // absolute, applied with absMoveTo
+ *   player.setPos(x, y, z);
+ *   player.setDeltaMovement(...);
  * </pre>
  *
- * <p>{@code wasRiding} clears on the first tick without a passenger, so leaving a seat forces exactly one
- * absolute-position packet. It carries the SERVER's entity position; the client draws the rider from
- * {@code positionRider} against an interpolated carriage, and at speed the two differ by several ticks of
- * travel. Measured: 15.33 Blocks at 3.91 Blocks/tick = 3.92 ticks, matching every earlier build.
+ * <p>The previous-position fields are updated just before it, in both the relative and absolute branches,
+ * so nothing downstream treats the change as motion - it is a hard set, and the player visibly jumps by
+ * the entire correction.
  *
- * <h2>Why interpolation rather than suppression</h2>
+ * <h2>What is changed</h2>
  *
- * <p>Suppressing the packet would desynchronise the client whenever the server genuinely needs to correct
- * it. What is wrong is not that the correction arrives, but that it is applied instantly. Vanilla already
- * has the right mechanism for a small correction: {@code Entity.lerpTo}, which the client uses for
- * ordinary entity movement and which eases the entity across the gap over a few ticks.
+ * <p>For the local player, when the correction is small, that {@code setPos} is replaced by
+ * {@link Player#lerpTo} over three ticks. Vanilla already uses {@code lerpTo} for ordinary entity
+ * movement; it eases an entity across a small position change and keeps input responsive, because the
+ * client still owns the player's motion while the interpolation runs.
  *
- * <p>So: for the local player, when the correction is close enough to be this artefact, apply it through
- * {@code lerpTo} instead of {@code absMoveTo}. The player slides the remaining distance over a fraction of
- * a second instead of being thrown across it.
+ * <p>The correction being eased is the gap between the server's carriage position and the client's
+ * interpolated one - measured at 3.9 ticks of travel, 15.33 Blocks at 3.91 Blocks/tick on the previous
+ * build. A genuinely large relocation is far outside the bound and is applied exactly as vanilla does it.
  *
- * <h2>How the harmful case is told apart</h2>
+ * <h2>Bound</h2>
  *
- * <p>By distance only, with a bound well above the artefact and well below any intentional relocation. The
- * artefact is the carriage's per-tick travel times a few ticks - under 30 Blocks even at this mod's
- * maximum. A dimension change or a command teleport moves the player to a structurally different place.
- * The threshold used is 64 Blocks, which cannot catch a command teleport and cannot miss a dismount.
+ * <p>64 Blocks. The artefact is under 30 Blocks even at this mod's ceiling; an intentional teleport is
+ * structurally elsewhere. The bound cannot catch the latter and cannot miss the former.
  *
  * <h2>Cost</h2>
  *
- * <p>Only on a teleport packet for the local player - a handful of times per session. One distance
- * calculation.
+ * <p>One distance calculation per position packet received for the local player. Such packets arrive on
+ * dismounts, dimension changes and periodic resyncs - not per tick.
  */
 @Mixin(value = ClientPacketListener.class, remap = false)
 public class DismountTeleportMixin {
@@ -70,41 +63,35 @@ public class DismountTeleportMixin {
     @Unique
     private static final Logger electroEnergetics$LOG = LoggerFactory.getLogger("CEE-FORCED");
 
-    @Inject(method = "handleTeleportEntity", at = @At("HEAD"), cancellable = true, remap = false)
-    private void electroEnergetics$easeDismount(ClientboundTeleportEntityPacket packet, CallbackInfo ci) {
+    @Redirect(
+            method = "handleMovePlayer",
+            at = @At(value = "INVOKE",
+                    target = "Lnet/minecraft/world/entity/player/Player;setPos(DDD)V"),
+            remap = false)
+    private void electroEnergetics$easeInsteadOfSnap(Player player, double x, double y, double z) {
         try {
-            ClientPacketListener self = (ClientPacketListener) (Object) this;
-            var level = self.getLevel();
-            if (level == null)
-                return;
+            if (player instanceof LocalPlayer local) {
+                double dx = x - player.getX();
+                double dy = y - player.getY();
+                double dz = z - player.getZ();
+                double dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
 
-            Entity target = level.getEntity(packet.getId());
-            if (!(target instanceof LocalPlayer player))
-                return;                     // only the local player is ever "thrown" in the player's view
-
-            double dx = packet.getX() - player.getX();
-            double dy = packet.getY() - player.getY();
-            double dz = packet.getZ() - player.getZ();
-            double dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
-
-            // Beyond this it is a real relocation; let vanilla apply it instantly.
-            if (dist > 64)
-                return;
-
-            // Ordinary entity interpolation, over the same number of steps vanilla uses for a moved
-            // entity. The player keeps control the whole time; this only smooths the position change.
-            player.lerpTo(packet.getX(), packet.getY(), packet.getZ(),
-                    packet.getyRot() * 360.0f / 256.0f, packet.getxRot() * 360.0f / 256.0f, 3);
-            player.setDeltaMovement(player.getDeltaMovement().scale(0.5));
-
-            electroEnergetics$LOG.info("FORCED eased dist={} from={} to={}",
-                    String.format("%.2f", dist),
-                    String.format("(%.2f,%.2f,%.2f)", player.getX(), player.getY(), player.getZ()),
-                    String.format("(%.2f,%.2f,%.2f)", packet.getX(), packet.getY(), packet.getZ()));
-
-            ci.cancel();
+                if (dist > 0.05 && dist <= 64) {
+                    // Ease it. 3 ticks is what vanilla uses for an entity that moved; the player keeps
+                    // full control while the position catches up.
+                    local.lerpTo(x, y, z, local.getYRot(), local.getXRot(), 3);
+                    electroEnergetics$LOG.info("FORCED eased dist={} to=({},{},{})",
+                            String.format("%.2f", dist),
+                            String.format("%.2f", x), String.format("%.2f", y),
+                            String.format("%.2f", z));
+                    return;
+                }
+            }
+            // Out of range, or not the local player: apply it exactly as vanilla does.
+            player.setPos(x, y, z);
         } catch (Throwable ignored) {
-            // If anything at all is unexpected, let vanilla handle the packet.
+            // If anything is unexpected, fall back to vanilla behaviour.
+            player.setPos(x, y, z);
         }
     }
 }
