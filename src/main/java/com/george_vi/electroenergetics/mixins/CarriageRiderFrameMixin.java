@@ -92,6 +92,11 @@ public class CarriageRiderFrameMixin {
         try {
             if (!((Object) this instanceof Player player))
                 return;
+            // Client only. The server never carries a rider - the client computes the seat position and
+            // reports it - so on the server this hook sees pax=false and an empty vehicle on every tick,
+            // which is what 311 diagnostic lines showed: side=SERVER, cls=ServerPlayer, pax=false.
+            if (!player.level().isClientSide())
+                return;
 
             CarriageContraptionEntity carriage = CarriageRiderFrame.carriageOf(player);
             if (electroEnergetics$n++ % 20 == 0) {
@@ -134,6 +139,8 @@ public class CarriageRiderFrameMixin {
             if (pending == null)
                 return;
             if (!((Object) this instanceof Player player))
+                return;
+            if (!player.level().isClientSide())
                 return;
 
             CarriageContraptionEntity carriage = CarriageRiderFrame.carriageOf(player);

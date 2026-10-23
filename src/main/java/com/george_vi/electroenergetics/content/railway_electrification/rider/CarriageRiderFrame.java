@@ -33,13 +33,21 @@ public final class CarriageRiderFrame {
      */
     public record Local(int carriageId, Vec3 local, double floorY) {}
 
-    /** True when the carriage's train is an electric one this mod is responsible for. */
+    /**
+     * True when this carriage is one whose rider this mod owns.
+     *
+     * <p>Deliberately NOT gated on the train's electric state. {@code getCarriage()} is a SERVER field -
+     * the client only receives {@code CarriageSyncData} - so it returns null in the client tick, which is
+     * the only place this logic can run. The diagnostic proved it: the client reported
+     * {@code pax=true veh=CarriageContraptionEntity} while {@code carriage} came back null, because the
+     * lookup that decided it cannot work on that side.
+     *
+     * <p>The gate is therefore the carriage itself. A player standing on ANY carriage is placed by this
+     * frame; the frame does nothing a fuel train would notice, because on such a train the rider is inside
+     * Create's speed envelope and every value the frame produces matches what Create already computes.
+     */
     public static boolean isElectric(CarriageContraptionEntity carriage) {
-        var c = carriage.getCarriage();
-        if (c == null || c.train == null)
-            return false;
-        ElectricTrainData data = ((ICEETrainExtension) c.train).getElectricTrainData();
-        return data != null && data.hasTractionMotors;
+        return carriage != null;
     }
 
     /** The carriage a player is on, riding or standing in, or null. */
