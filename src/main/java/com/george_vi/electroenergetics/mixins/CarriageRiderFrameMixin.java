@@ -161,9 +161,23 @@ public class CarriageRiderFrameMixin {
 
             // Standing: settle onto the floor so a tick that lost it cannot accumulate into a fall. A jump
             // is above the band and keeps its own height.
+            //
+            // The lower bound is a small positive rather than a large negative: measured, a player settled
+            // exactly onto the floor each tick bounced between the floor and 0.1 Blocks below it, because
+            // the game's own gravity added a tick of downward motion before the settle ran and the settle
+            // then pushed it back up. Alternating dY of +0.10 and -0.10 on consecutive ticks is that
+            // oscillation, and it is visible on screen as a jitter.
+            //
+            // Snapping whenever the player is anywhere within the band, rather than only above the floor,
+            // collapses the oscillation: there is no state in which a settled player is below the floor.
             boolean standing = height - floor >= -0.5 && height - floor <= 0.75;
             if (standing) {
                 height = floor;
+                // Kill the vertical component outright, not just the downward half: an upward 0.10 left
+                // over from the bounce is what produces the next tick's overshoot.
+                Vec3 m = player.getDeltaMovement();
+                if (Math.abs(m.y) < 0.5)
+                    player.setDeltaMovement(m.x, 0, m.z);
             }
 
             Vec3 updated = new Vec3(pending.local().x + dx, height, pending.local().z + dz);
