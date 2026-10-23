@@ -95,7 +95,9 @@ public class CarriageRiderFrameMixin {
 
             CarriageContraptionEntity carriage = CarriageRiderFrame.carriageOf(player);
             if (electroEnergetics$n++ % 20 == 0) {
-                electroEnergetics$LOG.info("FRAME pax={} veh={} carriage={} electric={}",
+                electroEnergetics$LOG.info("FRAME side={} cls={} pax={} veh={} carriage={} electric={}",
+                        player.level().isClientSide() ? "CLIENT" : "SERVER",
+                        player.getClass().getSimpleName(),
                         player.isPassenger(),
                         player.getVehicle() == null ? "-" : player.getVehicle().getClass().getSimpleName(),
                         carriage == null ? "-" : carriage.getId(),
