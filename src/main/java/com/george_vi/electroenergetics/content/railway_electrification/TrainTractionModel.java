@@ -245,23 +245,55 @@ public final class TrainTractionModel {
      */
     public static double electricalDemand(double speed, double acceleration, double grade,
                                           int carriages, double powerScale) {
+        return electricalDemand(speed, acceleration, grade, carriages, powerScale, false);
+    }
+
+    /**
+     * As above, plus the current the motors draw when they are being driven AGAINST the train.
+     *
+     * <p>During an emergency application - and during REVERSE used as a brake - the motors are at full
+     * power in reverse. That is real current coming out of the catenary, and it is the whole reason the
+     * operator's rule says the emergency brake draws power and does not regenerate.
+     *
+     * <p>It was previously invisible: the demand was derived from the train's realised acceleration, and
+     * a braking train has negative acceleration, so the inertia term cancelled the running resistance and
+     * the demand came out at zero. The HUD accordingly read about 0 kW through an emergency stop while the
+     * motors were working at rating - a number that contradicted the physics it was meant to report.
+     *
+     * <p>The force is taken from {@link #motorReverseBrake} and converted back to newtons with the same
+     * effective mass that method divides by, so the two cannot disagree about how hard the motors are
+     * working.
+     */
+    public static double electricalDemand(double speed, double acceleration, double grade,
+                                          int carriages, double powerScale, boolean motorBraking) {
         double v = Math.abs(speed);
         double needed = runningResistance(v, carriages)
                 + gradeResistance(grade, carriages)
                 + inertiaForce(acceleration, carriages);
 
+        // Effort the motors are expending while braking. Added to the demand rather than allowed to cancel
+        // against it, because it is current drawn regardless of what the train's acceleration is doing.
+        double motorBrakeEffort = 0d;
+        if (motorBraking) {
+            double gamma = CEEConfigs.server().resistanceValues.electricTrainRotatingMassFactor.get();
+            double effective = (1d + gamma) * totalMass(carriages);
+            motorBrakeEffort = motorReverseBrake(v, carriages, powerScale) * effective;
+        }
+
         var res = CEEConfigs.server().resistanceValues;
         double margin = Math.max(res.electricTrainMarginFactor.get(), 1e-4d);
         double auxFactor = Math.max(res.electricTrainAuxiliaryLoadFactor.get(), 1e-4d);
 
+        double demandForce = Math.max(needed, 0d) + motorBrakeEffort;
+
         double tractionPower;
-        if (needed <= 0d) {
+        if (demandForce <= 0d) {
             // Gravity alone is enough to keep rolling; the motors draw nothing
             // useful and only the auxiliaries load the supply.
             tractionPower = 0d;
         } else {
             double deliverable = availableEffort(v, carriages, powerScale);
-            double effort = Math.min(needed, deliverable);
+            double effort = Math.min(demandForce, deliverable);
             // Auxiliaries are fed from the same supply, so they subtract from
             // the force available at the rail.
             tractionPower = effort * Math.max(v, MIN_SPEED_FOR_POWER) / (driveEfficiency() * auxFactor);
@@ -352,6 +384,11 @@ public final class TrainTractionModel {
      * factor rather than the order-of-magnitude jump a separate "emergency rate"
      * would imply. Real figures are around 1.3-1.5x the service rate.
      */
+    /**
+     * @deprecated No longer used. The emergency brake is the motors in reverse plus the ordinary friction
+     *             brake; multiplying friction by 1.5 asked for more adhesion than the wheels have.
+     */
+    @Deprecated
     public static final double EMERGENCY_ADHESION_FACTOR = 1.5d;
 
     // ------------------------------------------------------------------
@@ -591,7 +628,16 @@ public final class TrainTractionModel {
         // part is untouched and remains available with no power, which is the whole reason the
         // brake is kept while coasting.
         double dynamicPart = dynamicBrake() * dynamicBrakeFade(speed) * powerScale;
-        double brakeTotal = brakeMs2 + dynamicPart;
+        // Blended, not stacked.
+        //
+        // It used to be brakeMs2 + dynamicPart, so turning the regenerative brake on made the train brake
+        // HARDER than the driver asked for: 0.8 service + 0.5 electric = 1.3 m/s^2. A real unit blends the
+        // two to the commanded total, and the electric half simply takes over part of the work.
+        //
+        // max() is that blend for the case that matters: the commanded brake is the floor, and if the
+        // electric brake can produce more than friction alone it may, but never by silently adding itself
+        // to what the driver selected.
+        double brakeTotal = Math.max(brakeMs2, dynamicPart);
         // Accumulated as the motor brake is applied, so the caller knows how much
         // of the stop the motors are doing and can regenerate only that share.
         double dynamicApplied = 0d;
@@ -811,8 +857,19 @@ public final class TrainTractionModel {
         // really produce. `dynamicPart` already carries the supply scaling.
         if (emergency && speed > 1e-6d) {
             force -= leverBrakeForce;
-            force -= Math.signum(v) * (frictionBrake() * EMERGENCY_ADHESION_FACTOR + dynamicPart) * mass;
-            dynamicApplied = dynamicPart;
+            // The emergency brake is the MOTORS at full power in reverse, plus the friction brake.
+            //
+            // It used to be friction*1.5 + the dynamic brake. That was wrong twice over. The 1.5 factor
+            // asked the wheels for more adhesion than they have, and the dynamic brake is the REGENERATIVE
+            // brake - an emergency application must not return energy to the line, it must draw it.
+            //
+            // motorReverseBrake() is already scaled by powerScale, so a train that has lost its wire
+            // contributes nothing from the motors and stops on friction alone. That falls out of the
+            // model rather than being special-cased, which is why the "no power, no emergency brake"
+            // rule needs no test here: REVERSE cannot be selected without a supply in the first place.
+            double motorEmergency = motorReverseBrake(speed, carriages, powerScale);
+            force -= Math.signum(v) * (frictionBrake() + motorEmergency) * mass;
+            dynamicApplied = 0d;
         }
 
         double a = force / mass;
@@ -867,7 +924,8 @@ public final class TrainTractionModel {
                 }
             }
             if (emergency) {
-                hold = Math.max(hold, frictionBrake() * EMERGENCY_ADHESION_FACTOR);
+                // Same pairing as the moving case: friction plus the motors holding in reverse.
+                hold = Math.max(hold, frictionBrake() + motorReverseBrake(0d, carriages, powerScale));
                 braked = true;
             }
             if (braked && hold >= pull) {

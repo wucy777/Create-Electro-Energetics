@@ -33,7 +33,7 @@ public class CTrains extends ConfigBase {
     public final ConfigFloat electricTrainBrakeDeceleration = f(0.8f, 0.05f, "electricTrainBrakeDeceleration",
             "FRICTION (adhesion) service braking, the pads on the discs. 0.8 Blocks/Second² is the realistic figure for an adhesion railway. This is what the BRAKE position applies, and it is the only braking that exists at a standstill, so on its own it holds a grade up to this/g = 8.2%. The reverse position adds the motors to it; see electricTrainReverseMaxSpeed. [in Blocks / Second²]");
 
-    public final ConfigFloat electricTrainDynamicBrakeDeceleration = f(0f, 0f, "electricTrainDynamicBrakeDeceleration",
+    public final ConfigFloat electricTrainDynamicBrakeDeceleration = f(0.5f, 0f, "electricTrainDynamicBrakeDeceleration",
             "OPTIONAL motor (regenerative) braking, added on top of the friction figure above while the lever is in the BRAKE position. Left at 0 so that the brake position means exactly the realistic friction rate above; raise it to something like 0.8-1.5 to get a real EMU's blended friction-plus-regenerative stop, at the cost of the brake no longer being a single realistic number. Whatever is set here is also what can be pushed back into the catenary, so this is the knob that turns regeneration on. A motor brake fades out as the train slows because its back-EMF collapses, so it never counts toward holding a train on a grade. [in Blocks / Second²]");
 
     public final ConfigFloat electricTrainDynamicBrakeMinSpeed = f(5f, 0f, "electricTrainDynamicBrakeMinSpeed",

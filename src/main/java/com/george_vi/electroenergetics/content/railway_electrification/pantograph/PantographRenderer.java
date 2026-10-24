@@ -1,6 +1,7 @@
 package com.george_vi.electroenergetics.content.railway_electrification.pantograph;
 
 import com.george_vi.electroenergetics.CEEPartialModels;
+import com.george_vi.electroenergetics.CEEPantographTypes;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.simibubi.create.foundation.blockEntity.renderer.SmartBlockEntityRenderer;
 import net.createmod.catnip.render.CachedBuffers;
@@ -64,7 +65,8 @@ public class PantographRenderer extends SmartBlockEntityRenderer<PantographBlock
                     .renderInto(ms, buffer.getBuffer(RenderType.cutout()));
 
             CachedBuffers.partial(CEEPartialModels.PANTOGRAPH_CONNECTING_SURFACE_DOUBLE, state)
-                    .center().rotateYDegrees(yRot).uncenter()
+                    .center().rotateYDegrees(yRot)
+                    .scaleX(CEEPantographTypes.CONTACT_MODEL_SCALE).uncenter()
                     .translate(0, 0.5625 + a + armHingePosY, 1)
                     .light(light)
                     .renderInto(ms, buffer.getBuffer(RenderType.cutout()));
@@ -130,7 +132,8 @@ public class PantographRenderer extends SmartBlockEntityRenderer<PantographBlock
 
             float upperArmRadians = (89 - extensionState * 50) * Mth.DEG_TO_RAD;
             CachedBuffers.partial(CEEPartialModels.PANTOGRAPH_CONNECTING_SURFACE, state)
-                    .center().rotateYDegrees(yRot).uncenter()
+                    .center().rotateYDegrees(yRot)
+                    .scaleX(CEEPantographTypes.CONTACT_MODEL_SCALE).uncenter()
                     .translate(0, 0.375, 0.8125)
                     .translate(0, armHingePosY, armHingePosX)
                     .translate(0, Mth.cos(upperArmRadians) * 1.9, Mth.sin(upperArmRadians) * 1.9)

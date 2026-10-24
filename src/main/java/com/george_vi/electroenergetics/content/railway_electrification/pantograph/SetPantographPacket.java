@@ -2,6 +2,7 @@ package com.george_vi.electroenergetics.content.railway_electrification.pantogra
 
 import com.george_vi.electroenergetics.CEEPackets;
 import com.george_vi.electroenergetics.content.railway_electrification.TrainDriverState;
+import com.george_vi.electroenergetics.content.railway_electrification.TrainGear;
 import com.george_vi.electroenergetics.mixin_interfaces.ICEETrainExtension;
 import com.george_vi.electroenergetics.mixin_interfaces.IPantographList;
 import com.simibubi.create.Create;
@@ -84,6 +85,21 @@ public record SetPantographPacket(UUID trainId, int carriageIndex, BlockPos loca
         if (!raise) {
             // Always allowed. A driver must be able to drop a pantograph at any moment, and
             // refusing to would be the one failure with no workaround.
+            //
+            // The lever is dropped to COAST first, and the order matters. Cutting the supply while the
+            // gear still commands traction leaves the motors connected to a dead line, and an unexcited
+            // motor being turned by a moving train is a generator with a short across it: it brakes, hard
+            // enough to be felt through the train. A road vehicle has the same problem and the same
+            // answer - declutch before killing the engine - so the lever goes to neutral and only then
+            // does the pantograph come down.
+            //
+            // It is also the only order that is legal. COAST and BRAKE are the only positions selectable
+            // without a supply (ElectricTrainData.gearAvailable), so lowering first would leave the lever
+            // in a position the panel itself refuses to offer.
+            TrainDriverState driver = ((ICEETrainExtension) train).getElectricTrainData().driver;
+            if (driver.gear.appliesTraction())
+                driver.gear = TrainGear.COAST;
+
             entry.active = false;
             return;
         }
@@ -104,7 +120,13 @@ public record SetPantographPacket(UUID trainId, int carriageIndex, BlockPos loca
         // with the gear refusing a move that a pantograph command still allows. Spelling both makes
         // the pair self-evidently identical rather than accidentally identical.
         TrainDriverState driver = ((ICEETrainExtension) train).getElectricTrainData().driver;
-        if (driver.emergencyArmed || driver.controlsLocked) {
+        // emergencyPenalty is the flag that actually lasts to the next station: controlsLocked is released by
+        // LOCKOUT_TAIL_TICKS (2 s) once the train stands, so testing the two lockout flags alone let the
+        // driver re-raise a pantograph two seconds after an emergency stop - the exact thing the rule
+        // forbids, and the opposite of what the comment above claims. The penalty is cleared only at a
+        // station (GameEvents) or by the 10,000-Block backstop, so this cannot strand a driver on a line
+        // with no stations.
+        if (driver.emergencyArmed || driver.controlsLocked || driver.emergencyPenalty) {
             refusal(player, "electroenergetics.train.panto.locked");
             return;
         }

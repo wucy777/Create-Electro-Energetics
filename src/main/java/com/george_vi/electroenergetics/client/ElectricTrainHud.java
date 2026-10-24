@@ -43,6 +43,40 @@ import net.neoforged.api.distmarker.OnlyIn;
 @OnlyIn(Dist.CLIENT)
 public class ElectricTrainHud implements LayeredDraw.Layer {
 
+    /**
+     * Displayed speed, eased towards the last value the server sent.
+     *
+     * <p>Cosmetic only: nothing reads this for physics. The value it eases towards is {@code train.speed},
+     * which is the speed along the track - it is a scalar in the train's own frame, so a curve cannot add a
+     * lateral component to it. That is the whole reason this is safe: an earlier attempt smoothed the
+     * carriage entity's per-tick displacement instead, which on a bend contains the sideways swing as well
+     * as the forward run, so the reading spiked and dipped through every curve. That attempt was reverted
+     * and the comment left in place to stop it being retried.
+     *
+     * <p>The readout steps because the value arrives in TrainHUDUpdatePacket, between twenty and a hundred
+     * milliseconds apart depending on the send throttle. Easing towards it per frame decouples the number
+     * on screen from the packet interval without touching what is measured.
+     */
+    private static float electroEnergetics$displayedSpeed;
+    private static long electroEnergetics$lastNanos;
+
+    /** Time constant of the easing, in seconds. Short enough to track a brake application closely. */
+    private static final double electroEnergetics$SPEED_TAU = 0.12d;
+
+    private static float electroEnergetics$smooth(float target) {
+        long now = System.nanoTime();
+        double dt = electroEnergetics$lastNanos == 0L ? 0d : (now - electroEnergetics$lastNanos) / 1e9d;
+        electroEnergetics$lastNanos = now;
+        if (dt <= 0d || dt > 0.25d) {
+            // First frame, or a stall: jump rather than drag the number across a pause.
+            electroEnergetics$displayedSpeed = target;
+            return target;
+        }
+        double k = 1d - Math.exp(-dt / electroEnergetics$SPEED_TAU);
+        electroEnergetics$displayedSpeed += (float) ((target - electroEnergetics$displayedSpeed) * k);
+        return electroEnergetics$displayedSpeed;
+    }
+
     public static final ElectricTrainHud INSTANCE = new ElectricTrainHud();
 
     private static final int MARGIN = 4;
@@ -148,7 +182,9 @@ public class ElectricTrainHud implements LayeredDraw.Layer {
         // properly means projecting the carriage's displacement onto its own FORWARD axis
         // (which cancels the lateral swing) rather than using straight-line distance.
         // Not done, because it is cosmetic and this is the safe, known-good value.
-        float speed = (float) Math.abs(train.speed) * 20f;
+        // Along-track speed, eased for display. train.speed is a scalar in the train's own frame, so
+        // this is smooth along the railway and cannot be disturbed by a curve - see the field comment.
+        float speed = electroEnergetics$smooth((float) Math.abs(train.speed) * 20f);
         lerp(speed, manualCap, sample.power(), partialTicks);
 
         // Bottom-left, with the rows stacked upwards from the bottom margin, so

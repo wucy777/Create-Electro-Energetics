@@ -221,7 +221,7 @@
   "key.electroenergetics.pantograph_toggle": "Train: raise/lower pantograph",
   "electroenergetics.train.panto.up": "Raised",
   "electroenergetics.train.panto.canRaise": "Can raise",
-  "electroenergetics.train.status.locked": "E-BRAKE LOCK: no controls",
+  "electroenergetics.train.status.locked": "Emergency lock: releases once stopped; the speed cap lasts until the next station",
   "electroenergetics.train.panto.noWire": "No wire in reach",
   "electroenergetics.train.panto.none": "No pantographs",
   "electroenergetics.train.panto.locked": "Locked",

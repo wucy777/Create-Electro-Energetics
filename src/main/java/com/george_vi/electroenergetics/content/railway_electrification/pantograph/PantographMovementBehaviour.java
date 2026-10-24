@@ -48,7 +48,7 @@ public class PantographMovementBehaviour implements MovementBehaviour {
      * two ever drift, the visible symptom is an arm dropping into a bend while the train is still
      * drawing current, which is exactly the bug this constant replaced.
      */
-    private static final float CONTACT_HALF_WIDTH = 3.0f;
+    private static final float CONTACT_HALF_WIDTH = 2.5f;
 
     @Override
     public void tick(MovementContext context) {

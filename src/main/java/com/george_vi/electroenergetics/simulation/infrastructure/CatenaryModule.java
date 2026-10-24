@@ -408,8 +408,14 @@ public class CatenaryModule {
             double grade = trainGrade(train);
 
             // Electrical demand for the current mechanical situation.
+            // The motors draw current whenever they are being driven against the train: an emergency
+            // application, or REVERSE used as a brake while still moving. Both are motor work at rating,
+            // and both must be billed to the catenary - the emergency brake is explicitly not a
+            // regenerative brake.
+            boolean motorBraking = trainData.driver.emergencyArmed
+                    || (trainData.driver.gear == TrainGear.REVERSE && Math.abs(trainSpeedMs) > 1e-3d);
             double electricalPower = TrainTractionModel.electricalDemand(
-                    trainSpeedMs, accelerationMs2, grade, carriages, powerScale);
+                    trainSpeedMs, accelerationMs2, grade, carriages, powerScale, motorBraking);
 
             // Guard against a non-finite demand producing a broken resistance.
             if (!(electricalPower > 0d) || Double.isNaN(electricalPower))

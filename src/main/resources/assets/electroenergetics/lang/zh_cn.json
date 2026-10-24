@@ -539,7 +539,7 @@
   "key.electroenergetics.pantograph_toggle": "列车：升/降受电弓",
   "electroenergetics.train.panto.up": "已升弓",
   "electroenergetics.train.panto.canRaise": "可升弓",
-  "electroenergetics.train.status.locked": "紧急制动锁定：到下一站前禁止操控",
+  "electroenergetics.train.status.locked": "紧急制动锁定：停车后自行解除，限速持续到下一站",
   "electroenergetics.train.panto.noWire": "无接触网",
   "electroenergetics.train.panto.none": "本车无受电弓",
   "electroenergetics.train.panto.locked": "锁定：禁止操控",

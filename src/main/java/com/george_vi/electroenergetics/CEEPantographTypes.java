@@ -34,7 +34,27 @@ public class CEEPantographTypes {
      * <p>A constant rather than a config option: it is geometry that has to stay in step with the
      * model, and the third-rail type below must NOT be widened with it.
      */
-    private static final float CONTACT_HALF_WIDTH = 3.0f;
+    // The electrical tolerance, in Blocks either side of the pantograph's centre.
+    //
+    // Upstream used 2.0. That is too tight for a catenary that curves while the carriage stays rigid: a
+    // train two Blocks into a bend would lose contact and stop. 2.5 keeps half a Block of margin on top of
+    // upstream without allowing a train to draw power from a wire it is not under.
+    public static final float CONTACT_HALF_WIDTH = 2.5f;
+
+    // The width the collector bar is DRAWN at. Deliberately narrower than the tolerance above.
+    //
+    // These two numbers used to disagree by a factor of three: the tolerance had been widened to three
+    // Blocks while the model still spanned a little over one, so a train three Blocks off the wire still
+    // drew power and the bar visibly floated under nothing. Drawing to the full tolerance fixes that but
+    // makes the bar five Blocks wide, which is not what a pantograph looks like. Drawing to 2.0 leaves
+    // the half-Block of curve margin as the only gap, which is small enough not to read as a gap.
+    public static final float CONTACT_DRAW_HALF_WIDTH = 2.0f;
+
+    // The collector bar in connecting_surface.json runs from x=-9 to x=25 model units about a centre at
+    // x=8, so its half-length is 17/16 Blocks. The renderer scales by this ratio so the drawn bar matches
+    // CONTACT_DRAW_HALF_WIDTH exactly, and the two cannot drift apart again.
+    private static final float MODEL_HALF_WIDTH = 17f / 16f;
+    public static final float CONTACT_MODEL_SCALE = CONTACT_DRAW_HALF_WIDTH / MODEL_HALF_WIDTH;
 
     public static final DeferredHolder<PantographType, PantographType> STANDARD = PANTOGRAPH_TYPE.register("standard", () -> new PantographType(3.25f, 0.25f, 0.5f, CONTACT_HALF_WIDTH));
     public static final DeferredHolder<PantographType, PantographType> DOUBLE = PANTOGRAPH_TYPE.register("double", () -> new PantographType(3.25f, 0.5f, 0.5f, CONTACT_HALF_WIDTH));

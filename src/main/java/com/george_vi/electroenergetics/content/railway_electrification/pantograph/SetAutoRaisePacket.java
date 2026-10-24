@@ -72,7 +72,9 @@ public record SetAutoRaisePacket(UUID trainId, boolean autoRaise) implements Ser
         // The whole panel is inert during an emergency lockout - see the class comment for why this
         // is refused even though it could not raise anything on its own. The client also blocks the
         // key, so this is the authoritative half of the same rule.
-        if (data.driver.emergencyArmed || data.driver.controlsLocked) {
+        // Same three flags as the manual raise check: see the note there for why the penalty is the one
+        // that matters.
+        if (data.driver.emergencyArmed || data.driver.controlsLocked || data.driver.emergencyPenalty) {
             player.displayClientMessage(
                     net.minecraft.network.chat.Component.translatable(
                             "electroenergetics.train.panto.locked"), true);
