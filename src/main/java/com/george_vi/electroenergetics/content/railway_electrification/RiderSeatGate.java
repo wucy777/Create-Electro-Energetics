@@ -9,6 +9,7 @@ import net.minecraft.world.phys.AABB;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * Holds a train to Create's own speed ceiling while anyone aboard is free to move around.
@@ -50,7 +51,7 @@ public final class RiderSeatGate {
     public static final double CREATE_CEILING_BPT = CREATE_CEILING_BPS / 20d;
 
     /** Per-tick cache: several callers ask the same question inside one tick. */
-    private static final Map<Integer, Boolean> CACHE = new HashMap<>();
+    private static final Map<UUID, Boolean> CACHE = new HashMap<>();
     private static long cacheStamp = -1L;
 
     /**
