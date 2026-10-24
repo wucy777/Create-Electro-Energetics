@@ -10,6 +10,16 @@ public final class TrainPantographEntry {
     public final PantographType type;
     public final BlockPos rotatedPos;
     public boolean active;
+
+    /**
+     * Whether this arm looks after itself: raised whenever catenary is in reach, and lowered when it is
+     * not. Per arm, not per train - a consist can run one arm on auto through a bendy section while the
+     * other stays the driver's.
+     *
+     * <p>While set, the manual raise/lower key refuses to act on this arm, because the two would fight:
+     * the next solve would simply put it back. Turning auto off is the way to take manual control.
+     */
+    public boolean autoRaise;
     public boolean facingForward;
 
     /**

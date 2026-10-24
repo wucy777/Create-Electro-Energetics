@@ -217,6 +217,7 @@
   "key.electroenergetics.pantograph_next": "Train: select pantograph",
   "key.electroenergetics.pantograph_auto": "Train: Toggle auto-raise",
   "electroenergetics.train.panto.autoOn": "AUTO RAISE",
+  "electroenergetics.train.panto.autoLocked": "This pantograph is automatic - turn auto off to control it by hand",
   "electroenergetics.train.panto.autoOff": "MANUAL",
   "key.electroenergetics.pantograph_toggle": "Train: raise/lower pantograph",
   "electroenergetics.train.panto.up": "Raised",

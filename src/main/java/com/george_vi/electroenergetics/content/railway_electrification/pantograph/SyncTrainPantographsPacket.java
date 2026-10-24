@@ -70,9 +70,10 @@ public record SyncTrainPantographsPacket(UUID trainId, boolean locked, boolean a
      * @param active whether the driver has it raised
      * @param reachable whether catenary is within reach of it right now
      * @param railShoe whether this is a rail contact shoe rather than an overhead pantograph
+     * @param autoRaise whether this arm is on automatic raise/lower, which disables its manual key
      */
     public record Entry(int carriageIndex, BlockPos localPos, boolean active, boolean reachable,
-                        boolean railShoe) {}
+                        boolean railShoe, boolean autoRaise) {}
 
     /**
      * Written by hand rather than composed: the payload is a variable-length list of records, which
@@ -96,7 +97,7 @@ public record SyncTrainPantographsPacket(UUID trainId, boolean locked, boolean a
                 BlockPos localPos = BlockPos.STREAM_CODEC.decode(buffer);
                 int flags = buffer.readUnsignedByte();
                 entries.add(new Entry(carriageIndex, localPos, (flags & 1) != 0,
-                        (flags & 2) != 0, (flags & 4) != 0));
+                        (flags & 2) != 0, (flags & 4) != 0, (flags & 8) != 0));
             }
             return new SyncTrainPantographsPacket(trainId, locked, autoRaise, entries);
         }
@@ -112,7 +113,8 @@ public record SyncTrainPantographsPacket(UUID trainId, boolean locked, boolean a
             for (Entry e : p.entries) {
                 buffer.writeByte(e.carriageIndex & 0xFF);
                 BlockPos.STREAM_CODEC.encode(buffer, e.localPos);
-                buffer.writeByte((e.active ? 1 : 0) | (e.reachable ? 2 : 0) | (e.railShoe ? 4 : 0));
+                buffer.writeByte((e.active ? 1 : 0) | (e.reachable ? 2 : 0) | (e.railShoe ? 4 : 0)
+                        | (e.autoRaise ? 8 : 0));
             }
         }
     };

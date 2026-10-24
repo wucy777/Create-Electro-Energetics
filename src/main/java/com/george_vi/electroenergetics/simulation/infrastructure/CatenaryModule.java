@@ -261,7 +261,8 @@ public class CatenaryModule {
                             // It is allowed because it is not a silent raise: the driver turned the
                             // switch on. The invariant is now "no raise without either the driver's
                             // packet or the driver's switch", and both are the driver.
-                            if (!raised && trainData.autoRaisePantographs)
+                            // Per arm: this one's own switch, not the consist's.
+                            if (!raised && pantograph.autoRaise)
                                 pantograph.active = true;
 
                             // A raised this tick (by the driver earlier, or by the switch just above)
@@ -837,11 +838,22 @@ public class CatenaryModule {
     private void syncPantographs(Train train, ElectricTrainData trainData, TrainDriverState driver) {
         trainData.ticksSincePantographSync++;
         boolean lockChanged = trainData.lastSyncedControlsLocked != driver.controlsLocked;
+        // The header flag is now derived from the arms rather than stored on the train: automatic
+        // raise/lower is per arm, and a single train-wide boolean could only ever be a summary of them.
+        boolean anyAuto = false;
+        for (Carriage c : train.carriages) {
+            if (!(c instanceof IPantographList l))
+                continue;
+            for (TrainPantographEntry pe : l.electroEnergetics$getPantographList()) {
+                if (pe.autoRaise) { anyAuto = true; break; }
+            }
+            if (anyAuto) break;
+        }
         // The switch state is sent on change for the same reason the lock is: the driver pressed a key
         // and is looking at the panel. Waiting for the five-tick keep-alive would leave the indicator
         // disagreeing with the key for a quarter of a second, which reads as the key not having worked.
         boolean autoRaiseChanged =
-                trainData.lastSyncedAutoRaisePantographs != trainData.autoRaisePantographs;
+                trainData.lastSyncedAutoRaisePantographs != anyAuto;
         if (!lockChanged && !autoRaiseChanged
                 && trainData.ticksSincePantographSync < PANTOGRAPH_SYNC_INTERVAL)
             return;
@@ -867,17 +879,16 @@ public class CatenaryModule {
             for (TrainPantographEntry pe : list.electroEnergetics$getPantographList()) {
                 entries.add(new SyncTrainPantographsPacket.Entry(
                         i, pe.originalPos, pe.active, pe.reachable,
-                        pe.type == CEEPantographTypes.RAIL_CONTACT_SHOE.get()));
+                        pe.type == CEEPantographTypes.RAIL_CONTACT_SHOE.get(), pe.autoRaise));
             }
         }
 
         CatnipServices.NETWORK.sendToClient(driverPlayer,
-                new SyncTrainPantographsPacket(train.id, driver.controlsLocked,
-                        trainData.autoRaisePantographs, entries));
+                new SyncTrainPantographsPacket(train.id, driver.controlsLocked, anyAuto, entries));
 
         trainData.ticksSincePantographSync = 0;
         trainData.lastSyncedControlsLocked = driver.controlsLocked;
-        trainData.lastSyncedAutoRaisePantographs = trainData.autoRaisePantographs;
+        trainData.lastSyncedAutoRaisePantographs = anyAuto;
     }
 
     /** Voltage the catenary is nominally at; used for creative-supply trains. */

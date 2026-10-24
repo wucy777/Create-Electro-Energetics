@@ -295,13 +295,6 @@ public final class TrainControlInput {
         // The auto-raise switch is deliberately OUTSIDE the `!pantographs.isEmpty()` test below. It is
         // a property of the train's operation rather than of any one arm, and a consist whose list is
         // momentarily empty must still be able to turn it off - which is the safe direction.
-        if (!locked && pantoAuto && !pantoAutoWasDown) {
-            CatnipServices.NETWORK.sendToServer(
-                    new com.george_vi.electroenergetics.content.railway_electrification
-                            .pantograph.SetAutoRaisePacket(train.id,
-                            !TrainHudData.autoRaise(train.id)));
-        }
-
         if (!locked && !pantographs.isEmpty()) {
             // Clamped rather than wrapped blindly: the server's list can shrink when a carriage is
             // removed, and a selection left pointing past the end would make the toggle key do
@@ -319,6 +312,16 @@ public final class TrainControlInput {
                     selectedPantograph = (selectedPantograph + 1) % count;
                 if (pantoPrev && !pantoPrevWasDown)
                     selectedPantograph = (selectedPantograph - 1 + count) % count;
+            }
+
+            // Automatic raise/lower is per arm, so the key acts on the selection like the manual one.
+            // Pressing it while a given arm is selected flips that arm only; the others are untouched.
+            if (pantoAuto && !pantoAutoWasDown) {
+                var target = pantographs.get(selectedPantograph);
+                CatnipServices.NETWORK.sendToServer(
+                        new com.george_vi.electroenergetics.content.railway_electrification
+                                .pantograph.SetAutoRaisePacket(train.id, target.carriageIndex(),
+                                target.localPos(), !target.autoRaise()));
             }
 
             if (pantoToggle && !pantoToggleWasDown) {

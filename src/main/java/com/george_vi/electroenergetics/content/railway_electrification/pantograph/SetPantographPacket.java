@@ -82,6 +82,13 @@ public record SetPantographPacket(UUID trainId, int carriageIndex, BlockPos loca
         if (entry == null)
             return;
 
+        // Automatic raise/lower owns this arm. Its manual key would be undone by the very next solve, so
+        // refusing is the honest answer - and the panel says AUTO, which is where the driver is told why.
+        if (entry.autoRaise) {
+            refusal(player, "electroenergetics.train.panto.autoLocked");
+            return;
+        }
+
         if (!raise) {
             // Always allowed. A driver must be able to drop a pantograph at any moment, and
             // refusing to would be the one failure with no workaround.

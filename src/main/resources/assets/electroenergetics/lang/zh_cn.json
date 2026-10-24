@@ -535,6 +535,7 @@
   "key.electroenergetics.pantograph_next": "列车：选择受电弓",
   "key.electroenergetics.pantograph_auto": "列车：自动升弓开关",
   "electroenergetics.train.panto.autoOn": "自动升弓",
+  "electroenergetics.train.panto.autoLocked": "该受电弓为自动模式，先关闭自动才能手动升降",
   "electroenergetics.train.panto.autoOff": "手动",
   "key.electroenergetics.pantograph_toggle": "列车：升/降受电弓",
   "electroenergetics.train.panto.up": "已升弓",

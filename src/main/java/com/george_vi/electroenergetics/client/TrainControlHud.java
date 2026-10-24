@@ -477,7 +477,9 @@ public class TrainControlHud implements LayeredDraw.Layer {
         // the per-arm state MEANS: with it on, a lowered arm will be raised again by the next solve,
         // so "this one is down" is not something the driver can act on. Saying AUTO makes that
         // obvious instead of leaving them pressing raise and watching it revert.
-        if (TrainHudData.autoRaise(train.id))
+        var chosen = pantographs.get(Math.min(TrainControlInput.selectedPantograph(),
+                pantographs.size() - 1));
+        if (chosen.autoRaise())
             return tr("electroenergetics.train.panto.autoOn");
         var sel = pantographs.get(Math.min(TrainControlInput.selectedPantograph(),
                 pantographs.size() - 1));
