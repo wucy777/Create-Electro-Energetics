@@ -226,7 +226,20 @@ public class TrainMixin implements ICEETrainExtension {
      * than teleported - the same treatment the emergency penalty already had in the gear law.
      */
     @Unique
+    /**
+     * The ceiling every branch of {@code maxSpeed()} passes through.
+     *
+     * <p>The clamp lives here rather than at each return because this helper is the one point all of them
+     * share - including the fall-through to Create's own figure. One place, so a new branch cannot forget
+     * it, and so the rule reads as a property of the ceiling rather than of any particular control scheme.
+     */
     private static float electroEnergetics$withPenalty(float ceiling, Train self,
+                                                       ElectricTrainData data) {
+        return com.george_vi.electroenergetics.content.railway_electrification.RiderSeatGate.clamp(
+                self, electroEnergetics$withPenaltyRaw(ceiling, self, data));
+    }
+
+    private static float electroEnergetics$withPenaltyRaw(float ceiling, Train self,
                                                        ElectricTrainData data) {
         // The flag lives on the driver state, which only the SERVER ever writes: it is set when the
         // emergency brake is pulled (SetTrainGearPacket) and restored from the train tag on load.

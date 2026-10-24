@@ -24,8 +24,6 @@
     "defaultRequire": 1
   },
   "mixins": [
-    "CarriageCarrySuppressMixin",
-    "CarriageRiderFrameMixin",
     "CarriageChunkProbeMixin",
     "BlockStateBaseMixin",
     "CarriageContraptionEntityMixin",
