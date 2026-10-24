@@ -8,6 +8,7 @@ import com.simibubi.create.Create;
 import com.simibubi.create.content.trains.entity.Train;
 import io.netty.buffer.ByteBuf;
 import net.createmod.catnip.net.base.ServerboundPacketPayload;
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.UUIDUtil;
 import net.minecraft.network.codec.ByteBufCodecs;
 import net.minecraft.network.codec.StreamCodec;
@@ -15,39 +16,6 @@ import net.minecraft.server.level.ServerPlayer;
 
 import java.util.UUID;
 
-/**
- * Driver to server: turn the automatic-raise switch on or off.
- *
- * <h2>What the switch does</h2>
- *
- * <p>On, it restores upstream's behaviour: a pantograph with catenary in reach is raised, with no
- * further test. Off - the default - a pantograph only goes up because the driver's packet put it
- * there.
- *
- * <h2>Why it is a switch and not a key</h2>
- *
- * <p>The case that prompted it is a rigid carriage on a curve. The arm is fixed in the carriage's
- * frame while the catenary follows the arc, so on a tight enough bend the contact leaves reach
- * sideways; the automatic lowering that is deliberately kept then drops the arm, and by the time the
- * track straightens the train has already lost speed. Pressing raise at the right moment on every
- * bend is not a driving skill, it is a chore, and the operator's own track is a compact loop where it
- * would happen constantly. So it is a mode, held on, not a key pressed repeatedly.
- *
- * <p>Automatic lowering still applies while the switch is on, which is what makes the pair work:
- * "raise whenever there is wire, drop it when there is none" is exactly upstream's behaviour, and
- * that is what the switch restores.
- *
- * <p>Deliberately NOT blocked by the emergency lockout, and this is a considered exception. The
- * lockout exists so an emergency stop cannot be finished on the motors; it is enforced on the
- * individual raise command, which is what could do that. This switch does not raise anything by
- * itself - it sets a policy, and the policy only takes effect through geometry that is re-evaluated
- * every solve. But the panel is inert during a lockout, so the key is unreachable anyway; the check
- * here is therefore refused rather than allowed, to keep the panel's rule "everything is inert"
- * literally true rather than approximately true.
- *
- * @param trainId the train the driver is at the controls of
- * @param autoRaise the switch's new position
- */
 /**
  * Turns one arm's automatic raise/lower on or off.
  *
@@ -77,7 +45,7 @@ public record SetAutoRaisePacket(UUID trainId, int carriageIndex, BlockPos local
 
         // Only the person at the controls. Checked against Create's own record, like every other cab
         // packet, and not gated on the control mode: a driver handed to Create must still be able to
-        // turn the switch on, because that is how they get the electric controls back.
+        // turn it on, because that is how they get the electric controls back.
         if (!data.driver.isDriver(player.getUUID()))
             return;
 
