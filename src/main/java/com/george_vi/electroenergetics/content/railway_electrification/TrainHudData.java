@@ -327,6 +327,14 @@ public final class TrainHudData {
      * <p>Absent means OFF, which is the default and the safe direction: a train whose state has not
      * arrived yet must not be drawn as if it were raising itself.
      */
+    /** Carriages in each train's consist, as last reported. */
+    private static final java.util.Map<UUID, Integer> CARRIAGE_COUNT = new ConcurrentHashMap<>();
+
+    /** How many carriages this train has, or 0 when the server has not said. */
+    public static int carriageCount(UUID trainId) {
+        return CARRIAGE_COUNT.getOrDefault(trainId, 0);
+    }
+
     private static final java.util.Set<UUID> AUTO_RAISE =
             java.util.concurrent.ConcurrentHashMap.newKeySet();
 
@@ -336,10 +344,12 @@ public final class TrainHudData {
     }
 
     public static void updatePantographs(UUID trainId, boolean locked, boolean autoRaise,
+                                        int carriageCount,
                                          java.util.List<
             com.george_vi.electroenergetics.content.railway_electrification.pantograph
                     .SyncTrainPantographsPacket.Entry> entries) {
         PANTOGRAPHS.put(trainId, java.util.List.copyOf(entries));
+        CARRIAGE_COUNT.put(trainId, carriageCount);
         if (locked)
             PANTOGRAPH_LOCKED.add(trainId);
         else

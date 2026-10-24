@@ -59,7 +59,7 @@ import java.util.UUID;
  * @param entries one per pantograph, in carriage order
  */
 public record SyncTrainPantographsPacket(UUID trainId, boolean locked, boolean autoRaise,
-                                         List<Entry> entries)
+                                         int carriageCount, List<Entry> entries)
         implements ClientboundPacketPayload {
 
     /**
@@ -90,6 +90,10 @@ public record SyncTrainPantographsPacket(UUID trainId, boolean locked, boolean a
             // consist) exactly as `locked` is - putting a train-level flag inside the per-pantograph
             // byte would mean repeating it on every entry and inviting the copies to disagree.
             boolean autoRaise = buffer.readBoolean();
+            // How many carriages the consist has, so the panel can draw the whole train rather than only
+            // the carriages that happen to carry a pantograph. The client cannot ask: Carriage is server
+            // state, and train.carriages is empty there.
+            int carriageCount = buffer.readUnsignedByte();
             int count = buffer.readUnsignedByte();
             List<Entry> entries = new ArrayList<>(count);
             for (int i = 0; i < count; i++) {
@@ -99,7 +103,7 @@ public record SyncTrainPantographsPacket(UUID trainId, boolean locked, boolean a
                 entries.add(new Entry(carriageIndex, localPos, (flags & 1) != 0,
                         (flags & 2) != 0, (flags & 4) != 0, (flags & 8) != 0));
             }
-            return new SyncTrainPantographsPacket(trainId, locked, autoRaise, entries);
+            return new SyncTrainPantographsPacket(trainId, locked, autoRaise, carriageCount, entries);
         }
 
         @Override
@@ -107,6 +111,7 @@ public record SyncTrainPantographsPacket(UUID trainId, boolean locked, boolean a
             UUIDUtil.STREAM_CODEC.encode(buffer, p.trainId);
             buffer.writeBoolean(p.locked);
             buffer.writeBoolean(p.autoRaise);
+            buffer.writeByte(Math.min(255, p.carriageCount));
             // A consist with more than 255 pantographs does not exist; clamped rather than
             // growing the field, since the count is what every other field's size depends on.
             buffer.writeByte(Math.min(255, p.entries.size()));
@@ -122,7 +127,7 @@ public record SyncTrainPantographsPacket(UUID trainId, boolean locked, boolean a
     @Override
     @OnlyIn(Dist.CLIENT)
     public void handle(LocalPlayer player) {
-        TrainHudData.updatePantographs(trainId, locked, autoRaise, entries);
+        TrainHudData.updatePantographs(trainId, locked, autoRaise, carriageCount, entries);
     }
 
     @Override

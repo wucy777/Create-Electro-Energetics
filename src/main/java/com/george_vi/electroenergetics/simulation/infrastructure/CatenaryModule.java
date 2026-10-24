@@ -884,7 +884,8 @@ public class CatenaryModule {
         }
 
         CatnipServices.NETWORK.sendToClient(driverPlayer,
-                new SyncTrainPantographsPacket(train.id, driver.controlsLocked, anyAuto, entries));
+                new SyncTrainPantographsPacket(train.id, driver.controlsLocked, anyAuto,
+                        train.carriages.size(), entries));
 
         trainData.ticksSincePantographSync = 0;
         trainData.lastSyncedControlsLocked = driver.controlsLocked;

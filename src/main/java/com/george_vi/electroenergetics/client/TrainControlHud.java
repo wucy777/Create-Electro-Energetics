@@ -296,7 +296,10 @@ public class TrainControlHud implements LayeredDraw.Layer {
                 TrainControlLayout.footerRowY(y, TrainControlLayout.FOOTER_ROW_PANTO));
     }
 
-    /** The pantograph row: one glyph per pantograph, the selected one accented. */
+    /**
+     * The pantograph row: the consist drawn as carriages, each arm marked above the carriage it is on,
+     * the selected one accented.
+     */
     private static void drawPantographs(GuiGraphics graphics, Font font, Train train,
                                         int x, int y) {
         java.util.List<com.george_vi.electroenergetics.content.railway_electrification.pantograph
@@ -311,8 +314,7 @@ public class TrainControlHud implements LayeredDraw.Layer {
         // is drawn straight over it - and drawSmallFitted never shrinks it, because 94 has not been
         // exceeded yet. A three-carriage train with three pantographs is already 40.5 px wide at 75%
         // scale, so this was the ordinary case, not an extreme one.
-        drawSmallFitted(graphics, font, pantographGlyphs(pantographs), x, y,
-                PANTO_DETAIL_X - 4, TEXT);
+        drawPantographConsist(graphics, train, pantographs, x, y);
         // The detail shares its line with the glyph group, so it only has what is left of the panel:
         // measured from its own left edge to the panel's right inset.
         drawSmallFitted(graphics, font, key(TrainControlKeys.PANTOGRAPH_TOGGLE) + " "
@@ -377,8 +379,10 @@ public class TrainControlHud implements LayeredDraw.Layer {
             // at x + PANTO_DETAIL_X, so the row owns PANTO_DETAIL_X - 5 pixels and must be measured
             // against that. Using drawSmall here measured against the whole panel and let the glyphs
             // run over the detail from three pantographs upward.
-            drawSmallFitted(graphics, font, pantographGlyphs(pantographs), x + 5, y + 15,
-                    PANTO_DETAIL_X - 9, TEXT);
+            // The same consist strip as the electric panel. Two panels, one picture: the marks above
+            // the carriages mean the same thing whichever scheme is driving, and a driver handed to
+            // Create should not lose the only place that says which arm is on which carriage.
+            drawPantographConsist(graphics, train, pantographs, x + 5, y + 15);
             drawSmallFitted(graphics, font, key(TrainControlKeys.PANTOGRAPH_TOGGLE) + " "
                             + pantographStateText(train, pantographs), x + PANTO_DETAIL_X, y + 15,
                     FITTED_MAX_W - PANTO_DETAIL_X, pantographStateColour(train, pantographs));
@@ -459,6 +463,94 @@ public class TrainControlHud implements LayeredDraw.Layer {
             line.append(i == selected ? ']' : ' ');
         }
         return line.toString();
+    }
+
+
+    /**
+     * The consist, drawn as a row of carriage silhouettes, with each pantograph above the carriage it is
+     * fitted to and an arrow below for the direction of travel.
+     *
+     * <h2>Why a drawing rather than a glyph string</h2>
+     *
+     * <p>The row used to be "pPp" - one character per pantograph. It told the driver how many there were
+     * and nothing else: not which carriage any of them was on, not how long the train was, and not which
+     * end was leading. A strip of carriages carries all three in the same space, because the position of
+     * a mark above a carriage IS which carriage it is on.
+     *
+     * <h2>Why the client needs the carriage count</h2>
+     *
+     * <p>The list only contains carriages that have a pantograph. A rake with one power car would draw as
+     * a single carriage, which is worse than useless - it would misrepresent the train's length. The count
+     * comes from the server in the sync packet because {@code train.carriages} is empty on the client:
+     * Carriage is server state there, the same reason the control gate cannot read it.
+     *
+     * <h2>Shape</h2>
+     *
+     * <p>Bodies are inset by a pixel at each end and the two end carriages get one further step, so the
+     * silhouette is chamfered rather than a row of boxes. That is as close to an EMU nose as four pixels
+     * allow, and it is deliberately narrow: at this size a rounded nose and a pointed one are the same
+     * two pixels.
+     *
+     * <h2>Cost</h2>
+     *
+     * <p>One fill per carriage plus three per pantograph, on a panel that is only drawn while the driver
+     * holds the cab. Nothing is allocated.
+     */
+    private static void drawPantographConsist(GuiGraphics graphics, Train train,
+                                              java.util.List<
+                                                      com.george_vi.electroenergetics.content
+                                                              .railway_electrification.pantograph
+                                                              .SyncTrainPantographsPacket.Entry> pantographs,
+                                              int x, int y) {
+        int n = Math.max(1, Math.min(20, TrainHudData.carriageCount(train.id)));
+        int avail = PANTO_DETAIL_X - 8;
+        int gap = n > 1 ? 1 : 0;
+        int carW = Math.max(4, (avail - gap * (n - 1)) / n);
+
+        int selected = Math.min(TrainControlInput.selectedPantograph(),
+                Math.max(0, pantographs.size() - 1));
+        int selectedCarriage = pantographs.isEmpty() ? -1 : pantographs.get(selected).carriageIndex();
+
+        for (int i = 0; i < n; i++) {
+            int cx = x + i * (carW + gap);
+            int colour = i == selectedCarriage ? TEXT : TEXT_DIM;
+
+            graphics.fill(cx + 1, y + 2, cx + carW - 1, y + 5, colour);
+            // A nose only on the outside of the two end carriages. The cars between them are flat, as
+            // they are on the real thing.
+            if (i == 0)
+                graphics.fill(cx, y + 3, cx + 1, y + 4, colour);
+            if (i == n - 1)
+                graphics.fill(cx + carW - 1, y + 3, cx + carW, y + 4, colour);
+            if (i == selectedCarriage)
+                graphics.fill(cx, y + 6, cx + carW, y + 7, colour);
+        }
+
+        // Each pantograph above its own carriage: a collector bar and a stem, which is the least that
+        // still reads as a pantograph at this size. Red when that arm is on automatic, because the panel's
+        // detail line says the same thing in words.
+        for (var entry : pantographs) {
+            int i = Math.max(0, Math.min(n - 1, entry.carriageIndex()));
+            int cx = x + i * (carW + gap);
+            int mx = cx + carW / 2;
+            int colour = entry.autoRaise() ? DANGER : (entry.active() ? TEXT : TEXT_DIM);
+            graphics.fill(mx - 2, y, mx + 3, y + 1, colour);
+            graphics.fill(mx, y + 1, mx + 1, y + 2, colour);
+        }
+
+        // Direction of travel. The strip is in consist order, so this is what says which end leads:
+        // a filled triangle pointing the way the train is going.
+        boolean right = train.speed >= 0;
+        int ax = right ? x + n * (carW + gap) - gap - 2 : x;
+        if (right) {
+            graphics.fill(ax, y + 7, ax + 1, y + 8, TEXT_DIM);
+            graphics.fill(ax + 1, y + 8, ax + 2, y + 9, TEXT_DIM);
+            graphics.fill(ax, y + 9, ax + 1, y + 10, TEXT_DIM);
+        } else {
+            graphics.fill(ax + 1, y + 7, ax + 2, y + 8, TEXT_DIM);
+            graphics.fill(ax, y + 8, ax + 1, y + 9, TEXT_DIM);
+            graphics.fill(ax + 1, y + 9, ax + 2, y + 10, TEXT_DIM);
+        }
     }
 
     /**
