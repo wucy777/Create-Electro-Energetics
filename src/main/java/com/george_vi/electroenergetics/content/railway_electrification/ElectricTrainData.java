@@ -158,6 +158,10 @@ public class ElectricTrainData {
      * snapping back.
      */
     public boolean gearAvailable(TrainGear gear) {
+        // Over capacity: accelerate is refused. Brake and cruise stay available - the train still has to
+        // be able to slow down and to hold a speed, and locking those would strand the driver.
+        if (gear == TrainGear.ACCELERATE && driver.overloaded)
+            return false;
         if (gear.appliesTraction())
             return isPowered || hasCreativeSource;
         return true;

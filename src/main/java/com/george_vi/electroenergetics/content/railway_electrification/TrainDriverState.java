@@ -542,6 +542,16 @@ public class TrainDriverState {
     public boolean riderBrakeNotified = false;
 
     /**
+     * True while there are more players aboard than there are seats for them.
+     *
+     * <p>The only thing this caps: while it holds, the train may not exceed Create's ceiling and the
+     * accelerate position is refused. It is a capacity limit, not a "somebody is standing" penalty - a
+     * player on their feet below the ceiling is free to walk around, which is the whole point of seating
+     * them in the first place.
+     */
+    public boolean overloaded = false;
+
+    /**
      * The vigilance device tripping: brake the train to a stand and drop the lever.
      *
      * <p>Deliberately not the emergency brake. A forgotten acknowledgement should stop

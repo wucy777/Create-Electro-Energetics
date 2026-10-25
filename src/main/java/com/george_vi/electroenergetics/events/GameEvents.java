@@ -233,28 +233,42 @@ public class GameEvents {
 
             driver.tickDriverPresence();
 
-            // Somebody standing on a train that is ALREADY above Create's ceiling.
+            // Two rules, in this order, and they are not the same rule.
             //
-            // The ceiling clamp cannot answer this - the train is faster than the ceiling it would impose -
-            // so the train is brought down on the ordinary brake lever. Deliberately NOT the emergency
-            // application: the owner's ruling is that this is an operational mistake, not an emergency, and
-            // firing the emergency brake here would forfeit the pantograph until the next station for what
-            // may be a passenger who stood up a moment too early.
+            // 1. Somebody standing on a train that is already above Create's ceiling: seat them, into a
+            //    free seat on THIS train. Above that speed a standing rider has no stable frame, so the
+            //    choice is seat them or stop - and seating is what was asked for. The candidate seats are
+            //    read from this train's own carriages, so a nearer seat on another train, or a seat block
+            //    standing in the world, can never be used.
             //
-            // Reapplied every tick the condition holds, so moving the lever back while it is still too fast
-            // is overruled. The message is latched separately, because the condition is true for as long as
-            // it takes to stop and a message per tick would be unreadable.
-            boolean ridersOnTheirFeet = data.underElectricControl() && RiderSeatGate.anyUnseated(train);
-            if (ridersOnTheirFeet
-                    && Math.abs(train.speed) > RiderSeatGate.CREATE_CEILING_BPT) {
-                if (driver.gear != TrainGear.BRAKE)
-                    driver.gear = TrainGear.BRAKE;
-                if (!driver.riderBrakeNotified) {
-                    driver.riderBrakeNotified = true;
-                    notifyRiders(train, "electroenergetics.train.riders.notSeatedBraking");
+            // 2. If no seat is free the train is over capacity. Brake down to the ceiling, hold cruise
+            //    once there, and refuse the accelerate position until the overload clears - which it does
+            //    by itself when somebody gets off, dies or teleports away.
+            //
+            // There used to be a third rule, braking to a stand for any standing rider above the ceiling.
+            // It contradicted rule 1: it fired on the exact situation rule 1 now resolves by seating.
+            if (data.underElectricControl()) {
+                boolean unseated = RiderSeatGate.anyUnseated(train);
+                if (unseated && Math.abs(train.speed) > RiderSeatGate.CREATE_CEILING_BPT) {
+                    RiderSeatGate.trySeatAll(train);
+                    unseated = RiderSeatGate.anyUnseated(train);
                 }
-            } else {
-                driver.riderBrakeNotified = false;
+
+                driver.overloaded = unseated;
+                if (unseated) {
+                    if (Math.abs(train.speed) > RiderSeatGate.CREATE_CEILING_BPT) {
+                        if (driver.gear != TrainGear.BRAKE)
+                            driver.gear = TrainGear.BRAKE;
+                    } else if (driver.gear == TrainGear.ACCELERATE || driver.gear == TrainGear.REVERSE) {
+                        driver.gear = TrainGear.CRUISE;
+                    }
+                    if (!driver.riderBrakeNotified) {
+                        driver.riderBrakeNotified = true;
+                        notifyRiders(train, "electroenergetics.train.riders.overloaded");
+                    }
+                } else {
+                    driver.riderBrakeNotified = false;
+                }
             }
 
             // A train under a running SCHEDULE is Create's to drive, not this mode's.

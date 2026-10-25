@@ -218,7 +218,7 @@
   "key.electroenergetics.pantograph_auto": "Train: Toggle auto-raise",
   "electroenergetics.train.panto.autoOn": "AUTO RAISE",
   "electroenergetics.train.panto.autoLocked": "This pantograph is automatic - turn auto off to control it by hand",
-  "electroenergetics.train.riders.notSeatedBraking": "A rider is not seated above 28 Blocks/s - train braking",
+  "electroenergetics.train.riders.notSeatedBraking": "Over capacity: not enough seats - capped at 28, accelerate locked",
   "electroenergetics.train.riders.seatLocked": "Above 28 Blocks/s: leaving a seat is not allowed while moving",
   "electroenergetics.train.panto.autoOff": "MANUAL",
   "key.electroenergetics.pantograph_toggle": "Train: raise/lower pantograph",

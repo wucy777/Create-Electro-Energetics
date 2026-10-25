@@ -7,7 +7,10 @@ import com.simibubi.create.content.trains.entity.Train;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Player;
 
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -88,11 +91,95 @@ public final class RiderSeatGate {
         return !allSeated(train);
     }
 
-    /** Applies the ceiling to a value that is already in Blocks per tick. */
+    /**
+     * The players aboard who are not sitting, in a deterministic order.
+     *
+     * <p>Sorted by UUID rather than by whatever order the level hands them out. Two players contending for
+     * the same seat resolve in a fixed order because of this, so the same situation always produces the same
+     * seating - not a different one after a reload.
+     */
+    public static List<Player> unseatedPlayers(Train train) {
+        List<Player> out = new ArrayList<>();
+        for (Carriage carriage : train.carriages) {
+            CarriageContraptionEntity entity = carriage.anyAvailableEntity();
+            if (entity == null || entity.level().isClientSide())
+                continue;
+            for (Entity colliding : entity.collidingEntities.keySet())
+                collect(colliding, out);
+            for (Entity passenger : entity.getIndirectPassengers())
+                collect(passenger, out);
+        }
+        out.sort(Comparator.comparing(Player::getUUID));
+        return out;
+    }
+
+    private static void collect(Entity entity, List<Player> out) {
+        if (entity instanceof Player player && !player.isSpectator() && !isSeated(player) && !out.contains(player))
+            out.add(player);
+    }
+
+    /**
+     * Seats every standing player that a free seat can be found for, and returns how many were seated.
+     *
+     * <p>Only seats belonging to THIS train are considered: the free seats are read from the carriages'
+     * own passengers, so a nearer seat on another train, or a seat block standing in the world, is not a
+     * candidate. That was an explicit instruction - a player must not be moved onto a different train.
+     *
+     * <p>Each assignment claims the seat before the next player is considered, so two players can never be
+     * given the same one. Ties on distance are broken by the seat's own block position, which makes the
+     * outcome independent of iteration order.
+     */
+    public static int trySeatAll(Train train) {
+        List<Player> unseated = unseatedPlayers(train);
+        if (unseated.isEmpty())
+            return 0;
+
+        List<SeatEntity> free = new ArrayList<>();
+        for (Carriage carriage : train.carriages) {
+            CarriageContraptionEntity entity = carriage.anyAvailableEntity();
+            if (entity == null)
+                continue;
+            for (Entity passenger : entity.getPassengers())
+                if (passenger instanceof SeatEntity seat && seat.getPassengers().isEmpty() && !free.contains(seat))
+                    free.add(seat);
+        }
+
+        int seated = 0;
+        for (Player player : unseated) {
+            SeatEntity best = null;
+            double bestDistance = Double.MAX_VALUE;
+            for (SeatEntity seat : free) {
+                double d = seat.distanceToSqr(player);
+                if (best == null
+                        || d < bestDistance - 1.0e-9d
+                        || (Math.abs(d - bestDistance) <= 1.0e-9d && seat.blockPosition().compareTo(best.blockPosition()) < 0)) {
+                    best = seat;
+                    bestDistance = d;
+                }
+            }
+            if (best == null)
+                break;
+            free.remove(best);
+            if (player.startRiding(best, true))
+                seated++;
+        }
+        return seated;
+    }
+
+    /**
+     * Applies the ceiling to a value that is already in Blocks per tick.
+     *
+     * <p>Gated on OVERLOAD, not on "somebody is standing". A player on their feet below the ceiling is the
+     * intended way to move around a train; only when there are more people than seats does the ceiling
+     * apply.
+     */
     public static float clamp(Train train, float blocksPerTick) {
         if (blocksPerTick <= (float) CREATE_CEILING_BPT)
             return blocksPerTick;
-        return allSeated(train) ? blocksPerTick : (float) CREATE_CEILING_BPT;
+
+        var data = ((com.george_vi.electroenergetics.mixin_interfaces.ICEETrainExtension) train)
+                .getElectricTrainData();
+        return data.driver.overloaded ? (float) CREATE_CEILING_BPT : blocksPerTick;
     }
 
     private static boolean compute(Train train) {
