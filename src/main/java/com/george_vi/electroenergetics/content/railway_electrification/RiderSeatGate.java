@@ -1,58 +1,58 @@
 package com.george_vi.electroenergetics.content.railway_electrification;
 
-import com.simibubi.create.content.contraptions.actors.seat.SeatEntity;
+import com.simibubi.create.content.contraptions.Contraption;
 import com.simibubi.create.content.trains.entity.Carriage;
 import com.simibubi.create.content.trains.entity.CarriageContraptionEntity;
 import com.simibubi.create.content.trains.entity.Train;
+import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.phys.Vec3;
 
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /**
- * Answers one question: is anybody aboard this train standing up?
+ * Answers one question - is anybody aboard this train standing up - and puts them in a seat when there is
+ * one to put them in.
  *
- * <h2>The two sources, and why not a bounding box</h2>
+ * <h2>What "seated" means, and the mistake this class made first</h2>
  *
- * <p>This used to scan a world AABB two Blocks around each carriage. That counted players on the platform,
- * spectators flying past, and both trains in a passing loop - so an ordinary station stop pinned the train
- * at Create's ceiling, and two trains meeting did it to each other. The box was my invention; nothing in
- * Create works that way.
+ * <p>A player sitting on a train does NOT ride a seat entity. They ride the carriage itself, and Create
+ * records which seat index they occupy in {@code Contraption.seatMapping}. That mapping is the only
+ * authority, and it is what {@code AbstractContraptionEntity.addSittingPassenger} writes and what
+ * {@code getSeatOf(uuid)} reads.
  *
- * <p>Create already tracks both populations this needs, and the answer is read from them instead:
+ * <p>This class originally tested {@code getVehicle() instanceof SeatEntity}. That is how a seat block
+ * standing in the world works, and it is wrong for a train: every seated passenger rides the carriage, so
+ * every one of them counted as standing. With the ceiling gated on that answer the train would have been
+ * capped whenever anybody was aboard, and the seating pass would have tried to re-seat people who were
+ * already sitting.
+ *
+ * <h2>Who counts as aboard</h2>
+ *
+ * <p>Two collections Create already maintains, per carriage:
  *
  * <ul>
- *   <li>{@code AbstractContraptionEntity.collidingEntities} - the map Create maintains of entities resting
- *       on a contraption. A player standing in the carriage, or on its roof, is in it. A player on the
- *       platform is not.</li>
- *   <li>{@code getIndirectPassengers()} - riders, including a player sitting on a seat, which is itself a
- *       passenger of the contraption.</li>
+ *   <li>{@code collidingEntities} - entities resting on the contraption. A player standing in the carriage,
+ *       or on its roof, is in it. A player on the platform is not.</li>
+ *   <li>{@code getIndirectPassengers()} - riders, including seated passengers.</li>
  * </ul>
  *
- * <p>Both are per-contraption, so a passing train cannot see the other's occupants, and neither query looks
- * at anything outside the train.
+ * <p>Spectators are excluded: not counted, not carried, not followed.
  *
- * <h2>Spectators</h2>
+ * <h2>Free seats come from the carriage, not the world</h2>
  *
- * <p>Excluded outright. A spectator is not part of the world: they are not carried, they are not counted,
- * and their camera follows whatever they are spectating. Leaving them in meant a spectator drifting through
- * a carriage capped the train.
- *
- * <h2>Roof</h2>
- *
- * <p>A player on the roof is in {@code collidingEntities} and is not on a seat, so they count as standing -
- * which is what the owner asked for. Riding on the outside of a train at line speed is exactly the case the
- * ceiling exists to prevent.
- *
- * <h2>Cost</h2>
- *
- * <p>Two small collections per carriage, cached for the tick because several callers of {@code maxSpeed()}
- * ask inside one. Nothing is allocated and no bounding-box query touches the level.
+ * <p>{@code Contraption.getSeats()} lists every seat position in the carriage and the seat mapping says
+ * which are taken, so a free seat is an index in the former that is absent from the latter. Only THIS
+ * train's carriages are read, so a nearer seat on another train, or a seat block standing in the world, can
+ * never be used.
  */
 public final class RiderSeatGate {
 
@@ -81,7 +81,7 @@ public final class RiderSeatGate {
         if (cached != null)
             return cached;
 
-        boolean result = compute(train);
+        boolean result = unseatedPlayers(train).isEmpty();
         CACHE.put(train.id, result);
         return result;
     }
@@ -94,9 +94,8 @@ public final class RiderSeatGate {
     /**
      * The players aboard who are not sitting, in a deterministic order.
      *
-     * <p>Sorted by UUID rather than by whatever order the level hands them out. Two players contending for
-     * the same seat resolve in a fixed order because of this, so the same situation always produces the same
-     * seating - not a different one after a reload.
+     * <p>Sorted by UUID, so two players contending for the same seat resolve the same way every time rather
+     * than in whatever order the level happened to hand them out.
      */
     public static List<Player> unseatedPlayers(Train train) {
         List<Player> out = new ArrayList<>();
@@ -104,64 +103,85 @@ public final class RiderSeatGate {
             CarriageContraptionEntity entity = carriage.anyAvailableEntity();
             if (entity == null || entity.level().isClientSide())
                 continue;
+            Contraption contraption = entity.getContraption();
+            if (contraption == null)
+                continue;
+
             for (Entity colliding : entity.collidingEntities.keySet())
-                collect(colliding, out);
+                collect(colliding, contraption, out);
             for (Entity passenger : entity.getIndirectPassengers())
-                collect(passenger, out);
+                collect(passenger, contraption, out);
         }
         out.sort(Comparator.comparing(Player::getUUID));
         return out;
     }
 
-    private static void collect(Entity entity, List<Player> out) {
-        if (entity instanceof Player player && !player.isSpectator() && !isSeated(player) && !out.contains(player))
+    private static void collect(Entity entity, Contraption contraption, List<Player> out) {
+        if (!(entity instanceof Player player))
+            return;
+        if (player.isSpectator())
+            return;
+        if (contraption.getSeatMapping().containsKey(player.getUUID()))
+            return;                                  // already in a seat
+        if (!out.contains(player))
             out.add(player);
     }
 
     /**
      * Seats every standing player that a free seat can be found for, and returns how many were seated.
      *
-     * <p>Only seats belonging to THIS train are considered: the free seats are read from the carriages'
-     * own passengers, so a nearer seat on another train, or a seat block standing in the world, is not a
-     * candidate. That was an explicit instruction - a player must not be moved onto a different train.
-     *
      * <p>Each assignment claims the seat before the next player is considered, so two players can never be
-     * given the same one. Ties on distance are broken by the seat's own block position, which makes the
-     * outcome independent of iteration order.
+     * given the same one. Ties on distance are broken by the seat's own position, which makes the outcome
+     * independent of iteration order.
      */
     public static int trySeatAll(Train train) {
         List<Player> unseated = unseatedPlayers(train);
         if (unseated.isEmpty())
             return 0;
 
-        List<SeatEntity> free = new ArrayList<>();
+        record Candidate(CarriageContraptionEntity entity, int index, BlockPos local, Vec3 world) {}
+
+        List<Candidate> free = new ArrayList<>();
         for (Carriage carriage : train.carriages) {
             CarriageContraptionEntity entity = carriage.anyAvailableEntity();
-            if (entity == null)
+            if (entity == null || entity.level().isClientSide())
                 continue;
-            for (Entity passenger : entity.getPassengers())
-                if (passenger instanceof SeatEntity seat && seat.getPassengers().isEmpty() && !free.contains(seat))
-                    free.add(seat);
+            Contraption contraption = entity.getContraption();
+            if (contraption == null)
+                continue;
+
+            List<BlockPos> seats = contraption.getSeats();
+            Set<Integer> taken = new HashSet<>(contraption.getSeatMapping().values());
+            for (int i = 0; i < seats.size(); i++) {
+                if (taken.contains(i))
+                    continue;
+                BlockPos local = seats.get(i);
+                free.add(new Candidate(entity, i, local, entity.toGlobalVector(Vec3.atCenterOf(local), 1.0f)));
+            }
         }
 
         int seated = 0;
         for (Player player : unseated) {
-            SeatEntity best = null;
+            Candidate best = null;
             double bestDistance = Double.MAX_VALUE;
-            for (SeatEntity seat : free) {
-                double d = seat.distanceToSqr(player);
+            for (Candidate candidate : free) {
+                double d = candidate.world().distanceToSqr(player.position());
                 if (best == null
                         || d < bestDistance - 1.0e-9d
-                        || (Math.abs(d - bestDistance) <= 1.0e-9d && seat.blockPosition().compareTo(best.blockPosition()) < 0)) {
-                    best = seat;
+                        || (Math.abs(d - bestDistance) <= 1.0e-9d
+                            && candidate.local().compareTo(best.local()) < 0)) {
+                    best = candidate;
                     bestDistance = d;
                 }
             }
             if (best == null)
                 break;
             free.remove(best);
-            if (player.startRiding(best, true))
-                seated++;
+
+            // Create's own entry point for sitting somebody on a moving contraption. It writes the seat
+            // mapping and starts the ride, so nothing here has to know how either works.
+            best.entity().addSittingPassenger(player, best.index());
+            seated++;
         }
         return seated;
     }
@@ -180,32 +200,5 @@ public final class RiderSeatGate {
         var data = ((com.george_vi.electroenergetics.mixin_interfaces.ICEETrainExtension) train)
                 .getElectricTrainData();
         return data.driver.overloaded ? (float) CREATE_CEILING_BPT : blocksPerTick;
-    }
-
-    private static boolean compute(Train train) {
-        for (Carriage carriage : train.carriages) {
-            CarriageContraptionEntity entity = carriage.anyAvailableEntity();
-            if (entity == null)
-                continue;
-
-            // The client has neither of the two collections below - collidingEntities is filled by the
-            // collider on the side that owns the world - so it must not decide this for itself. Its ceiling
-            // arrives already capped through the synced sample.
-            if (entity.level().isClientSide())
-                return true;
-
-            for (Entity colliding : entity.collidingEntities.keySet())
-                if (colliding instanceof Player player && !player.isSpectator() && !isSeated(player))
-                    return false;
-
-            for (Entity passenger : entity.getIndirectPassengers())
-                if (passenger instanceof Player player && !player.isSpectator() && !isSeated(player))
-                    return false;
-        }
-        return true;
-    }
-
-    private static boolean isSeated(Player player) {
-        return player.getVehicle() instanceof SeatEntity;
     }
 }

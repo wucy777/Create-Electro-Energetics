@@ -12,7 +12,7 @@ public class CEEPantographTypes {
     /**
      * Half-width of the contact strip, in Blocks - the sideways tolerance for collecting current.
      *
-     * <p>Upstream used 2.0. Raised to 3.0 for the two overhead types.
+     * <p>Upstream used 2.0. Raised to 2.5 for the two overhead types.
      *
      * <p>Why: a rigid carriage cannot keep its pantograph under a curved catenary. The arm is fixed
      * in the carriage's frame while the wire follows the arc, so on a compact loop the lateral offset
@@ -20,9 +20,9 @@ public class CEEPantographTypes {
      * bend - then has to be re-raised on every straight, by which time it has lost speed. 2.0 was not
      * enough for the operator's layout.
      *
-     * <p>3.0 rather than an arbitrary larger number because that is the width the contact strip is
+     * <p>2.5 rather than an arbitrary larger number because that is the width the contact strip is
      * understood to be: the debug range box in {@code PantographMovementBehaviour} traces
-     * z = -1.5 .. +1.5 Blocks, i.e. a three-Block strip, so 3.0 is the value at which the tolerance
+     * z = -1.5 .. +1.5 Blocks, i.e. a three-Block strip, so 2.5 is the value at which the tolerance
      * stops being narrower than the metal it is modelling.
      *
      * <p>The cost, stated plainly: this is a wider net than the metal, so a pantograph can collect

@@ -269,6 +269,10 @@ public class GameEvents {
                 } else {
                     driver.riderBrakeNotified = false;
                 }
+            } else {
+                // Handed back to Create: the seat limit is this mod's rule and must not outlive the mode
+                // that owns it. Leaving the flag set capped a train this mod no longer drives.
+                driver.overloaded = false;
             }
 
             // A train under a running SCHEDULE is Create's to drive, not this mode's.
