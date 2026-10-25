@@ -29,11 +29,6 @@ import java.util.UUID;
 public record SetTrainGearPacket(UUID trainId, int gearOrdinal, boolean confirm, boolean emergency)
         implements ServerboundPacketPayload {
 
-    /**
-     * How long the emergency brake is applied for once fired. Long enough to
-     * bring a train down from line speed at the emergency rate; the penalty then
-     * outlives it until the next station.
-     */
 
     public static final StreamCodec<ByteBuf, SetTrainGearPacket> STREAM_CODEC = StreamCodec.composite(
             UUIDUtil.STREAM_CODEC, SetTrainGearPacket::trainId,

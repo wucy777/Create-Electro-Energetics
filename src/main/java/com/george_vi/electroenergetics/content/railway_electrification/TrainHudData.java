@@ -257,6 +257,7 @@ public final class TrainHudData {
         PANTOGRAPHS.keySet().removeIf(id -> !keep.test(id));
         PANTOGRAPH_LOCKED.removeIf(id -> !keep.test(id));
         AUTO_RAISE.removeIf(id -> !keep.test(id));
+        OVERLOADED.removeIf(id -> !keep.test(id));
     }
 
     // ------------------------------------------------------------------
@@ -342,6 +343,11 @@ public final class TrainHudData {
     /** Trains the server last reported as over capacity. */
     private static final java.util.Set<UUID> OVERLOADED =
             java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    /** Whether the server last reported this train as over capacity. */
+    public static boolean overloaded(UUID trainId) {
+        return OVERLOADED.contains(trainId);
+    }
 
     public static void setOverloaded(UUID trainId, boolean overloaded) {
         if (overloaded)

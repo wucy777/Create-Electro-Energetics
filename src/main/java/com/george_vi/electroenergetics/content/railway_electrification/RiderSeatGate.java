@@ -197,8 +197,19 @@ public final class RiderSeatGate {
         if (blocksPerTick <= (float) CREATE_CEILING_BPT)
             return blocksPerTick;
 
-        var data = ((com.george_vi.electroenergetics.mixin_interfaces.ICEETrainExtension) train)
-                .getElectricTrainData();
-        return data.driver.overloaded ? (float) CREATE_CEILING_BPT : blocksPerTick;
+        // Which side is asking matters here. The server owns the flag; the client is told it through the
+        // gauge packet. Reading the server field on the client returns false always, which left the HUD's
+        // speed-bar denominator uncapped while the server was actually holding the train to the ceiling -
+        // the bar then read low for the whole overload.
+        var carriage = train.carriages.isEmpty() ? null : train.carriages.get(0).anyAvailableEntity();
+        boolean overloaded;
+        if (carriage != null && carriage.level().isClientSide()) {
+            overloaded = TrainHudData.overloaded(train.id);
+        } else {
+            var data = ((com.george_vi.electroenergetics.mixin_interfaces.ICEETrainExtension) train)
+                    .getElectricTrainData();
+            overloaded = data.driver.overloaded;
+        }
+        return overloaded ? (float) CREATE_CEILING_BPT : blocksPerTick;
     }
 }
