@@ -788,7 +788,7 @@ public class CatenaryModule {
                                         trainData.regenPower > 0d,
                                         driver.autoArrive, driver.unmanned,
                                         (float) TrainTractionModel.designMaxSpeed(),
-                                        trainData.controlMode.ordinal())
+                                        trainData.controlMode.ordinal(), driver.overloaded)
                         );
                         trainData.lastSyncedVoltage = voltage;
                         trainData.lastSyncedCurrent = totalCurrent;
