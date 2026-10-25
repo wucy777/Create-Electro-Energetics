@@ -532,6 +532,28 @@ public class TrainDriverState {
     }
 
     /**
+     * Pull the emergency brake because somebody is standing on a train that is already too fast for them.
+     *
+     * <p>The same application the reverse-at-speed path makes, and deliberately the same flags: an emergency
+     * brake is an emergency brake, and a second code path that armed it slightly differently is how the
+     * pantograph lock and the gear lock came to disagree in the first place.
+     *
+     * <p>Reached from three situations that are one situation: a player teleported into a moving carriage, a
+     * player who was already standing when the train accelerated past the ceiling, and a passenger who
+     * logged back in on their feet. In all three the ceiling clamp is useless - the train is already faster
+     * than the ceiling it would impose - so the train stops instead.
+     */
+    public void armEmergencyForRiders() {
+        emergencyTicks = 0;
+        emergencyPenalty = true;
+        penaltyStationReached = false;
+        penaltyDistance = 0d;
+        controlsLocked = true;
+        emergencyArmed = true;
+        lockoutTailTicks = 0;
+    }
+
+    /**
      * The vigilance device tripping: brake the train to a stand and drop the lever.
      *
      * <p>Deliberately not the emergency brake. A forgotten acknowledgement should stop

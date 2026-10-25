@@ -36,6 +36,7 @@ import com.george_vi.electroenergetics.simulation.infrastructure.InfrastructureS
 import com.simibubi.create.AllSoundEvents;
 import com.george_vi.electroenergetics.content.railway_electrification.ElectricTrainData;
 import com.george_vi.electroenergetics.content.railway_electrification.TrainDriverState;
+import com.george_vi.electroenergetics.content.railway_electrification.RiderSeatGate;
 import com.george_vi.electroenergetics.content.railway_electrification.TrainGear;
 import com.george_vi.electroenergetics.mixin_interfaces.ICEETrainExtension;
 import com.george_vi.electroenergetics.mixin_interfaces.IPantographList;
@@ -189,6 +190,26 @@ public class GameEvents {
      * <p>Cost is one pass over the train map with no allocation and no work for a
      * train nobody is driving, so it is a handful of integer decrements per tick.
      */
+    /**
+     * Sends an overlay message to everybody aboard a train.
+     *
+     * <p>Walked through the carriages' passengers rather than the level's player list: the people who need
+     * this are by definition the ones on the train, and the level list would also hit players on the
+     * platform who are not involved.
+     */
+    private static void notifyRiders(Train train, String langKey) {
+        for (var carriage : train.carriages) {
+            var entity = carriage.anyAvailableEntity();
+            if (entity == null)
+                continue;
+            for (var passenger : entity.getIndirectPassengers()) {
+                if (passenger instanceof net.minecraft.server.level.ServerPlayer player)
+                    player.displayClientMessage(
+                            net.minecraft.network.chat.Component.translatable(langKey), true);
+            }
+        }
+    }
+
     private static void tickDriverState(MinecraftServer server) {
         if (Create.RAILWAYS.trains.isEmpty())
             return;
@@ -211,6 +232,22 @@ public class GameEvents {
             driver.setDriverPresent(controllingPlayer(train));
 
             driver.tickDriverPresence();
+
+            // Somebody standing on a train that is ALREADY above Create's ceiling. The ceiling clamp
+            // cannot answer this - the train is faster than the ceiling it would impose - so the train
+            // stops, and everybody aboard is told why.
+            //
+            // The situations that reach here are one situation: a player teleported into a moving
+            // carriage, a player who was already on their feet when the train accelerated, a passenger who
+            // logged back in without a seat. All of them are the state this whole feature exists to keep
+            // out, and the owner's rule is explicit - brake, and broadcast.
+            if (data.underElectricControl()
+                    && Math.abs(train.speed) > RiderSeatGate.CREATE_CEILING_BPT
+                    && RiderSeatGate.anyUnseated(train)
+                    && !driver.emergencyArmed) {
+                driver.armEmergencyForRiders();
+                notifyRiders(train, "electroenergetics.train.riders.notSeatedBraking");
+            }
 
             // A train under a running SCHEDULE is Create's to drive, not this mode's.
             //

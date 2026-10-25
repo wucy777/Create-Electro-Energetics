@@ -4,41 +4,52 @@ import com.simibubi.create.content.contraptions.actors.seat.SeatEntity;
 import com.simibubi.create.content.trains.entity.Carriage;
 import com.simibubi.create.content.trains.entity.CarriageContraptionEntity;
 import com.simibubi.create.content.trains.entity.Train;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.phys.AABB;
 
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 
 /**
- * Holds a train to Create's own speed ceiling while anyone aboard is free to move around.
+ * Answers one question: is anybody aboard this train standing up?
  *
- * <h2>The rule</h2>
+ * <h2>The two sources, and why not a bounding box</h2>
  *
- * <p>Create's rider physics are designed for a train that advances well under a Block per tick. Above that,
- * a passenger who is not in a seat has no stable frame to stand in: they sink through a floor the game does
- * not recognise, slide along at the carriage's speed while doing it, and every few ticks the accumulated
- * deficit is settled in one step. That is the entire history of this bug, and it is unfixable by adjusting
- * where the rider is put, because the state itself is outside what the engine supports.
+ * <p>This used to scan a world AABB two Blocks around each carriage. That counted players on the platform,
+ * spectators flying past, and both trains in a passing loop - so an ordinary station stop pinned the train
+ * at Create's ceiling, and two trains meeting did it to each other. The box was my invention; nothing in
+ * Create works that way.
  *
- * <p>So the state is made unreachable instead. While any player aboard is not in a seat, the train's ceiling
- * is Create's own - 28 Blocks per second - and Create's own rider code is correct in that range, unchanged
- * and never overridden. When everyone is seated the electric ceiling applies again and the train is free to
- * run at the speeds this mod exists to allow.
+ * <p>Create already tracks both populations this needs, and the answer is read from them instead:
  *
- * <h2>Why the ceiling and not an override</h2>
+ * <ul>
+ *   <li>{@code AbstractContraptionEntity.collidingEntities} - the map Create maintains of entities resting
+ *       on a contraption. A player standing in the carriage, or on its roof, is in it. A player on the
+ *       platform is not.</li>
+ *   <li>{@code getIndirectPassengers()} - riders, including a player sitting on a seat, which is itself a
+ *       passenger of the contraption.</li>
+ * </ul>
  *
- * <p>{@code Train.maxSpeed()} is the single figure both control schemes consult: Create computes its target
- * speed from it, and this mod's gear law reads it for its own ceiling. Clamping there means the two cannot
- * disagree, and no code path needs to know which scheme is in charge. Nothing is forced, nothing is
- * re-implemented; the train simply is not allowed to ask for a speed at which the problem exists.
+ * <p>Both are per-contraption, so a passing train cannot see the other's occupants, and neither query looks
+ * at anything outside the train.
+ *
+ * <h2>Spectators</h2>
+ *
+ * <p>Excluded outright. A spectator is not part of the world: they are not carried, they are not counted,
+ * and their camera follows whatever they are spectating. Leaving them in meant a spectator drifting through
+ * a carriage capped the train.
+ *
+ * <h2>Roof</h2>
+ *
+ * <p>A player on the roof is in {@code collidingEntities} and is not on a seat, so they count as standing -
+ * which is what the owner asked for. Riding on the outside of a train at line speed is exactly the case the
+ * ceiling exists to prevent.
  *
  * <h2>Cost</h2>
  *
- * <p>One bounding-box query per carriage per train per tick, cached for the tick so the several callers of
- * {@code maxSpeed()} pay for it once. A train with nobody inside is one empty query. This is the minimum
- * that can answer "is anyone standing up on this train" at all.
+ * <p>Two small collections per carriage, cached for the tick because several callers of {@code maxSpeed()}
+ * ask inside one. Nothing is allocated and no bounding-box query touches the level.
  */
 public final class RiderSeatGate {
 
@@ -50,16 +61,10 @@ public final class RiderSeatGate {
     /** The same figure in Blocks per tick, which is what {@code maxSpeed()} returns. */
     public static final double CREATE_CEILING_BPT = CREATE_CEILING_BPS / 20d;
 
-    /** Per-tick cache: several callers ask the same question inside one tick. */
     private static final Map<UUID, Boolean> CACHE = new HashMap<>();
     private static long cacheStamp = -1L;
 
-    /**
-     * Whether every player aboard this train is sitting in a seat.
-     *
-     * <p>A player standing in a carriage is a passenger of the contraption, or not a passenger at all - in
-     * both cases their vehicle is something other than a seat, which is what this tests.
-     */
+    /** Whether every player aboard is sitting in a seat. */
     public static boolean allSeated(Train train) {
         if (train == null || train.carriages == null || train.carriages.isEmpty())
             return true;
@@ -78,6 +83,11 @@ public final class RiderSeatGate {
         return result;
     }
 
+    /** Whether anybody aboard is standing, on the roof included. */
+    public static boolean anyUnseated(Train train) {
+        return !allSeated(train);
+    }
+
     /** Applies the ceiling to a value that is already in Blocks per tick. */
     public static float clamp(Train train, float blocksPerTick) {
         if (blocksPerTick <= (float) CREATE_CEILING_BPT)
@@ -90,16 +100,25 @@ public final class RiderSeatGate {
             CarriageContraptionEntity entity = carriage.anyAvailableEntity();
             if (entity == null)
                 continue;
-            AABB box = entity.getBoundingBox();
-            if (box == null)
-                continue;
-            // Generous by two Blocks: the contraption's own bounds are the carriages' build volume, and a
-            // player pressed against a wall or mid-jump is still aboard.
-            for (Player player : entity.level().getEntitiesOfClass(Player.class, box.inflate(2d))) {
-                if (!(player.getVehicle() instanceof SeatEntity))
+
+            // The client has neither of the two collections below - collidingEntities is filled by the
+            // collider on the side that owns the world - so it must not decide this for itself. Its ceiling
+            // arrives already capped through the synced sample.
+            if (entity.level().isClientSide())
+                return true;
+
+            for (Entity colliding : entity.collidingEntities.keySet())
+                if (colliding instanceof Player player && !player.isSpectator() && !isSeated(player))
                     return false;
-            }
+
+            for (Entity passenger : entity.getIndirectPassengers())
+                if (passenger instanceof Player player && !player.isSpectator() && !isSeated(player))
+                    return false;
         }
         return true;
+    }
+
+    private static boolean isSeated(Player player) {
+        return player.getVehicle() instanceof SeatEntity;
     }
 }
