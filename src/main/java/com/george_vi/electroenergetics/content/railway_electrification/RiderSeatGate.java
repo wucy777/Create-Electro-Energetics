@@ -132,10 +132,15 @@ public final class RiderSeatGate {
     /**
      * Whether this player has a teleport that has been sent but not yet acknowledged.
      *
-     * <p>{@code /tp} does not move a server player. It stores the destination and waits for the client to
-     * confirm; until then {@code position()} is still the OLD one. Seating by that position would put a
-     * player teleported between two seats straight back where they came from, so the search is deferred
-     * until the destination is real - which for a same-train teleport is one or two ticks.
+     * <p>Not because the position is stale - it is not. {@code teleport} applies the destination with
+     * {@code absMoveTo} before it returns, so the player is already at the new coordinate when the command
+     * finishes. The deferral is about the SECOND application: the client's acknowledgement makes the server
+     * call {@code absMoveTo} with the same stored destination again, overwriting anything done in between.
+     *
+     * <p>Seating somebody inside that window puts them in a seat on a moving train, and the acknowledgement
+     * then pulls them back to the static destination - by then metres behind the train. Deferring until the
+     * teleport is no longer pending keeps the seat until after the second application, so the seat is never
+     * undone.
      */
     private static boolean hasTeleportInFlight(Player player) {
         if (!(player instanceof net.minecraft.server.level.ServerPlayer serverPlayer))

@@ -6,17 +6,23 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.gen.Accessor;
 
 /**
- * Reads the server's "a teleport is in flight" field.
+ * Reads the server's "a teleport has been sent but not yet acknowledged" field.
  *
- * <p>A {@code /tp} on a server player does not move them. It sends a position packet and stores the
- * destination in {@code awaitingPositionFromClient}; the position only becomes real when the client
- * acknowledges and {@code handleAcceptTeleportPacket} calls {@code absMoveTo}. Until then
- * {@code player.position()} still reports where they were BEFORE the command.
+ * <h2>What a teleport actually does</h2>
  *
- * <p>That matters for seating: a player teleported from one seat to another would otherwise be seated by
- * the nearest-free-seat search using their old position - putting them back where they started, which is
- * the opposite of what the command asked for. The seat search must run against the position the player
- * actually ends up at, so a player with a teleport in flight is skipped until it lands.
+ * <p>{@code ServerGamePacketListenerImpl.teleport} applies the destination immediately - it calls
+ * {@code absMoveTo} before returning. So the server position is the NEW one from the tick the command
+ * runs; an earlier version of this file claimed otherwise and that claim was wrong.
+ *
+ * <p>What makes the field worth reading is the SECOND application. When the client acknowledges,
+ * {@code handleAcceptTeleportPacket} calls {@code absMoveTo} again with the same stored destination. Any
+ * position change made in between is overwritten.
+ *
+ * <p>That is the window this exists to close. A player teleported between two seats on a moving train can
+ * be seated by the gate during the interval; the acknowledgement then drags them back to the static
+ * destination coordinate, which by then is two to five Blocks behind the train at line speed. The player
+ * sees the seat take hold and then a snap backwards. Skipping a player whose teleport is still pending
+ * keeps the seat until the second application has landed, so nothing has to be undone.
  */
 @Mixin(ServerGamePacketListenerImpl.class)
 public interface TeleportPendingAccessor {
