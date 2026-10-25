@@ -2,6 +2,7 @@ package com.george_vi.electroenergetics.content.railway_electrification.pantogra
 
 import com.george_vi.electroenergetics.CEEPackets;
 import com.george_vi.electroenergetics.content.railway_electrification.ElectricTrainData;
+import com.george_vi.electroenergetics.content.railway_electrification.TrainGear;
 import com.george_vi.electroenergetics.mixin_interfaces.ICEETrainExtension;
 import com.george_vi.electroenergetics.mixin_interfaces.IPantographList;
 import com.simibubi.create.Create;
@@ -82,8 +83,13 @@ public record SetAutoRaisePacket(UUID trainId, int carriageIndex, BlockPos local
         // with no check on whether there is wire - precisely the failure the manual path refuses.
         // Turning it off lowers the arm it was looking after, and only that one: the others were never
         // this switch's business.
-        if (!autoRaise)
+        if (!autoRaise) {
+            // Same order as the manual lower: declutch before cutting the supply, or the motors are briefly
+            // left connected to a dead line while still commanded to drive.
+            if (data.driver.gear.appliesTraction())
+                data.driver.gear = TrainGear.COAST;
             entry.active = false;
+        }
     }
 
     @Override

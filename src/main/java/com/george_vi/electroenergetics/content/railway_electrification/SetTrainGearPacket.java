@@ -34,7 +34,6 @@ public record SetTrainGearPacket(UUID trainId, int gearOrdinal, boolean confirm,
      * bring a train down from line speed at the emergency rate; the penalty then
      * outlives it until the next station.
      */
-    public static final int EMERGENCY_APPLY_TICKS = 100;
 
     public static final StreamCodec<ByteBuf, SetTrainGearPacket> STREAM_CODEC = StreamCodec.composite(
             UUIDUtil.STREAM_CODEC, SetTrainGearPacket::trainId,

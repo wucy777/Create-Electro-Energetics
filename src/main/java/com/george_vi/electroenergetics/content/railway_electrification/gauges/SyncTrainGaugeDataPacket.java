@@ -57,7 +57,7 @@ public record SyncTrainGaugeDataPacket(UUID trainId, double voltage, double curr
                                        boolean emergencyArmed,
                                        boolean emergencyPenalty, int cruiseState,
                                        boolean regen, boolean autoArrive, boolean unmanned,
-                                       float designMaxSpeed, int controlMode)
+                                       float designMaxSpeed, int controlMode, boolean overloaded)
         implements ClientboundPacketPayload {
 
     public static final StreamCodec<ByteBuf, SyncTrainGaugeDataPacket> STREAM_CODEC = new StreamCodec<>() {
@@ -82,7 +82,12 @@ public record SyncTrainGaugeDataPacket(UUID trainId, double voltage, double curr
             int flags = buffer.readUnsignedByte();
             int cruiseState = buffer.readByte();
             float designMaxSpeed = buffer.readFloat();
-            int controlMode = buffer.readByte();
+            // The control mode is 0..2, so the two spare bits of its byte carry the overload flag rather
+            // than growing the packet. Without it the client's panel cannot know that the accelerate
+            // position is refused, and the lever would move and then snap back.
+            int modeByte = buffer.readByte();
+            int controlMode = modeByte & 3;
+            boolean overloaded = (modeByte & 4) != 0;
             boolean confirmDue = (flags & 1) != 0;
             boolean emergencyArmed = (flags & 2) != 0;
             boolean emergencyPenalty = (flags & 4) != 0;
@@ -93,7 +98,7 @@ public record SyncTrainGaugeDataPacket(UUID trainId, double voltage, double curr
             return new SyncTrainGaugeDataPacket(trainId, voltage, current, maxSpeed, power,
                     grade, powered, carriages, motorCars, powerPerCarriage, manualFullSpeed,
                     gear, confirmDue, vigilanceStage, emergencyArmed, emergencyPenalty,
-                    cruiseState, regen, autoArrive, unmanned, designMaxSpeed, controlMode);
+                    cruiseState, regen, autoArrive, unmanned, designMaxSpeed, controlMode, overloaded);
         }
 
         @Override
@@ -120,7 +125,7 @@ public record SyncTrainGaugeDataPacket(UUID trainId, double voltage, double curr
             // Which control scheme the server has this train in. Without it the client cannot know
             // whether to show the electric panel, because the decision depends on whether a
             // pantograph is within reach of catenary - server-side geometry the client never sees.
-            buffer.writeByte(p.controlMode);
+            buffer.writeByte((p.controlMode & 3) | (p.overloaded ? 4 : 0));
         }
     };
 
@@ -133,6 +138,7 @@ public record SyncTrainGaugeDataPacket(UUID trainId, double voltage, double curr
                 controlMode);
         TrainHudData.updateGear(trainId, gear, confirmDue, vigilanceStage, emergencyArmed,
                 emergencyPenalty, cruiseState, regen, autoArrive, unmanned);
+        TrainHudData.setOverloaded(trainId, overloaded);
     }
 
     @Override

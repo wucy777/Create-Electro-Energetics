@@ -117,6 +117,10 @@ public final class TrainHudData {
      * server is the authority while the panel must not offer a position that would be refused.
      */
     public static boolean gearAvailable(UUID trainId, TrainGear gear) {
+        // Over capacity, the accelerate position is refused on the SERVER, so the panel must not offer it:
+        // a lever that moves and then snaps back reads as a broken key. Mirrors ElectricTrainData exactly.
+        if (gear == TrainGear.ACCELERATE && OVERLOADED.contains(trainId))
+            return false;
         if (!gear.appliesTraction())
             return true;
         Sample s = SAMPLES.get(trainId);
@@ -333,6 +337,17 @@ public final class TrainHudData {
     /** How many carriages this train has, or 0 when the server has not said. */
     public static int carriageCount(UUID trainId) {
         return CARRIAGE_COUNT.getOrDefault(trainId, 0);
+    }
+
+    /** Trains the server last reported as over capacity. */
+    private static final java.util.Set<UUID> OVERLOADED =
+            java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    public static void setOverloaded(UUID trainId, boolean overloaded) {
+        if (overloaded)
+            OVERLOADED.add(trainId);
+        else
+            OVERLOADED.remove(trainId);
     }
 
     private static final java.util.Set<UUID> AUTO_RAISE =
