@@ -233,20 +233,28 @@ public class GameEvents {
 
             driver.tickDriverPresence();
 
-            // Somebody standing on a train that is ALREADY above Create's ceiling. The ceiling clamp
-            // cannot answer this - the train is faster than the ceiling it would impose - so the train
-            // stops, and everybody aboard is told why.
+            // Somebody standing on a train that is ALREADY above Create's ceiling.
             //
-            // The situations that reach here are one situation: a player teleported into a moving
-            // carriage, a player who was already on their feet when the train accelerated, a passenger who
-            // logged back in without a seat. All of them are the state this whole feature exists to keep
-            // out, and the owner's rule is explicit - brake, and broadcast.
-            if (data.underElectricControl()
-                    && Math.abs(train.speed) > RiderSeatGate.CREATE_CEILING_BPT
-                    && RiderSeatGate.anyUnseated(train)
-                    && !driver.emergencyArmed) {
-                driver.armEmergencyForRiders();
-                notifyRiders(train, "electroenergetics.train.riders.notSeatedBraking");
+            // The ceiling clamp cannot answer this - the train is faster than the ceiling it would impose -
+            // so the train is brought down on the ordinary brake lever. Deliberately NOT the emergency
+            // application: the owner's ruling is that this is an operational mistake, not an emergency, and
+            // firing the emergency brake here would forfeit the pantograph until the next station for what
+            // may be a passenger who stood up a moment too early.
+            //
+            // Reapplied every tick the condition holds, so moving the lever back while it is still too fast
+            // is overruled. The message is latched separately, because the condition is true for as long as
+            // it takes to stop and a message per tick would be unreadable.
+            boolean ridersOnTheirFeet = data.underElectricControl() && RiderSeatGate.anyUnseated(train);
+            if (ridersOnTheirFeet
+                    && Math.abs(train.speed) > RiderSeatGate.CREATE_CEILING_BPT) {
+                if (driver.gear != TrainGear.BRAKE)
+                    driver.gear = TrainGear.BRAKE;
+                if (!driver.riderBrakeNotified) {
+                    driver.riderBrakeNotified = true;
+                    notifyRiders(train, "electroenergetics.train.riders.notSeatedBraking");
+                }
+            } else {
+                driver.riderBrakeNotified = false;
             }
 
             // A train under a running SCHEDULE is Create's to drive, not this mode's.
