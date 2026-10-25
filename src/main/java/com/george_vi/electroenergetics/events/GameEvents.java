@@ -191,23 +191,35 @@ public class GameEvents {
      * train nobody is driving, so it is a handful of integer decrements per tick.
      */
     /**
-     * Sends an overlay message to everybody aboard a train.
+     * Sends an overlay message to everybody aboard a train, standing passengers included.
      *
-     * <p>Walked through the carriages' passengers rather than the level's player list: the people who need
-     * this are by definition the ones on the train, and the level list would also hit players on the
-     * platform who are not involved.
+     * <p>Both populations, because they are disjoint. A seated player is in the carriage's passenger chain;
+     * a player on their feet - which is exactly who a capacity message is aimed at - is only in Create's
+     * collidingEntities map. Walking just the passenger chain reached the driver and the seated passengers
+     * and missed the one person the message exists for.
+     *
+     * <p>De-duplicated by UUID, since a player riding the carriage can appear in both collections.
      */
     private static void notifyRiders(Train train, String langKey) {
+        java.util.Set<java.util.UUID> sent = new java.util.HashSet<>();
         for (var carriage : train.carriages) {
             var entity = carriage.anyAvailableEntity();
             if (entity == null)
                 continue;
-            for (var passenger : entity.getIndirectPassengers()) {
-                if (passenger instanceof net.minecraft.server.level.ServerPlayer player)
-                    player.displayClientMessage(
-                            net.minecraft.network.chat.Component.translatable(langKey), true);
-            }
+            for (var passenger : entity.getIndirectPassengers())
+                notifyOne(passenger, langKey, sent);
+            for (var colliding : entity.collidingEntities.keySet())
+                notifyOne(colliding, langKey, sent);
         }
+    }
+
+    private static void notifyOne(net.minecraft.world.entity.Entity entity, String langKey,
+                                  java.util.Set<java.util.UUID> sent) {
+        if (!(entity instanceof net.minecraft.server.level.ServerPlayer player))
+            return;
+        if (!sent.add(player.getUUID()))
+            return;
+        player.displayClientMessage(net.minecraft.network.chat.Component.translatable(langKey), true);
     }
 
     private static void tickDriverState(MinecraftServer server) {
