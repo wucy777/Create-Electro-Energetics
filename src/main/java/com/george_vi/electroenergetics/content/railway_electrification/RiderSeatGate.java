@@ -123,8 +123,29 @@ public final class RiderSeatGate {
             return;
         if (contraption.getSeatMapping().containsKey(player.getUUID()))
             return;                                  // already in a seat
+        if (hasTeleportInFlight(player))
+            return;                                  // position not authoritative yet
         if (!out.contains(player))
             out.add(player);
+    }
+
+    /**
+     * Whether this player has a teleport that has been sent but not yet acknowledged.
+     *
+     * <p>{@code /tp} does not move a server player. It stores the destination and waits for the client to
+     * confirm; until then {@code position()} is still the OLD one. Seating by that position would put a
+     * player teleported between two seats straight back where they came from, so the search is deferred
+     * until the destination is real - which for a same-train teleport is one or two ticks.
+     */
+    private static boolean hasTeleportInFlight(Player player) {
+        if (!(player instanceof net.minecraft.server.level.ServerPlayer serverPlayer))
+            return false;
+        try {
+            return ((com.george_vi.electroenergetics.mixins.TeleportPendingAccessor) serverPlayer.connection)
+                    .electroEnergetics$awaitingPositionFromClient() != null;
+        } catch (Throwable ignored) {
+            return false;
+        }
     }
 
     /**
