@@ -68,7 +68,7 @@ public class RiderDismountLockMixin {
             var c = carriage.getCarriage();
             if (c == null || c.train == null)
                 return;
-            if (Math.abs(c.train.speed) <= RiderSeatGate.CREATE_CEILING_BPT)
+            if (!RiderSeatGate.atOrAboveCeiling(c.train))
                 return;                                  // slow enough: getting off is safe
 
             cir.setReturnValue(false);

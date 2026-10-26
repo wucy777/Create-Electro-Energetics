@@ -98,6 +98,21 @@ public final class RiderSeatGate {
         return result;
     }
 
+    /**
+     * Whether the train is at or above Create's ceiling.
+     *
+     * <p>{@code >=} and not {@code >}, because the ceiling is a place the train can actually sit: 28 is the
+     * configured limit, so a train running at its limit is exactly 1.4 Blocks/tick and a strict comparison
+     * is never true. The seating rule and the dismount lock both hung off that comparison and were
+     * therefore unreachable at the speed they exist for.
+     *
+     * <p>The epsilon absorbs the float division; without it 28/20 does not round-trip and the train would
+     * have to exceed its own ceiling to arm anything.
+     */
+    public static boolean atOrAboveCeiling(Train train) {
+        return train != null && Math.abs(train.speed) >= CREATE_CEILING_BPT - 1.0e-4d;
+    }
+
     /** Whether anybody aboard is standing, on the roof included. */
     public static boolean anyUnseated(Train train) {
         return !allSeated(train);
@@ -123,6 +138,12 @@ public final class RiderSeatGate {
                 collect(colliding, contraption, out);
             for (Entity passenger : entity.getIndirectPassengers())
                 collect(passenger, contraption, out);
+            // collidingEntities is filled by the collision pass, so a player who walked into the carriage
+            // and stopped may never appear in it. Their own bounding box against the carriage's is the
+            // cheap exact test, and unlike an inflated world box it does not reach the platform.
+            for (var nearby : entity.level().players())
+                if (entity.getBoundingBox().intersects(nearby.getBoundingBox()))
+                    collect(nearby, contraption, out);
         }
         out.sort(Comparator.comparing(Player::getUUID));
         return out;
@@ -162,6 +183,54 @@ public final class RiderSeatGate {
                     .electroEnergetics$awaitingPositionFromClient() != null;
         } catch (Throwable ignored) {
             return false;
+        }
+    }
+
+    /**
+     * Drops seat-mapping entries whose player is no longer riding that carriage.
+     *
+     * <p>A mapping entry is what makes a seat "taken". If one outlives the ride - a teleport, a death, a
+     * chunk unload, a train edit - that seat is permanently unusable: right-click reaches Create's
+     * addSittingPassenger, which sees a player already at that index and returns without doing anything.
+     * From the outside the seat simply stops accepting people, while its neighbours keep working.
+     *
+     * <p>Cheap: one pass over the seat map, which has one entry per seat, once per tick per electric train.
+     */
+    public static void pruneStaleSeats(Train train) {
+        for (Carriage carriage : train.carriages) {
+            CarriageContraptionEntity entity = carriage.anyAvailableEntity();
+            if (entity == null || entity.level().isClientSide())
+                continue;
+            Contraption contraption = entity.getContraption();
+            if (contraption == null)
+                continue;
+
+            Map<UUID, Integer> mapping;
+            try {
+                mapping = contraption.getSeatMapping();
+            } catch (Throwable ignored) {
+                continue;
+            }
+            if (mapping == null || mapping.isEmpty())
+                continue;
+
+            boolean changed = false;
+            java.util.Iterator<Map.Entry<UUID, Integer>> it = mapping.entrySet().iterator();
+            while (it.hasNext()) {
+                Map.Entry<UUID, Integer> e = it.next();
+                Player player = entity.level().getPlayerByUUID(e.getKey());
+                if (player == null || player.getVehicle() != entity) {
+                    it.remove();
+                    changed = true;
+                }
+            }
+            if (changed) {
+                try {
+                    contraption.setSeatMapping(mapping);
+                } catch (Throwable ignored) {
+                    // A copy we cannot write back is not worth a crash; the next tick tries again.
+                }
+            }
         }
     }
 

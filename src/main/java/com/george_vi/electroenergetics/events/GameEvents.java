@@ -260,15 +260,16 @@ public class GameEvents {
             // There used to be a third rule, braking to a stand for any standing rider above the ceiling.
             // It contradicted rule 1: it fired on the exact situation rule 1 now resolves by seating.
             if (data.underElectricControl()) {
+                RiderSeatGate.pruneStaleSeats(train);
                 boolean unseated = RiderSeatGate.anyUnseated(train);
-                if (unseated && Math.abs(train.speed) > RiderSeatGate.CREATE_CEILING_BPT) {
+                if (unseated && RiderSeatGate.atOrAboveCeiling(train)) {
                     RiderSeatGate.trySeatAll(train);
                     unseated = RiderSeatGate.anyUnseated(train);
                 }
 
                 driver.overloaded = unseated;
                 if (unseated) {
-                    if (Math.abs(train.speed) > RiderSeatGate.CREATE_CEILING_BPT) {
+                    if (RiderSeatGate.atOrAboveCeiling(train)) {
                         if (driver.gear != TrainGear.BRAKE)
                             driver.gear = TrainGear.BRAKE;
                     } else if (driver.gear == TrainGear.ACCELERATE || driver.gear == TrainGear.REVERSE) {
