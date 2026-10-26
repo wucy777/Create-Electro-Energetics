@@ -552,6 +552,15 @@ public class TrainDriverState {
     public boolean overloaded = false;
 
     /**
+     * The position the lever was in when the capacity limit forced it down to CRUISE, or null if it did not.
+     *
+     * <p>At the ceiling the accelerate position is dropped to cruise - the train holds the limit instead of
+     * pushing against it. When the overload clears, the drop is lifted: the lever goes back to what it was
+     * if the driver has not moved it in the meantime, and if they have, their choice stands.
+     */
+    public TrainGear gearBeforeOverloadDrop = null;
+
+    /**
      * The vigilance device tripping: brake the train to a stand and drop the lever.
      *
      * <p>Deliberately not the emergency brake. A forgotten acknowledgement should stop

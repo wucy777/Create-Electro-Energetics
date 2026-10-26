@@ -269,18 +269,38 @@ public class GameEvents {
 
                 driver.overloaded = unseated;
                 if (unseated) {
-                    if (RiderSeatGate.atOrAboveCeiling(train)) {
+                    // Two different situations, and only one of them is a braking matter.
+                    //
+                    // Above the ceiling - somebody teleported aboard a train already running faster than
+                    // the limit - the overspeed has to come down, so the brake takes it there.
+                    //
+                    // At the ceiling, which is where a train under the limit normally is, the accelerate
+                    // position is DROPPED TO CRUISE instead: the train holds the limit rather than pushing
+                    // against it. Braking here would slow the train every time it reached the speed it is
+                    // allowed to do, which is what it used to do.
+                    double speed = Math.abs(train.speed);
+                    if (speed > RiderSeatGate.CREATE_CEILING_BPT + 1.0e-4d) {
                         if (driver.gear != TrainGear.BRAKE)
                             driver.gear = TrainGear.BRAKE;
-                    } else if (driver.gear == TrainGear.ACCELERATE || driver.gear == TrainGear.REVERSE) {
+                    } else if (driver.gear == TrainGear.ACCELERATE) {
+                        driver.gearBeforeOverloadDrop = TrainGear.ACCELERATE;
                         driver.gear = TrainGear.CRUISE;
                     }
+
                     if (!driver.riderBrakeNotified) {
                         driver.riderBrakeNotified = true;
                         notifyRiders(train, "electroenergetics.train.riders.overloaded");
                     }
                 } else {
                     driver.riderBrakeNotified = false;
+                    // Overload cleared: lift the forced downshift, but never overrule the driver. If the
+                    // lever is still the cruise this put it in, it goes back; otherwise they moved it and
+                    // their position stands.
+                    if (driver.gearBeforeOverloadDrop != null) {
+                        if (driver.gear == TrainGear.CRUISE)
+                            driver.gear = driver.gearBeforeOverloadDrop;
+                        driver.gearBeforeOverloadDrop = null;
+                    }
                 }
             } else {
                 // Handed back to Create: the seat limit is this mod's rule and must not outlive the mode
