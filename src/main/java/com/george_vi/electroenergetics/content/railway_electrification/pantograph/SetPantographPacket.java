@@ -104,10 +104,15 @@ public record SetPantographPacket(UUID trainId, int carriageIndex, BlockPos loca
             // without a supply (ElectricTrainData.gearAvailable), so lowering first would leave the lever
             // in a position the panel itself refuses to offer.
             TrainDriverState driver = ((ICEETrainExtension) train).getElectricTrainData().driver;
-            if (driver.gear.appliesTraction())
+            entry.active = false;
+
+            // Only declutch if this was the LAST live arm. On a twin-arm consist, dropping one while the
+            // other still collects leaves the train powered, and cutting traction there is a step the
+            // driver never asked for. The declutch exists to keep the motors off a dead line - with an arm
+            // still live, the line is not dead.
+            if (!electroEnergetics$otherArmLive(train, entry) && driver.gear.appliesTraction())
                 driver.gear = TrainGear.COAST;
 
-            entry.active = false;
             return;
         }
 
@@ -167,6 +172,19 @@ public record SetPantographPacket(UUID trainId, int carriageIndex, BlockPos loca
     private static void refusal(ServerPlayer player, String langKey) {
         player.displayClientMessage(
                 net.minecraft.network.chat.Component.translatable(langKey), true);
+    }
+
+    /** Whether any arm other than this one is still raised, on any carriage of the train. */
+    private static boolean electroEnergetics$otherArmLive(Train train, TrainPantographEntry except) {
+        for (var carriage : train.carriages) {
+            if (!(carriage instanceof IPantographList list))
+                continue;
+            for (TrainPantographEntry other : list.electroEnergetics$getPantographList()) {
+                if (other != except && other.active)
+                    return true;
+            }
+        }
+        return false;
     }
 
     @Override

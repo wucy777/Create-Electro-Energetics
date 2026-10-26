@@ -84,11 +84,20 @@ public record SetAutoRaisePacket(UUID trainId, int carriageIndex, BlockPos local
         // Turning it off lowers the arm it was looking after, and only that one: the others were never
         // this switch's business.
         if (!autoRaise) {
-            // Same order as the manual lower: declutch before cutting the supply, or the motors are briefly
-            // left connected to a dead line while still commanded to drive.
-            if (data.driver.gear.appliesTraction())
-                data.driver.gear = TrainGear.COAST;
             entry.active = false;
+            // Same rule as the manual lower: declutch only if no arm is left collecting. On a twin-arm
+            // consist the other arm may still be feeding the motors, and the line is not dead.
+            boolean otherArmLive = false;
+            for (var carriage : train.carriages) {
+                if (!(carriage instanceof IPantographList list))
+                    continue;
+                for (TrainPantographEntry other : list.electroEnergetics$getPantographList()) {
+                    if (other != entry && other.active) { otherArmLive = true; break; }
+                }
+                if (otherArmLive) break;
+            }
+            if (!otherArmLive && data.driver.gear.appliesTraction())
+                data.driver.gear = TrainGear.COAST;
         }
     }
 

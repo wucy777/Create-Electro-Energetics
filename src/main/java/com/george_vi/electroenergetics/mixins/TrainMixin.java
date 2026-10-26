@@ -169,12 +169,18 @@ public class TrainMixin implements ICEETrainExtension {
                 return electroEnergetics$withPenalty(original.call(), self, electricTrainData);
 
             // maxSpeed is in Blocks/Second, maxSpeed() must return Blocks/Tick.
-            float synced = TrainHudData.maxSpeedFor(self.id);
-            if (synced > 0f)
-                return electroEnergetics$withPenalty(synced / 20f, self, electricTrainData);
+            //
+            // The solve's own figure first. TrainHudData is written by the CLIENT packet handler; on a
+            // dedicated server it is always empty, and in single player the server would be reading a table
+            // the client filled up to five ticks ago - the authoritative side taking a stale answer from
+            // the side that has no authority. The synced table is still consulted, but only as a fallback
+            // for the window before the first solve has produced a number.
             if (electricTrainData.maxSpeed > 0f)
                 return electroEnergetics$withPenalty(electricTrainData.maxSpeed / 20f, self,
                         electricTrainData);
+            float synced = TrainHudData.maxSpeedFor(self.id);
+            if (synced > 0f)
+                return electroEnergetics$withPenalty(synced / 20f, self, electricTrainData);
             // Before the electrical solve has produced a figure, fall back to the
             // configured design ceiling so a driven train is not briefly capped by
             // Create while the first circuit build is still pending.
@@ -394,6 +400,12 @@ public class TrainMixin implements ICEETrainExtension {
      * holds.
      */
     private void applyGearLaw(Train self, ElectricTrainData data) {
+        // A derailed train belongs to Create's recovery. Writing its speed here as well means two writers
+        // pulling in opposite directions every tick - bounded, but it makes the recovery look like a
+        // stutter and hides what is actually happening.
+        if (self.derailed)
+            return;
+
         TrainDriverState st = data.driver;
         int carriages = Math.max(1, self.carriages.size());
 

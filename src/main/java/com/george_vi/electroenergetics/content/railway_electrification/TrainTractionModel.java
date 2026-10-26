@@ -797,8 +797,13 @@ public final class TrainTractionModel {
                     // and only then by friction. That is the "climbing at full power
                     // and braking on the way down" behaviour, and it is also why the
                     // descent case draws no power rather than feeding the line hard.
+                    // gradeResistance, not mass*G*grade. Gravity acts on the REAL mass; the effective mass
+                    // includes the rotating parts, which do not weigh more on a slope. Every other grade
+                    // term in this file already goes through gradeResistance and the comment at 574-582
+                    // says why - this branch was the one place that did not, and it read 6% high because
+                    // of it.
                     double needed = Math.signum(v) * runningResistance(speed, carriages)
-                            + mass * G * gradeToPlusX;
+                            + gradeResistance(gradeToPlusX, carriages);
                     if (needed >= 0d) {
                         force += Math.min(needed, effort);
                     } else {

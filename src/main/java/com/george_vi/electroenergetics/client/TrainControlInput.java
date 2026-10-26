@@ -244,7 +244,10 @@ public final class TrainControlInput {
         // Emergency is only offered by the server's own rule (reverse, while moving);
         // sending it otherwise is harmless because the handler ignores it, but this
         // avoids the packet entirely.
-        if (emergency && !emergencyWasDown && handle == TrainGear.REVERSE.ordinal()
+        // engagedPosition, not the pending handle. The server requires the gear to BE reverse; testing the
+        // handle that has not been engaged yet sent a packet the handler silently ignored, with no feedback
+        // anywhere - the exact "reply is harmless" assumption this comment used to make.
+        if (emergency && !emergencyWasDown && engagedPosition(serverGear) == TrainGear.REVERSE.ordinal()
                 && TrainHudData.emergencyBrakeAvailable(train.id))
             send(SetTrainGearPacket.emergency(train.id));
 

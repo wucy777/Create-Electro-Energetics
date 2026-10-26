@@ -28,7 +28,14 @@ public enum TrainGear {
     /** 倒车: reverse from rest; while moving it arms the emergency brake instead. */
     REVERSE("reverse");
 
-    /** Stable id used on the wire; never send ordinal, so the enum can be reordered. */
+    /**
+     * Human-readable id, and the intended wire format.
+     *
+     * <p>It is NOT what the wire uses today: the gear packets send {@code ordinal()} and the HUD decodes by
+     * ordinal. So reordering these constants IS a protocol change, whatever this comment used to claim.
+     * {@link #byId} is unused, kept for the day the packets move to ids - at which point reordering becomes
+     * safe and this note should go.
+     */
     public final String id;
 
     TrainGear(String id) {
