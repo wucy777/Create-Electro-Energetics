@@ -89,9 +89,9 @@ public record SetAutoRaisePacket(UUID trainId, int carriageIndex, BlockPos local
             // consist the other arm may still be feeding the motors, and the line is not dead.
             boolean otherArmLive = false;
             for (var carriage : train.carriages) {
-                if (!(carriage instanceof IPantographList list))
+                if (!(carriage instanceof IPantographList otherList))
                     continue;
-                for (TrainPantographEntry other : list.electroEnergetics$getPantographList()) {
+                for (TrainPantographEntry other : otherList.electroEnergetics$getPantographList()) {
                     if (other != entry && other.active) { otherArmLive = true; break; }
                 }
                 if (otherArmLive) break;
