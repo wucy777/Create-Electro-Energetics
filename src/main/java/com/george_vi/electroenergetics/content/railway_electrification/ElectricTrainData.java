@@ -158,10 +158,11 @@ public class ElectricTrainData {
      * snapping back.
      */
     public boolean gearAvailable(TrainGear gear) {
-        // Over capacity: accelerate is refused. Brake and cruise stay available - the train still has to
-        // be able to slow down and to hold a speed, and locking those would strand the driver.
-        if (gear == TrainGear.ACCELERATE && driver.overloaded)
-            return false;
+        // Over capacity the train is CAPPED, not immobilised. Refusing accelerate here locked the lever out
+        // entirely: from a standstill there is no position that starts the train, so "run slowly" became
+        // "cannot depart" - and it fired on a driver whose own seat entry had been pruned. The ceiling is
+        // enforced by RiderSeatGate.clamp and by the brake in the tick, which is where a speed limit
+        // belongs; availability is about whether the position is legal at all.
         if (gear.appliesTraction())
             return isPowered || hasCreativeSource;
         return true;

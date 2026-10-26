@@ -214,12 +214,25 @@ public final class RiderSeatGate {
             if (mapping == null || mapping.isEmpty())
                 continue;
 
+            // Aboard means "is a passenger of this carriage", by Create's own bookkeeping. Testing
+            // getVehicle() == entity directly was wrong: a player can be carried through a seat entity that
+            // is itself a passenger, in which case their vehicle is that seat, not the carriage. The first
+            // version pruned the driver's own entry the moment electric control engaged - which is exactly
+            // when this runs - leaving them recorded as standing, the train as over capacity and the
+            // accelerate position refused.
+            java.util.Set<UUID> aboard = new java.util.HashSet<>();
+            for (Entity passenger : entity.getIndirectPassengers())
+                if (passenger instanceof Player p)
+                    aboard.add(p.getUUID());
+
             boolean changed = false;
             java.util.Iterator<Map.Entry<UUID, Integer>> it = mapping.entrySet().iterator();
             while (it.hasNext()) {
                 Map.Entry<UUID, Integer> e = it.next();
+                if (aboard.contains(e.getKey()))
+                    continue;
                 Player player = entity.level().getPlayerByUUID(e.getKey());
-                if (player == null || player.getVehicle() != entity) {
+                if (player == null || !aboard.contains(player.getUUID())) {
                     it.remove();
                     changed = true;
                 }
@@ -230,6 +243,8 @@ public final class RiderSeatGate {
                 } catch (Throwable ignored) {
                     // A copy we cannot write back is not worth a crash; the next tick tries again.
                 }
+                // The seat answer changed inside this tick, so any cached verdict is now wrong.
+                CACHE.remove(train.id);
             }
         }
     }

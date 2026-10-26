@@ -117,10 +117,9 @@ public final class TrainHudData {
      * server is the authority while the panel must not offer a position that would be refused.
      */
     public static boolean gearAvailable(UUID trainId, TrainGear gear) {
-        // Over capacity, the accelerate position is refused on the SERVER, so the panel must not offer it:
-        // a lever that moves and then snaps back reads as a broken key. Mirrors ElectricTrainData exactly.
-        if (gear == TrainGear.ACCELERATE && OVERLOADED.contains(trainId))
-            return false;
+        // Accelerate is NOT withheld when over capacity: the train is capped at the ceiling, not stopped from
+        // departing. Keeping the panel in step with ElectricTrainData.gearAvailable, which no longer refuses
+        // it either.
         if (!gear.appliesTraction())
             return true;
         Sample s = SAMPLES.get(trainId);
