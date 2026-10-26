@@ -72,7 +72,19 @@ public final class RiderSeatGate {
         if (train == null || train.carriages == null || train.carriages.isEmpty())
             return true;
 
-        long stamp = System.currentTimeMillis() / 50L;
+        // Stamped on the level's own tick counter, not on the wall clock. A 50 ms wall-clock window drifts
+        // against the game tick when the server is lagging: it can straddle two ticks (a stale answer
+        // survives longer than a tick) or collapse two ticks into one. The game time cannot.
+        long stamp = -1L;
+        for (Carriage carriage : train.carriages) {
+            CarriageContraptionEntity entity = carriage.anyAvailableEntity();
+            if (entity != null) {
+                stamp = entity.level().getGameTime();
+                break;
+            }
+        }
+        if (stamp < 0L)
+            return true;                                  // nothing loaded: nobody aboard to be standing
         if (stamp != cacheStamp) {
             cacheStamp = stamp;
             CACHE.clear();
@@ -186,6 +198,12 @@ public final class RiderSeatGate {
             }
         }
 
+        // The cache is what makes maxSpeed() cheap, and it is exactly what would lie here: the caller asks
+        // anyUnseated() again immediately after this method, inside the same tick, and a cached "true" from
+        // before the seating would report the train as overloaded after everybody had been seated - which
+        // put the lever into BRAKE on a train that had just been fixed.
+        CACHE.remove(train.id);
+
         int seated = 0;
         for (Player player : unseated) {
             Candidate best = null;
@@ -209,6 +227,7 @@ public final class RiderSeatGate {
             best.entity().addSittingPassenger(player, best.index());
             seated++;
         }
+        CACHE.remove(train.id);
         return seated;
     }
 
