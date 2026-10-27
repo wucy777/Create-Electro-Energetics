@@ -174,6 +174,26 @@ public final class RiderSeatGate {
     }
 
     /**
+     * Whether this player has a teleport that has been sent but not yet acknowledged.
+     *
+     * <p>Not because the position is stale - it is not. {@code teleport} applies the destination with
+     * {@code absMoveTo} before it returns. The deferral is about the SECOND application: the acknowledgement
+     * makes the server call {@code absMoveTo} with the same stored destination again, overwriting anything
+     * done in between. Seating somebody inside that window puts them in a seat on a moving train and then
+     * pulls them back to the static destination, which is two to five Blocks behind at line speed.
+     */
+    private static boolean hasTeleportInFlight(Player player) {
+        if (!(player instanceof net.minecraft.server.level.ServerPlayer serverPlayer))
+            return false;
+        try {
+            return ((com.george_vi.electroenergetics.mixins.TeleportPendingAccessor) serverPlayer.connection)
+                    .electroEnergetics$awaitingPositionFromClient() != null;
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    /**
      * Drops seat-mapping entries whose entity is no longer a passenger of that carriage.
      *
      * <p>A mapping entry is what makes a seat "taken". If one outlives the ride - a teleport, a death, a
@@ -238,7 +258,7 @@ public final class RiderSeatGate {
         if (unseated.isEmpty())
             return 0;
 
-        record Candidate(CarriageContraptionEntity entity, int index, BlockPos local, Vec3 world) {}
+        record Candidate(CarriageContraptionEntity entity, int index, BlockPos local) {}
 
         List<Candidate> free = new ArrayList<>();
         for (Carriage carriage : train.carriages) {
