@@ -134,67 +134,55 @@ public final class RiderSeatGate {
             if (contraption == null)
                 continue;
 
-            for (Entity colliding : entity.collidingEntities.keySet())
-                collect(colliding, contraption, out);
+            // Seated means "is a passenger of this carriage". Create seats a player by starting the ride on
+            // the carriage, so a seated player is always in this set - and unlike the seat mapping it is a
+            // property of this entity instance, which is the instance the seating call was made on.
+            //
+            // The mapping alone was not reliable enough to answer this: the player was seated into a seat,
+            // the mapping did not report them, and every tick repeated "one player is standing" - over
+            // capacity, the message, and the brake at the limit, forever, on a train full of empty seats.
+            java.util.Set<UUID> seated = new java.util.HashSet<>();
             for (Entity passenger : entity.getIndirectPassengers())
-                collect(passenger, contraption, out);
-            // collidingEntities is filled by the collision pass, so a player who walked into the carriage
-            // and stopped may never appear in it. Their own bounding box against the carriage's is the
-            // cheap exact test, and unlike an inflated world box it does not reach the platform.
+                seated.add(passenger.getUUID());
+            seated.addAll(contraption.getSeatMapping().keySet());
+
+            for (Entity colliding : entity.collidingEntities.keySet())
+                collect(colliding, seated, out);
+            for (Entity passenger : entity.getIndirectPassengers())
+                collect(passenger, seated, out);
+            // collidingEntities is filled by the collision pass, so a player who walked in and stopped may
+            // never appear in it. Their own box against the carriage's is the cheap exact test.
             for (var nearby : entity.level().players())
                 if (entity.getBoundingBox().intersects(nearby.getBoundingBox()))
-                    collect(nearby, contraption, out);
+                    collect(nearby, seated, out);
         }
         out.sort(Comparator.comparing(Player::getUUID));
         return out;
     }
 
-    private static void collect(Entity entity, Contraption contraption, List<Player> out) {
+    private static void collect(Entity entity, java.util.Set<UUID> seated, List<Player> out) {
         if (!(entity instanceof Player player))
             return;
         if (player.isSpectator())
             return;
-        if (contraption.getSeatMapping().containsKey(player.getUUID()))
-            return;                                  // already in a seat
+        if (seated.contains(player.getUUID()))
+            return;
         if (hasTeleportInFlight(player))
-            return;                                  // position not authoritative yet
+            return;
         if (!out.contains(player))
             out.add(player);
     }
 
     /**
-     * Whether this player has a teleport that has been sent but not yet acknowledged.
-     *
-     * <p>Not because the position is stale - it is not. {@code teleport} applies the destination with
-     * {@code absMoveTo} before it returns, so the player is already at the new coordinate when the command
-     * finishes. The deferral is about the SECOND application: the client's acknowledgement makes the server
-     * call {@code absMoveTo} with the same stored destination again, overwriting anything done in between.
-     *
-     * <p>Seating somebody inside that window puts them in a seat on a moving train, and the acknowledgement
-     * then pulls them back to the static destination - by then metres behind the train. Deferring until the
-     * teleport is no longer pending keeps the seat until after the second application, so the seat is never
-     * undone.
-     */
-    private static boolean hasTeleportInFlight(Player player) {
-        if (!(player instanceof net.minecraft.server.level.ServerPlayer serverPlayer))
-            return false;
-        try {
-            return ((com.george_vi.electroenergetics.mixins.TeleportPendingAccessor) serverPlayer.connection)
-                    .electroEnergetics$awaitingPositionFromClient() != null;
-        } catch (Throwable ignored) {
-            return false;
-        }
-    }
-
-    /**
-     * Drops seat-mapping entries whose player is no longer riding that carriage.
+     * Drops seat-mapping entries whose entity is no longer a passenger of that carriage.
      *
      * <p>A mapping entry is what makes a seat "taken". If one outlives the ride - a teleport, a death, a
      * chunk unload, a train edit - that seat is permanently unusable: right-click reaches Create's
-     * addSittingPassenger, which sees a player already at that index and returns without doing anything.
-     * From the outside the seat simply stops accepting people, while its neighbours keep working.
+     * addSittingPassenger, which sees an occupant at that index and returns without doing anything, while
+     * the neighbouring seats keep working.
      *
-     * <p>Cheap: one pass over the seat map, which has one entry per seat, once per tick per electric train.
+     * <p>Every passenger counts, not just players. A mob in a seat has an entry and no Player behind it, so
+     * a player-only sweep would delete it and hand that seat to somebody else.
      */
     public static void pruneStaleSeats(Train train) {
         for (Carriage carriage : train.carriages) {
@@ -205,6 +193,10 @@ public final class RiderSeatGate {
             if (contraption == null)
                 continue;
 
+            java.util.Set<UUID> aboard = new java.util.HashSet<>();
+            for (Entity passenger : entity.getIndirectPassengers())
+                aboard.add(passenger.getUUID());
+
             Map<UUID, Integer> mapping;
             try {
                 mapping = contraption.getSeatMapping();
@@ -214,27 +206,10 @@ public final class RiderSeatGate {
             if (mapping == null || mapping.isEmpty())
                 continue;
 
-            // Aboard means "is a passenger of this carriage", by Create's own bookkeeping, and it is EVERY
-            // passenger - not just players. A seat can be taken by a mob, and its entry has to survive this
-            // sweep: an entry dropped there would make an occupied seat look free, so the seating pass would
-            // hand a player a seat somebody is already sitting in, and the seat count for the capacity rule
-            // would be wrong in the same direction.
-            //
-            // Testing player.getVehicle() == entity directly was wrong for the other reason: a passenger can
-            // be carried through a seat entity that is itself a passenger, so their vehicle is that seat, not
-            // the carriage. The first version pruned the driver's own entry the moment electric control
-            // engaged - which is exactly when this runs.
-            java.util.Set<UUID> aboard = new java.util.HashSet<>();
-            for (Entity passenger : entity.getIndirectPassengers())
-                aboard.add(passenger.getUUID());
-            if (aboard.isEmpty() && mapping.isEmpty())
-                continue;
-
             boolean changed = false;
             java.util.Iterator<Map.Entry<UUID, Integer>> it = mapping.entrySet().iterator();
             while (it.hasNext()) {
-                Map.Entry<UUID, Integer> e = it.next();
-                if (!aboard.contains(e.getKey())) {
+                if (!aboard.contains(it.next().getKey())) {
                     it.remove();
                     changed = true;
                 }
@@ -279,8 +254,7 @@ public final class RiderSeatGate {
             for (int i = 0; i < seats.size(); i++) {
                 if (taken.contains(i))
                     continue;
-                BlockPos local = seats.get(i);
-                free.add(new Candidate(entity, i, local, entity.toGlobalVector(Vec3.atCenterOf(local), 1.0f)));
+                free.add(new Candidate(entity, i, seats.get(i)));
             }
         }
 
@@ -295,7 +269,13 @@ public final class RiderSeatGate {
             Candidate best = null;
             double bestDistance = Double.MAX_VALUE;
             for (Candidate candidate : free) {
-                double d = candidate.world().distanceToSqr(player.position());
+                // Compared in the carriage's own frame. Converting the seat to world coordinates and the
+                // player to world coordinates as well looked equivalent but was not: the transform is
+                // anchored on the contraption, so mixing the two put the seats in the wrong places and the
+                // "nearest" seat was whichever arithmetic error won. In local space both sides share one
+                // origin and the answer is the seat that is actually closest to the player.
+                Vec3 localPlayer = candidate.entity().toLocalVector(player.position(), 1.0f);
+                double d = Vec3.atCenterOf(candidate.local()).distanceToSqr(localPlayer);
                 if (best == null
                         || d < bestDistance - 1.0e-9d
                         || (Math.abs(d - bestDistance) <= 1.0e-9d
