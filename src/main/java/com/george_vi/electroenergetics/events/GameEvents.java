@@ -303,11 +303,18 @@ public class GameEvents {
                     } else {
                         if (driver.overloadBraking) {
                             driver.overloadBraking = false;
-                            if (driver.gear == TrainGear.BRAKE)
+                            if (driver.gear == TrainGear.BRAKE) {
+                                // Cruise holds whatever speed it was TOLD to hold, and that number is only
+                                // captured when the driver selects the position themselves. Forcing the
+                                // position without it left the target at its old value - zero, on a train
+                                // that had never cruised - so "hold this speed" meant "brake to a stand".
+                                driver.cruiseSpeed = Math.abs(train.speed) * 20d;
                                 driver.gear = TrainGear.CRUISE;
+                            }
                         }
                         if (driver.gear == TrainGear.ACCELERATE) {
                             driver.gearBeforeOverloadDrop = TrainGear.ACCELERATE;
+                            driver.cruiseSpeed = Math.abs(train.speed) * 20d;
                             driver.gear = TrainGear.CRUISE;
                         }
                     }

@@ -58,6 +58,14 @@ public final class RiderSeatGate {
 
     private RiderSeatGate() {}
 
+    /**
+     * How far a player may be moved to a seat, in Blocks.
+     *
+     * <p>Generous enough for the length of a carriage bay, small enough that the player can see where they
+     * ended up. Beyond this the situation is treated as "no seat for you", which is the honest answer.
+     */
+    public static final double MAX_SEAT_TRANSFER_BLOCKS = 4d;
+
     /** Create's own ceiling, in Blocks per second. Above this its rider model does not hold. */
     public static final double CREATE_CEILING_BPS = 28d;
 
@@ -335,6 +343,12 @@ public final class RiderSeatGate {
                 // origin and the answer is the seat that is actually closest to the player.
                 Vec3 localPlayer = candidate.entity().toLocalVector(player.position(), 1.0f);
                 double d = Vec3.atCenterOf(candidate.local()).distanceToSqr(localPlayer);
+                // A seat has to be somewhere the player could have walked to. Handing them one at the far
+                // end of the train is not seating them, it is teleporting them: they lose their bearings and
+                // whatever they were doing. If nothing is close, this is a capacity problem and is treated
+                // as one rather than solved by moving a player five Blocks.
+                if (d > MAX_SEAT_TRANSFER_BLOCKS * MAX_SEAT_TRANSFER_BLOCKS)
+                    continue;
                 if (best == null
                         || d < bestDistance - 1.0e-9d
                         || (Math.abs(d - bestDistance) <= 1.0e-9d
