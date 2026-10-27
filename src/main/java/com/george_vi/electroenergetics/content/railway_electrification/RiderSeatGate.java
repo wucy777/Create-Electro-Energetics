@@ -214,25 +214,27 @@ public final class RiderSeatGate {
             if (mapping == null || mapping.isEmpty())
                 continue;
 
-            // Aboard means "is a passenger of this carriage", by Create's own bookkeeping. Testing
-            // getVehicle() == entity directly was wrong: a player can be carried through a seat entity that
-            // is itself a passenger, in which case their vehicle is that seat, not the carriage. The first
-            // version pruned the driver's own entry the moment electric control engaged - which is exactly
-            // when this runs - leaving them recorded as standing, the train as over capacity and the
-            // accelerate position refused.
+            // Aboard means "is a passenger of this carriage", by Create's own bookkeeping, and it is EVERY
+            // passenger - not just players. A seat can be taken by a mob, and its entry has to survive this
+            // sweep: an entry dropped there would make an occupied seat look free, so the seating pass would
+            // hand a player a seat somebody is already sitting in, and the seat count for the capacity rule
+            // would be wrong in the same direction.
+            //
+            // Testing player.getVehicle() == entity directly was wrong for the other reason: a passenger can
+            // be carried through a seat entity that is itself a passenger, so their vehicle is that seat, not
+            // the carriage. The first version pruned the driver's own entry the moment electric control
+            // engaged - which is exactly when this runs.
             java.util.Set<UUID> aboard = new java.util.HashSet<>();
             for (Entity passenger : entity.getIndirectPassengers())
-                if (passenger instanceof Player p)
-                    aboard.add(p.getUUID());
+                aboard.add(passenger.getUUID());
+            if (aboard.isEmpty() && mapping.isEmpty())
+                continue;
 
             boolean changed = false;
             java.util.Iterator<Map.Entry<UUID, Integer>> it = mapping.entrySet().iterator();
             while (it.hasNext()) {
                 Map.Entry<UUID, Integer> e = it.next();
-                if (aboard.contains(e.getKey()))
-                    continue;
-                Player player = entity.level().getPlayerByUUID(e.getKey());
-                if (player == null || !aboard.contains(player.getUUID())) {
+                if (!aboard.contains(e.getKey())) {
                     it.remove();
                     changed = true;
                 }

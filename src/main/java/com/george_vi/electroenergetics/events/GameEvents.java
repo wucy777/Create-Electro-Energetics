@@ -261,8 +261,22 @@ public class GameEvents {
             // It contradicted rule 1: it fired on the exact situation rule 1 now resolves by seating.
             if (data.underElectricControl()) {
                 RiderSeatGate.pruneStaleSeats(train);
+
+                // The capacity rule is a rule about the speed at which boarding players are seated, so it is
+                // evaluated there and nowhere else. Below the ceiling a player on their feet is simply a
+                // passenger moving around the train, and reporting them as over capacity would put a limit
+                // and a message on a train that is doing nothing wrong.
+                //
+                // Below the ceiling the state is left exactly as it was. Clearing it there would flap: the
+                // train reaches the limit, the lever drops to cruise, the speed dips a fraction under it on
+                // the next gradient, the limit is declared over, the lever returns to accelerate and the
+                // whole cycle starts again. The condition is re-evaluated when the train is at the speed the
+                // rule is about, and not in between.
+                boolean atCeiling = RiderSeatGate.atOrAboveCeiling(train);
+                if (atCeiling) {
+
                 boolean unseated = RiderSeatGate.anyUnseated(train);
-                if (unseated && RiderSeatGate.atOrAboveCeiling(train)) {
+                if (unseated) {
                     RiderSeatGate.trySeatAll(train);
                     unseated = RiderSeatGate.anyUnseated(train);
                 }
@@ -301,6 +315,7 @@ public class GameEvents {
                             driver.gear = driver.gearBeforeOverloadDrop;
                         driver.gearBeforeOverloadDrop = null;
                     }
+                }
                 }
             } else {
                 // Handed back to Create: the seat limit is this mod's rule and must not outlive the mode
