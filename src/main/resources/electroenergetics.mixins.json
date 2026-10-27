@@ -24,6 +24,7 @@
   "mixins": [
     "TeleportPendingAccessor",
     "RiderDismountLockMixin",
+    "RiderStopRidingLockMixin",
     "CarriageChunkProbeMixin",
     "BlockStateBaseMixin",
     "CarriageContraptionEntityMixin",

@@ -194,6 +194,45 @@ public final class RiderSeatGate {
     }
 
     /**
+     * Whether a dismount by this player must be refused: they are in a seat on a train carriage, and the
+     * train is at or above the ceiling.
+     *
+     * <p>Shared by the two mixins that guard the dismount, so the rule cannot differ between them.
+     */
+    public static boolean shouldLockDismount(net.minecraft.world.entity.player.Player player) {
+        if (!(player instanceof net.minecraft.server.level.ServerPlayer))
+            return false;
+        if (player.level().isClientSide())
+            return false;
+
+        com.simibubi.create.content.trains.entity.CarriageContraptionEntity carriage = null;
+        if (player.getVehicle()
+                instanceof com.simibubi.create.content.trains.entity.CarriageContraptionEntity direct)
+            carriage = direct;
+        else if (player.getVehicle()
+                instanceof com.simibubi.create.content.contraptions.actors.seat.SeatEntity seat
+                && seat.getRootVehicle()
+                instanceof com.simibubi.create.content.trains.entity.CarriageContraptionEntity root)
+            carriage = root;
+        if (carriage == null)
+            return false;
+
+        Contraption contraption = carriage.getContraption();
+        if (contraption == null || !contraption.getSeatMapping().containsKey(player.getUUID()))
+            return false;
+
+        var c = carriage.getCarriage();
+        return c != null && c.train != null && atOrAboveCeiling(c.train);
+    }
+
+    /** Tells the player their dismount was refused. */
+    public static void refuseDismount(net.minecraft.world.entity.player.Player player) {
+        player.displayClientMessage(
+                net.minecraft.network.chat.Component.translatable(
+                        "electroenergetics.train.riders.seatLocked"), true);
+    }
+
+    /**
      * Drops seat-mapping entries whose entity is no longer a passenger of that carriage.
      *
      * <p>A mapping entry is what makes a seat "taken". If one outlives the ride - a teleport, a death, a

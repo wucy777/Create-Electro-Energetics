@@ -1,16 +1,10 @@
 package com.george_vi.electroenergetics.mixins;
 
 import com.george_vi.electroenergetics.content.railway_electrification.RiderSeatGate;
-import com.simibubi.create.content.contraptions.Contraption;
-import com.simibubi.create.content.contraptions.actors.seat.SeatEntity;
-import com.simibubi.create.content.trains.entity.CarriageContraptionEntity;
-import net.minecraft.network.chat.Component;
-import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Player;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
-import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /**
@@ -44,62 +38,13 @@ public class RiderDismountLockMixin {
         try {
             if (!cir.getReturnValue())
                 return;
-            if (!electroEnergetics$shouldLock((Player) (Object) this))
+            if (!RiderSeatGate.shouldLockDismount((Player) (Object) this))
                 return;
             cir.setReturnValue(false);
-            electroEnergetics$refuse((Player) (Object) this);
+            RiderSeatGate.refuseDismount((Player) (Object) this);
         } catch (Throwable ignored) {
             // Falling through to the normal dismount is always safe.
         }
     }
 
-    @Inject(method = "stopRiding", at = @At("HEAD"), cancellable = true, remap = false)
-    private void electroEnergetics$lockStopRiding(CallbackInfo ci) {
-        try {
-            Player self = (Player) (Object) this;
-            if (!electroEnergetics$shouldLock(self))
-                return;
-            if (!(self instanceof ServerPlayer player))
-                return;
-            if (player.isChangingDimension())
-                return;                                  // the dimension change must be allowed to finish
-            if (((TeleportPendingAccessor) player.connection).electroEnergetics$awaitingPositionFromClient() != null)
-                return;                                  // a teleport is in flight; it owns this dismount
-            ci.cancel();
-            electroEnergetics$refuse(player);
-        } catch (Throwable ignored) {
-            // Same reasoning: letting the dismount through is the safe failure.
-        }
-    }
-
-    /** The shared condition: seated on a train carriage, at or above the ceiling. */
-    private static boolean electroEnergetics$shouldLock(Player player) {
-        if (!(player instanceof ServerPlayer))
-            return false;
-        if (player.level().isClientSide())
-            return false;
-
-        CarriageContraptionEntity carriage = null;
-        if (player.getVehicle() instanceof CarriageContraptionEntity direct)
-            carriage = direct;
-        else if (player.getVehicle() instanceof SeatEntity seat
-                && seat.getRootVehicle() instanceof CarriageContraptionEntity root)
-            carriage = root;
-        if (carriage == null)
-            return false;
-
-        Contraption contraption = carriage.getContraption();
-        if (contraption == null || !contraption.getSeatMapping().containsKey(player.getUUID()))
-            return false;
-
-        var c = carriage.getCarriage();
-        if (c == null || c.train == null)
-            return false;
-        return RiderSeatGate.atOrAboveCeiling(c.train);
-    }
-
-    private static void electroEnergetics$refuse(Player player) {
-        player.displayClientMessage(
-                Component.translatable("electroenergetics.train.riders.seatLocked"), true);
-    }
 }
