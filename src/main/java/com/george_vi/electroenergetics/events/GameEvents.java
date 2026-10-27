@@ -294,11 +294,22 @@ public class GameEvents {
                     // allowed to do, which is what it used to do.
                     double speed = Math.abs(train.speed);
                     if (speed > RiderSeatGate.CREATE_CEILING_BPT + 1.0e-4d) {
+                        // Above the ceiling: brake, and REMEMBER that the brake is ours. Reaching the ceiling
+                        // has to release it - otherwise the train brakes past 28 and stops, which is a
+                        // stop, not a speed limit.
+                        driver.overloadBraking = true;
                         if (driver.gear != TrainGear.BRAKE)
                             driver.gear = TrainGear.BRAKE;
-                    } else if (driver.gear == TrainGear.ACCELERATE) {
-                        driver.gearBeforeOverloadDrop = TrainGear.ACCELERATE;
-                        driver.gear = TrainGear.CRUISE;
+                    } else {
+                        if (driver.overloadBraking) {
+                            driver.overloadBraking = false;
+                            if (driver.gear == TrainGear.BRAKE)
+                                driver.gear = TrainGear.CRUISE;
+                        }
+                        if (driver.gear == TrainGear.ACCELERATE) {
+                            driver.gearBeforeOverloadDrop = TrainGear.ACCELERATE;
+                            driver.gear = TrainGear.CRUISE;
+                        }
                     }
 
                     if (!driver.riderBrakeNotified) {
@@ -307,6 +318,7 @@ public class GameEvents {
                     }
                 } else {
                     driver.riderBrakeNotified = false;
+                    driver.overloadBraking = false;
                     // Overload cleared: lift the forced downshift, but never overrule the driver. If the
                     // lever is still the cruise this put it in, it goes back; otherwise they moved it and
                     // their position stands.

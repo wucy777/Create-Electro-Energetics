@@ -561,6 +561,15 @@ public class TrainDriverState {
     public TrainGear gearBeforeOverloadDrop = null;
 
     /**
+     * True while the capacity rule is braking the train down to the ceiling.
+     *
+     * <p>Without this the brake was indistinguishable from one the driver had applied, so nothing released
+     * it when the speed reached the ceiling: the train braked past 28 and went on to a stand. A limit that
+     * stops the train is not a limit.
+     */
+    public boolean overloadBraking = false;
+
+    /**
      * The vigilance device tripping: brake the train to a stand and drop the lever.
      *
      * <p>Deliberately not the emergency brake. A forgotten acknowledgement should stop
