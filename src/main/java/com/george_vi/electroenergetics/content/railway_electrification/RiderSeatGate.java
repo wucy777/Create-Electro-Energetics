@@ -56,6 +56,11 @@ import java.util.UUID;
  */
 public final class RiderSeatGate {
 
+    // Temporary: one line per seating event, so a wrong seat can be diagnosed from the log instead of
+    // guessed at. Costs nothing when nobody is being seated.
+    private static final org.slf4j.Logger LOGGER =
+            org.slf4j.LoggerFactory.getLogger("electroenergetics/seatdiag");
+
     private RiderSeatGate() {}
 
     /**
@@ -308,6 +313,7 @@ public final class RiderSeatGate {
         record Candidate(CarriageContraptionEntity entity, int index, BlockPos local) {}
 
         List<Candidate> free = new ArrayList<>();
+        int totalSeats = 0;   // SEATDIAG
         for (Carriage carriage : train.carriages) {
             CarriageContraptionEntity entity = carriage.anyAvailableEntity();
             if (entity == null || entity.level().isClientSide())
@@ -317,6 +323,7 @@ public final class RiderSeatGate {
                 continue;
 
             List<BlockPos> seats = contraption.getSeats();
+            totalSeats += seats.size();   // SEATDIAG
             Set<Integer> taken = new HashSet<>(contraption.getSeatMapping().values());
             for (int i = 0; i < seats.size(); i++) {
                 if (taken.contains(i))
@@ -335,6 +342,7 @@ public final class RiderSeatGate {
         for (Player player : unseated) {
             Candidate best = null;
             double bestDistance = Double.MAX_VALUE;
+            StringBuilder diag = null;   // SEATDIAG
             for (Candidate candidate : free) {
                 // Compared in the carriage's own frame. Converting the seat to world coordinates and the
                 // player to world coordinates as well looked equivalent but was not: the transform is
@@ -347,6 +355,14 @@ public final class RiderSeatGate {
                 // end of the train is not seating them, it is teleporting them: they lose their bearings and
                 // whatever they were doing. If nothing is close, this is a capacity problem and is treated
                 // as one rather than solved by moving a player five Blocks.
+                if (diag == null) {
+                    diag = new StringBuilder("SEATDIAG playerLocal=")
+                            .append(String.format("%.2f,%.2f,%.2f", localPlayer.x, localPlayer.y, localPlayer.z))
+                            .append(" seats=").append(totalSeats)
+                            .append(" free=").append(free.size());
+                }
+                diag.append(" #").append(candidate.index()).append(candidate.local())
+                        .append(String.format("@%.2f", Math.sqrt(d)));
                 if (d > MAX_SEAT_TRANSFER_BLOCKS * MAX_SEAT_TRANSFER_BLOCKS)
                     continue;
                 if (best == null
@@ -357,6 +373,8 @@ public final class RiderSeatGate {
                     bestDistance = d;
                 }
             }
+            if (diag != null)
+                LOGGER.info(diag.append(best == null ? " -> none" : " -> chosen #" + best.index()).toString());
             if (best == null)
                 break;
             free.remove(best);
