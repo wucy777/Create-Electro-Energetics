@@ -210,6 +210,12 @@ public class GameEvents {
                 notifyOne(passenger, langKey, sent);
             for (var colliding : entity.collidingEntities.keySet())
                 notifyOne(colliding, langKey, sent);
+            // Same fallback as the seating gate: collidingEntities only holds entities the collision pass
+            // has seen, so a player who walked in and stopped can be missing from it - and they are the one
+            // the message is for.
+            for (var nearby : entity.level().players())
+                if (entity.getBoundingBox().intersects(nearby.getBoundingBox()))
+                    notifyOne(nearby, langKey, sent);
         }
     }
 
@@ -273,6 +279,37 @@ public class GameEvents {
                 // whole cycle starts again. The condition is re-evaluated when the train is at the speed the
                 // rule is about, and not in between.
                 boolean atCeiling = RiderSeatGate.atOrAboveCeiling(train);
+
+                // The release has to happen OUTSIDE the at-ceiling gate. Braking is what brings the speed
+                // down, so by the time the train is below the ceiling the block above is skipped entirely -
+                // and the brake it applied is never taken off. That is a brake that cannot stop braking:
+                // it goes past 28 and continues to a stand, which is exactly the complaint.
+                // Capacity can clear at any speed - the last standing passenger gets off while the train is
+                // rolling slowly, say. Waiting until the train next reaches 28 to notice would keep the
+                // limit and the forced cruise on a train that is no longer over capacity.
+                //
+                // This only clears on the actual condition (nobody standing), never merely because the
+                // speed dropped - that was the flapping: reach 28, drop to cruise, dip under, clear,
+                // accelerate, repeat.
+                if (!atCeiling && driver.overloaded && !RiderSeatGate.anyUnseated(train)) {
+                    driver.overloaded = false;
+                    driver.riderBrakeNotified = false;
+                    driver.overloadBraking = false;
+                    if (driver.gearBeforeOverloadDrop != null) {
+                        if (driver.gear == TrainGear.CRUISE)
+                            driver.gear = driver.gearBeforeOverloadDrop;
+                        driver.gearBeforeOverloadDrop = null;
+                    }
+                }
+
+                if (!atCeiling && driver.overloadBraking) {
+                    driver.overloadBraking = false;
+                    if (driver.gear == TrainGear.BRAKE) {
+                        driver.cruiseSpeed = Math.abs(train.speed) * 20d;
+                        driver.gear = TrainGear.CRUISE;
+                    }
+                }
+
                 if (atCeiling) {
 
                 boolean unseated = RiderSeatGate.anyUnseated(train);

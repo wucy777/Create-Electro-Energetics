@@ -252,6 +252,46 @@ public final class RiderSeatGate {
     }
 
     /**
+     * Seats ONE named player, without asking whether the gate thinks they are aboard.
+     *
+     * <p>Exists so seat selection can be tested on its own. The automatic pass first has to decide who is
+     * aboard, and if that decision is wrong the seat it picks is wrong for a reason that has nothing to do
+     * with the distance arithmetic. This runs the selection directly on a player the caller names.
+     */
+    public static boolean seatPlayer(Train train, Player player) {
+        int bestIndex = -1;
+        double bestDistance = Double.MAX_VALUE;
+        CarriageContraptionEntity chosenEntity = null;
+
+        for (Carriage carriage : train.carriages) {
+            CarriageContraptionEntity entity = carriage.anyAvailableEntity();
+            if (entity == null || entity.level().isClientSide())
+                continue;
+            Contraption contraption = entity.getContraption();
+            if (contraption == null)
+                continue;
+
+            List<BlockPos> seats = contraption.getSeats();
+            Set<Integer> taken = new HashSet<>(contraption.getSeatMapping().values());
+            Vec3 localPlayer = entity.toLocalVector(player.position(), 1.0f);
+            for (int i = 0; i < seats.size(); i++) {
+                if (taken.contains(i))
+                    continue;
+                double d = Vec3.atCenterOf(seats.get(i)).distanceToSqr(localPlayer);
+                if (d < bestDistance) {
+                    bestDistance = d;
+                    bestIndex = i;
+                    chosenEntity = entity;
+                }
+            }
+        }
+        if (chosenEntity == null)
+            return false;
+        chosenEntity.addSittingPassenger(player, bestIndex);
+        return true;
+    }
+
+    /**
      * Drops seat-mapping entries whose entity is no longer a passenger of that carriage.
      *
      * <p>A mapping entry is what makes a seat "taken". If one outlives the ride - a teleport, a death, a
@@ -407,8 +447,10 @@ public final class RiderSeatGate {
             }
             if (diag != null)
                 LOGGER.info(diag.append(best == null ? " -> none" : " -> chosen #" + best.index()).toString());
+            // continue, not break. One player with no seat within reach must not stop the others from being
+            // seated - that made the outcome depend on the order players happened to be listed in.
             if (best == null)
-                break;
+                continue;
             free.remove(best);
 
             // Create's own entry point for sitting somebody on a moving contraption. It writes the seat

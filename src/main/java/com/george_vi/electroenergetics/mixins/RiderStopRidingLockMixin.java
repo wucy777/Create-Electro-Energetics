@@ -34,6 +34,8 @@ public class RiderStopRidingLockMixin {
                 return;
             if (player.isChangingDimension())
                 return;
+            if (player.isDeadOrDying() || player.isRemoved())
+                return;                                  // dying must always be allowed to dismount
             if (((TeleportPendingAccessor) player.connection)
                     .electroEnergetics$awaitingPositionFromClient() != null)
                 return;

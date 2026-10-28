@@ -45,7 +45,23 @@ public final class SeatDebugCommand {
                                     + " speed=" + String.format("%.2f", Math.abs(train.speed) * 20d)
                                     + " bps"), false);
                     return seated;
-                }));
+                })
+                .then(Commands.literal("self").executes(ctx -> {
+                    ServerPlayer player = ctx.getSource().getPlayerOrException();
+                    Train train = trainOf(player);
+                    if (train == null) {
+                        ctx.getSource().sendFailure(Component.literal("no train nearby"));
+                        return 0;
+                    }
+                    var before = player.position();
+                    boolean ok = RiderSeatGate.seatPlayer(train, player);
+                    ctx.getSource().sendSuccess(() -> Component.literal(
+                            "self=" + ok
+                                    + " from=" + String.format("%.2f,%.2f,%.2f", before.x, before.y, before.z)
+                                    + " now=" + String.format("%.2f,%.2f,%.2f",
+                                    player.position().x, player.position().y, player.position().z)), false);
+                    return ok ? 1 : 0;
+                })));
     }
 
     private static Train trainOf(ServerPlayer player) {
