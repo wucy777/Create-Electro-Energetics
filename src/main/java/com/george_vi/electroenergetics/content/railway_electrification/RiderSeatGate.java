@@ -338,6 +338,8 @@ public final class RiderSeatGate {
         // put the lever into BRAKE on a train that had just been fixed.
         CACHE.remove(train.id);
 
+        String seatedMapHint = "";   // SEATDIAG
+        String aboardHint = "";      // SEATDIAG
         int seated = 0;
         for (Player player : unseated) {
             Candidate best = null;
@@ -356,13 +358,37 @@ public final class RiderSeatGate {
                 // whatever they were doing. If nothing is close, this is a capacity problem and is treated
                 // as one rather than solved by moving a player five Blocks.
                 if (diag == null) {
-                    diag = new StringBuilder("SEATDIAG playerLocal=")
+                    StringBuilder mh = new StringBuilder();
+                    StringBuilder ah = new StringBuilder();
+                    for (Carriage cc : train.carriages) {
+                        CarriageContraptionEntity ce = cc.anyAvailableEntity();
+                        if (ce == null || ce.getContraption() == null) continue;
+                        mh.append("{");
+                        ce.getContraption().getSeatMapping().forEach(
+                                (u, i) -> mh.append(u.toString(), 0, 8).append("=").append(i).append(","));
+                        mh.append("}");
+                        ah.append("[");
+                        for (Entity p : ce.getIndirectPassengers())
+                            ah.append(p.getUUID().toString(), 0, 8).append(",");
+                        ah.append("]");
+                    }
+                    seatedMapHint = mh.toString();
+                    aboardHint = ah.toString();
+                    var v = player.position();
+                    diag = new StringBuilder("SEATDIAG playerWorld=")
+                            .append(String.format("%.2f,%.2f,%.2f", v.x, v.y, v.z))
+                            .append(" local=")
                             .append(String.format("%.2f,%.2f,%.2f", localPlayer.x, localPlayer.y, localPlayer.z))
                             .append(" seats=").append(totalSeats)
-                            .append(" free=").append(free.size());
+                            .append(" free=").append(free.size())
+                            .append(" mapping=").append(seatedMapHint)
+                            .append(" aboard=").append(aboardHint);
                 }
+                var seatWorld = candidate.entity().toGlobalVector(Vec3.atCenterOf(candidate.local()), 1.0f);
                 diag.append(" #").append(candidate.index()).append(candidate.local())
-                        .append(String.format("@%.2f", Math.sqrt(d)));
+                        .append(String.format("@%.2f", Math.sqrt(d)))
+                        .append("[w").append(String.format("%.1f,%.1f,%.1f",
+                                seatWorld.x, seatWorld.y, seatWorld.z)).append("]");
                 if (d > MAX_SEAT_TRANSFER_BLOCKS * MAX_SEAT_TRANSFER_BLOCKS)
                     continue;
                 if (best == null
