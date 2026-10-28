@@ -138,6 +138,24 @@ public final class RiderSeatGate {
      * than in whatever order the level happened to hand them out.
      */
     public static List<Player> unseatedPlayers(Train train) {
+        // Seated is a property of the TRAIN, not of one carriage. Built once from every carriage before any
+        // player is judged, because a player seated in the first carriage is still inside the second
+        // carriage's bounding box - the two touch - and judging carriages one at a time counted that player
+        // as standing in every carriage but their own. On a multi-carriage train that is a permanent
+        // "somebody is standing", which is one player on a train with forty-six empty seats reporting itself
+        // as over capacity, forever.
+        java.util.Set<UUID> seated = new java.util.HashSet<>();
+        for (Carriage carriage : train.carriages) {
+            CarriageContraptionEntity entity = carriage.anyAvailableEntity();
+            if (entity == null || entity.level().isClientSide())
+                continue;
+            for (Entity passenger : entity.getIndirectPassengers())
+                seated.add(passenger.getUUID());
+            Contraption contraption = entity.getContraption();
+            if (contraption != null)
+                seated.addAll(contraption.getSeatMapping().keySet());
+        }
+
         List<Player> out = new ArrayList<>();
         for (Carriage carriage : train.carriages) {
             CarriageContraptionEntity entity = carriage.anyAvailableEntity();
@@ -146,18 +164,6 @@ public final class RiderSeatGate {
             Contraption contraption = entity.getContraption();
             if (contraption == null)
                 continue;
-
-            // Seated means "is a passenger of this carriage". Create seats a player by starting the ride on
-            // the carriage, so a seated player is always in this set - and unlike the seat mapping it is a
-            // property of this entity instance, which is the instance the seating call was made on.
-            //
-            // The mapping alone was not reliable enough to answer this: the player was seated into a seat,
-            // the mapping did not report them, and every tick repeated "one player is standing" - over
-            // capacity, the message, and the brake at the limit, forever, on a train full of empty seats.
-            java.util.Set<UUID> seated = new java.util.HashSet<>();
-            for (Entity passenger : entity.getIndirectPassengers())
-                seated.add(passenger.getUUID());
-            seated.addAll(contraption.getSeatMapping().keySet());
 
             for (Entity colliding : entity.collidingEntities.keySet())
                 collect(colliding, seated, out);
