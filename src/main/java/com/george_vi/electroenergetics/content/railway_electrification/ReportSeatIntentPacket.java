@@ -42,16 +42,29 @@ public record ReportSeatIntentPacket(UUID trainId, int carriageIndex, int seatIn
                                      double localX, double localY, double localZ, boolean standing)
         implements ServerboundPacketPayload {
 
-    public static final StreamCodec<ByteBuf, ReportSeatIntentPacket> STREAM_CODEC = StreamCodec.composite(
-            UUIDUtil.STREAM_CODEC, ReportSeatIntentPacket::trainId,
-            ByteBufCodecs.VAR_INT, ReportSeatIntentPacket::carriageIndex,
-            ByteBufCodecs.VAR_INT, ReportSeatIntentPacket::seatIndex,
-            ByteBufCodecs.DOUBLE, ReportSeatIntentPacket::localX,
-            ByteBufCodecs.DOUBLE, ReportSeatIntentPacket::localY,
-            ByteBufCodecs.DOUBLE, ReportSeatIntentPacket::localZ,
-            ByteBufCodecs.BOOL, ReportSeatIntentPacket::standing,
-            ReportSeatIntentPacket::new
-    );
+    /**
+     * Hand-written rather than {@code StreamCodec.composite}: seven components is past the largest overload
+     * that exists, so the builder form does not compile. The field order here is the wire format, and it must
+     * stay in step with the record.
+     */
+    public static final StreamCodec<ByteBuf, ReportSeatIntentPacket> STREAM_CODEC = StreamCodec.of(
+            (buf, p) -> {
+                UUIDUtil.STREAM_CODEC.encode(buf, p.trainId());
+                ByteBufCodecs.VAR_INT.encode(buf, p.carriageIndex());
+                ByteBufCodecs.VAR_INT.encode(buf, p.seatIndex());
+                ByteBufCodecs.DOUBLE.encode(buf, p.localX());
+                ByteBufCodecs.DOUBLE.encode(buf, p.localY());
+                ByteBufCodecs.DOUBLE.encode(buf, p.localZ());
+                ByteBufCodecs.BOOL.encode(buf, p.standing());
+            },
+            buf -> new ReportSeatIntentPacket(
+                    UUIDUtil.STREAM_CODEC.decode(buf),
+                    ByteBufCodecs.VAR_INT.decode(buf),
+                    ByteBufCodecs.VAR_INT.decode(buf),
+                    ByteBufCodecs.DOUBLE.decode(buf),
+                    ByteBufCodecs.DOUBLE.decode(buf),
+                    ByteBufCodecs.DOUBLE.decode(buf),
+                    ByteBufCodecs.BOOL.decode(buf)));
 
     @Override
     public void handle(ServerPlayer player) {
