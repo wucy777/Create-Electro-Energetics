@@ -321,6 +321,11 @@ public final class RiderSeatGate {
             java.util.Set<UUID> aboard = new java.util.HashSet<>();
             for (Entity passenger : entity.getIndirectPassengers())
                 aboard.add(passenger.getUUID());
+            // Offline players keep their seat. A player who logs off while sitting is removed from the
+            // passenger list, so "not aboard" would delete their entry - and on rejoin they would no longer
+            // be seated, landing wherever their saved position happened to be and then being force-seated
+            // into whatever seat was nearest at that moment. That is the seat that "changed after rejoining".
+            // A seat is only released when its player is online and demonstrably not in it.
 
             Map<UUID, Integer> mapping;
             try {
@@ -334,10 +339,15 @@ public final class RiderSeatGate {
             boolean changed = false;
             java.util.Iterator<Map.Entry<UUID, Integer>> it = mapping.entrySet().iterator();
             while (it.hasNext()) {
-                if (!aboard.contains(it.next().getKey())) {
+                UUID id = it.next().getKey();
+                if (aboard.contains(id))
+                    continue;
+                // Online and not aboard: they really did leave the seat.
+                if (entity.level().getPlayerByUUID(id) != null) {
                     it.remove();
                     changed = true;
                 }
+                // Offline: keep it. They are expected back, in that seat.
             }
             if (changed) {
                 try {
