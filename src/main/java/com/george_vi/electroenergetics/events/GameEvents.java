@@ -99,6 +99,7 @@ public class GameEvents {
         WireEffects.tick();
         CEEHoldInteractionHandler.tick();
         ElectricTrainSounds.tick();
+        com.george_vi.electroenergetics.client.RiderViewFollow.tick();
         ClientTrainGaugeData.tick();
         // Drop HUD samples for trains that no longer exist on the client, so the
         // cache cannot grow without bound over a long session.

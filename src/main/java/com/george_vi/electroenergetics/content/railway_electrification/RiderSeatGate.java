@@ -71,6 +71,13 @@ public final class RiderSeatGate {
      */
     public static final double MAX_SEAT_TRANSFER_BLOCKS = 4d;
 
+    /**
+     * How many ticks the carriage's transform runs ahead of the position Create last wrote for a player
+     * standing on it, measured from two moving samples (1.6 and 1.8). Standing still it is zero, which is
+     * why seat selection was correct when tested stationary and wrong at speed.
+     */
+    public static final double SEAT_POSITION_LAG_TICKS = 1.7d;
+
     /** Create's own ceiling, in Blocks per second. Above this its rider model does not hold. */
     public static final double CREATE_CEILING_BPS = 28d;
 
@@ -397,7 +404,19 @@ public final class RiderSeatGate {
                 // anchored on the contraption, so mixing the two put the seats in the wrong places and the
                 // "nearest" seat was whichever arithmetic error won. In local space both sides share one
                 // origin and the answer is the seat that is actually closest to the player.
-                Vec3 localPlayer = candidate.entity().toLocalVector(player.position(), 1.0f);
+                // The player's position and the carriage's transform are not from the same tick. Standing
+                // still, local z came out at 0.48 - exactly the seat under the player. At speed the same
+                // spot measured -8.34 and -3.62, i.e. two to nine Blocks BEHIND, in proportion to speed:
+                // the transform the carriage is drawn with is a tick or two ahead of the position Create
+                // last wrote for the player standing on it.
+                //
+                // The carriage's own per-tick movement is the correction. Scaling it by the measured lag
+                // (1.6-1.8 ticks across two samples at different speeds) puts both in the same frame;
+                // without it the nearest seat was chosen from a position the player had already left.
+                var moveEntity = candidate.entity();
+                Vec3 perTick = moveEntity.position().subtract(moveEntity.getPrevPositionVec());
+                Vec3 localPlayer = moveEntity.toLocalVector(
+                        player.position().subtract(perTick.scale(SEAT_POSITION_LAG_TICKS)), 1.0f);
                 double d = Vec3.atCenterOf(candidate.local()).distanceToSqr(localPlayer);
                 // A seat has to be somewhere the player could have walked to. Handing them one at the far
                 // end of the train is not seating them, it is teleporting them: they lose their bearings and
