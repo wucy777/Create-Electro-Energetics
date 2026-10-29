@@ -425,8 +425,13 @@ public final class RiderSeatGate {
                 // without it the nearest seat was chosen from a position the player had already left.
                 var moveEntity = candidate.entity();
                 Vec3 perTick = moveEntity.position().subtract(moveEntity.getPrevPositionVec());
+                // ADD, not subtract. The carriage's transform is ahead of the position written for the
+                // player, so the player's stored world position is behind the frame the seats are placed
+                // in; carrying them forward by the carriage's own movement puts them back into it.
+                // Subtracting pushed them further behind, which is why the first version made the choice
+                // worse - second-farthest became fourth-farthest.
                 Vec3 localPlayer = moveEntity.toLocalVector(
-                        player.position().subtract(perTick.scale(SEAT_POSITION_LAG_TICKS)), 1.0f);
+                        player.position().add(perTick.scale(SEAT_POSITION_LAG_TICKS)), 1.0f);
                 double d = Vec3.atCenterOf(candidate.local()).distanceToSqr(localPlayer);
                 // A seat has to be somewhere the player could have walked to. Handing them one at the far
                 // end of the train is not seating them, it is teleporting them: they lose their bearings and
