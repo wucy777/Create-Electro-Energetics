@@ -37,6 +37,8 @@ import com.simibubi.create.AllSoundEvents;
 import com.george_vi.electroenergetics.content.railway_electrification.ElectricTrainData;
 import com.george_vi.electroenergetics.content.railway_electrification.TrainDriverState;
 import com.george_vi.electroenergetics.content.railway_electrification.RiderSeatGate;
+import com.george_vi.electroenergetics.content.railway_electrification.SeatIntentStore;
+import com.george_vi.electroenergetics.content.railway_electrification.RequestSeatIntentPacket;
 import com.george_vi.electroenergetics.content.railway_electrification.TrainGear;
 import com.george_vi.electroenergetics.mixin_interfaces.ICEETrainExtension;
 import com.george_vi.electroenergetics.mixin_interfaces.IPantographList;
@@ -100,6 +102,7 @@ public class GameEvents {
         CEEHoldInteractionHandler.tick();
         ElectricTrainSounds.tick();
         com.george_vi.electroenergetics.client.RiderViewFollow.tick();
+        com.george_vi.electroenergetics.client.SeatIntentTracker.tick();
         ClientTrainGaugeData.tick();
         // Drop HUD samples for trains that no longer exist on the client, so the
         // cache cannot grow without bound over a long session.
@@ -315,6 +318,16 @@ public class GameEvents {
 
                 boolean unseated = RiderSeatGate.anyUnseated(train);
                 if (unseated) {
+                    // Ask anyone who has never reported which seat they are standing nearest to. The client
+                    // answers on its next tick and the seating pass uses that answer; without it the server
+                    // can only use a position it knows lags the carriage.
+                    for (var standing : RiderSeatGate.unseatedPlayers(train)) {
+                        if (standing instanceof net.minecraft.server.level.ServerPlayer serverPlayer
+                                && SeatIntentStore.get(standing.getUUID()) == null) {
+                            net.createmod.catnip.platform.CatnipServices.NETWORK.sendToClient(
+                                    serverPlayer, new RequestSeatIntentPacket());
+                        }
+                    }
                     RiderSeatGate.trySeatAll(train);
                     unseated = RiderSeatGate.anyUnseated(train);
                 }

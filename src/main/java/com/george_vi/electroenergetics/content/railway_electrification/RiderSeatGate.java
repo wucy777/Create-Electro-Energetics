@@ -71,13 +71,6 @@ public final class RiderSeatGate {
      */
     public static final double MAX_SEAT_TRANSFER_BLOCKS = 4d;
 
-    /**
-     * How many ticks the carriage's transform runs ahead of the position Create last wrote for a player
-     * standing on it, measured from two moving samples (1.6 and 1.8). Standing still it is zero, which is
-     * why seat selection was correct when tested stationary and wrong at speed.
-     */
-    public static final double SEAT_POSITION_LAG_TICKS = 1.7d;
-
     /** Create's own ceiling, in Blocks per second. Above this its rider model does not hold. */
     public static final double CREATE_CEILING_BPS = 28d;
 
@@ -298,6 +291,56 @@ public final class RiderSeatGate {
         return true;
     }
 
+    /** The index of the carriage this entity is riding, or -1 if it is not riding any of them. */
+    public static int carriageIndexOf(Train train, Entity entity) {
+        if (train == null || entity == null)
+            return -1;
+        Entity root = entity.getRootVehicle();
+        for (int i = 0; i < train.carriages.size(); i++) {
+            CarriageContraptionEntity carriage = train.carriages.get(i).anyAvailableEntity();
+            if (carriage == null)
+                continue;
+            if (root == carriage || entity.getVehicle() == carriage)
+                return i;
+        }
+        return -1;
+    }
+
+    /**
+     * The free seat nearest to a point given in the CARRIAGE's own coordinates, or -1 if none is free.
+     *
+     * <p>Takes local coordinates deliberately. The caller that knows where the player is drawn is the client,
+     * and it can express that in the carriage's frame; converting a world position on the server is what
+     * produced two rounds of wrong answers.
+     */
+    public static int nearestFreeSeat(CarriageContraptionEntity entity, Vec3 local) {
+        Contraption contraption = entity.getContraption();
+        if (contraption == null || local == null)
+            return -1;
+        java.util.List<BlockPos> seats = contraption.getSeats();
+        java.util.Set<Integer> taken = new java.util.HashSet<>(contraption.getSeatMapping().values());
+        int best = -1;
+        double bestDistance = Double.MAX_VALUE;
+        for (int i = 0; i < seats.size(); i++) {
+            if (taken.contains(i))
+                continue;
+            double d = Vec3.atCenterOf(seats.get(i)).distanceToSqr(local);
+            if (d < bestDistance) {
+                bestDistance = d;
+                best = i;
+            }
+        }
+        return best;
+    }
+
+    /** World position of a seat, for the client's own distance comparison. */
+    public static Vec3 seatWorld(CarriageContraptionEntity entity, int index) {
+        Contraption contraption = entity == null ? null : entity.getContraption();
+        if (contraption == null || index < 0 || index >= contraption.getSeats().size())
+            return null;
+        return entity.toGlobalVector(Vec3.atCenterOf(contraption.getSeats().get(index)), 1.0f);
+    }
+
     /**
      * Drops seat-mapping entries whose entity is no longer a passenger of that carriage.
      *
@@ -373,11 +416,12 @@ public final class RiderSeatGate {
         if (unseated.isEmpty())
             return 0;
 
-        record Candidate(CarriageContraptionEntity entity, int index, BlockPos local) {}
+        record Candidate(int carriage, CarriageContraptionEntity entity, int index, BlockPos local) {}
 
         List<Candidate> free = new ArrayList<>();
         int totalSeats = 0;   // SEATDIAG
-        for (Carriage carriage : train.carriages) {
+        for (int carriageIndex = 0; carriageIndex < train.carriages.size(); carriageIndex++) {
+            Carriage carriage = train.carriages.get(carriageIndex);
             CarriageContraptionEntity entity = carriage.anyAvailableEntity();
             if (entity == null || entity.level().isClientSide())
                 continue;
@@ -391,7 +435,7 @@ public final class RiderSeatGate {
             for (int i = 0; i < seats.size(); i++) {
                 if (taken.contains(i))
                     continue;
-                free.add(new Candidate(entity, i, seats.get(i)));
+                free.add(new Candidate(carriageIndex, entity, i, seats.get(i)));
             }
         }
 
@@ -407,31 +451,33 @@ public final class RiderSeatGate {
         for (Player player : unseated) {
             Candidate best = null;
             double bestDistance = Double.MAX_VALUE;
+
+            // The seat the player's own client said it was standing nearest to, if that seat is still free on
+            // the carriage it named. This is the whole point of the report: the client knows where it drew the
+            // player, the server only knows where the movement packets last put them.
+            SeatIntentStore.Intent intent = SeatIntentStore.get(player.getUUID());
+            if (intent != null && intent.trainId().equals(train.id)) {
+                for (Candidate candidate : free) {
+                    if (candidate.carriage() == intent.carriageIndex()
+                            && candidate.index() == intent.seatIndex()) {
+                        best = candidate;
+                        break;
+                    }
+                }
+            }
             StringBuilder diag = null;   // SEATDIAG
-            for (Candidate candidate : free) {
+            for (Candidate candidate : best == null ? free : java.util.List.<Candidate>of()) {
                 // Compared in the carriage's own frame. Converting the seat to world coordinates and the
                 // player to world coordinates as well looked equivalent but was not: the transform is
                 // anchored on the contraption, so mixing the two put the seats in the wrong places and the
                 // "nearest" seat was whichever arithmetic error won. In local space both sides share one
                 // origin and the answer is the seat that is actually closest to the player.
-                // The player's position and the carriage's transform are not from the same tick. Standing
-                // still, local z came out at 0.48 - exactly the seat under the player. At speed the same
-                // spot measured -8.34 and -3.62, i.e. two to nine Blocks BEHIND, in proportion to speed:
-                // the transform the carriage is drawn with is a tick or two ahead of the position Create
-                // last wrote for the player standing on it.
-                //
-                // The carriage's own per-tick movement is the correction. Scaling it by the measured lag
-                // (1.6-1.8 ticks across two samples at different speeds) puts both in the same frame;
-                // without it the nearest seat was chosen from a position the player had already left.
-                var moveEntity = candidate.entity();
-                Vec3 perTick = moveEntity.position().subtract(moveEntity.getPrevPositionVec());
-                // ADD, not subtract. The carriage's transform is ahead of the position written for the
-                // player, so the player's stored world position is behind the frame the seats are placed
-                // in; carrying them forward by the carriage's own movement puts them back into it.
-                // Subtracting pushed them further behind, which is why the first version made the choice
-                // worse - second-farthest became fourth-farthest.
-                Vec3 localPlayer = moveEntity.toLocalVector(
-                        player.position().add(perTick.scale(SEAT_POSITION_LAG_TICKS)), 1.0f);
+                // Compared in the carriage's own frame, with no correction applied. An earlier version
+                // multiplied the carriage's per-tick movement by a measured lag and added it to the player's
+                // position; without a way to prove that factor it was a guess dressed as a measurement, and
+                // a guess inside the selection is worse than a known-wrong frame. The authoritative position
+                // now comes from the client, which is the side that draws the player.
+                Vec3 localPlayer = candidate.entity().toLocalVector(player.position(), 1.0f);
                 double d = Vec3.atCenterOf(candidate.local()).distanceToSqr(localPlayer);
                 // A seat has to be somewhere the player could have walked to. Handing them one at the far
                 // end of the train is not seating them, it is teleporting them: they lose their bearings and
@@ -490,6 +536,7 @@ public final class RiderSeatGate {
             // Create's own entry point for sitting somebody on a moving contraption. It writes the seat
             // mapping and starts the ride, so nothing here has to know how either works.
             best.entity().addSittingPassenger(player, best.index());
+            SeatIntentStore.clear(player.getUUID());
             seated++;
         }
         CACHE.remove(train.id);
