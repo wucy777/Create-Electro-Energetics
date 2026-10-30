@@ -131,7 +131,7 @@ public final class SeatIntentTracker {
                 var e = car.anyAvailableEntity();
                 if (e == null)
                     continue;
-                if (!e.getBoundingBox().inflate(1.0).intersects(player.getBoundingBox()))
+                if (!RiderSeatGate.isOnContraption(player, e))
                     continue;
                 double d = e.distanceToSqr(player);
                 if (d < best) {

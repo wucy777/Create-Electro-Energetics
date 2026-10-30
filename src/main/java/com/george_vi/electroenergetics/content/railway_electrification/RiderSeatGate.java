@@ -325,6 +325,41 @@ public final class RiderSeatGate {
     }
 
     /** The index of the carriage this entity is riding, or -1 if it is not riding any of them. */
+    /**
+     * Whether this entity is standing on that carriage's own blocks.
+     *
+     * <p>Deliberately not the carriage's bounding box. That box is axis-aligned and does not turn with the
+     * contraption, so for a diagonal or angled car it covers a great deal of empty space - and a player
+     * standing on the platform beside the train would be inside it. This asks the question that actually
+     * matters: are the blocks under the entity's feet part of this contraption. Create's block map is in
+     * contraption-local coordinates, so it is exact for any shape and any rotation, and a world block is
+     * simply not in it.
+     *
+     * <p>Three samples up the body, each also checking the block below: standing on the floor, standing on
+     * a seat, and standing inside a wall all resolve, and the whole thing is a handful of map lookups.
+     */
+    public static boolean isOnContraption(net.minecraft.world.entity.Entity entity,
+                                         com.simibubi.create.content.contraptions.AbstractContraptionEntity carriage) {
+        if (entity == null || carriage == null)
+            return false;
+        Contraption contraption = carriage.getContraption();
+        if (contraption == null)
+            return false;
+        var blocks = contraption.getBlocks();
+        if (blocks == null || blocks.isEmpty())
+            return false;
+
+        double feetY = entity.getBoundingBox().minY;
+        for (double dy : new double[] {0.05d, 0.55d, 1.05d}) {
+            Vec3 world = new Vec3(entity.getX(), feetY + dy, entity.getZ());
+            Vec3 local = carriage.toLocalVector(world, 1.0f);
+            BlockPos pos = BlockPos.containing(local.x, local.y, local.z);
+            if (blocks.containsKey(pos) || blocks.containsKey(pos.below()))
+                return true;
+        }
+        return false;
+    }
+
     public static int carriageIndexOf(Train train, Entity entity) {
         if (train == null || entity == null)
             return -1;
@@ -344,7 +379,7 @@ public final class RiderSeatGate {
             CarriageContraptionEntity carriage = train.carriages.get(i).anyAvailableEntity();
             if (carriage == null)
                 continue;
-            if (carriage.getBoundingBox().inflate(1.0).intersects(entity.getBoundingBox()))
+            if (isOnContraption(entity, carriage))
                 return i;
         }
         return -1;

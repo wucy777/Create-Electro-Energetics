@@ -78,8 +78,19 @@ public record ReportSeatIntentPacket(UUID trainId, int carriageIndex, int seatIn
         // riding anything and gets nothing.
         int actual = RiderSeatGate.carriageIndexOf(train, player);
         if (actual < 0) {
-            SeatIntentStore.clear(player.getUUID());
-            return;
+            // The server's copy of a standing player's position lags at speed, so the exact block test can
+            // miss the carriage they are visibly on. The client said which one, and it is the authority on
+            // where it is standing - accepted here only if that carriage really is within reach, so a
+            // packet cannot place a player on a train across the world.
+            if (carriageIndex >= 0 && carriageIndex < train.carriages.size()) {
+                var claimed = train.carriages.get(carriageIndex).anyAvailableEntity();
+                if (claimed != null && claimed.distanceToSqr(player) < 16d * 16d)
+                    actual = carriageIndex;
+            }
+            if (actual < 0) {
+                SeatIntentStore.clear(player.getUUID());
+                return;
+            }
         }
         if (!standing) {
             SeatIntentStore.clear(player.getUUID());

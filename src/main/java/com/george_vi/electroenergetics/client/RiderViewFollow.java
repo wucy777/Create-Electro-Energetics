@@ -1,5 +1,6 @@
 package com.george_vi.electroenergetics.client;
 
+import com.george_vi.electroenergetics.content.railway_electrification.RiderSeatGate;
 import com.simibubi.create.content.contraptions.AbstractContraptionEntity;
 import com.simibubi.create.content.contraptions.actors.seat.SeatEntity;
 import com.simibubi.create.content.trains.entity.CarriageContraptionEntity;
@@ -194,7 +195,7 @@ public final class RiderViewFollow {
                 var e = car.anyAvailableEntity();
                 if (e == null)
                     continue;
-                if (!e.getBoundingBox().inflate(1.0).intersects(player.getBoundingBox()))
+                if (!RiderSeatGate.isOnContraption(player, e))
                     continue;
                 double d = e.distanceToSqr(player);
                 if (d < best) {
