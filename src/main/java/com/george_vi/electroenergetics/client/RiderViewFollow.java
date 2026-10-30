@@ -110,16 +110,10 @@ public final class RiderViewFollow {
             contraption = (AbstractContraptionEntity) vehicle;
         else if (vehicle instanceof SeatEntity && vehicle.getRootVehicle() instanceof AbstractContraptionEntity root)
             contraption = root;
-        else if (vehicle == null) {
-            // Standing on a carriage is the case the owner reported: seated riders already turn, because
-            // Create's own hook handles them, and a player on their feet has no vehicle for that hook to
-            // see. Found by intersection, same as the seat reporter.
-            contraption = standingContraption(player);
-            if (contraption == null) {
-                forget();
-                return;
-            }
-        } else {
+        else {
+            // Standing players are deliberately NOT handled here: Create does not rotate them, and the owner's
+            // decision is that this mod should not add behaviour Create does not have. Seated riders keep
+            // whatever is making theirs work today.
             forget();
             return;
         }

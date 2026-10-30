@@ -120,7 +120,20 @@ public record ReportSeatIntentPacket(UUID trainId, int carriageIndex, int seatIn
         if (target < 0)
             return;                                     // no seat anywhere: the capacity rule takes over
 
+        org.slf4j.LoggerFactory.getLogger("electroenergetics/seatintent").info(
+                "SEATINTENT recv reportedCarriage={} reportedSeat={} actualCarriage={} legal={} target={} "
+                        + "local={},{},{} occupiedBefore={}",
+                carriageIndex, seatIndex, actual, legal, target,
+                String.format("%.2f", localX), String.format("%.2f", localY), String.format("%.2f", localZ),
+                contraption.getSeatMapping().values());
+
         entity.addSittingPassenger(player, target);
+
+        org.slf4j.LoggerFactory.getLogger("electroenergetics/seatintent").info(
+                "SEATINTENT done playerSeatAfter={} passengers={}",
+                contraption.getSeatMapping().get(player.getUUID()),
+                entity.getPassengers().size());
+
         CatnipServices.NETWORK.sendToClient(player, new SeatAssignedPacket(actual, target));
     }
 

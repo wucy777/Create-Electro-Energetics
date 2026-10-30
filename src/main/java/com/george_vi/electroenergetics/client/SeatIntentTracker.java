@@ -109,6 +109,12 @@ public final class SeatIntentTracker {
         Vec3 local = carriage.toLocalVector(player.position(), 1.0f);
         CatnipServices.NETWORK.sendToServer(new ReportSeatIntentPacket(train.id, carriageIndex, best,
                 local.x, local.y, local.z, true));
+        org.slf4j.LoggerFactory.getLogger("electroenergetics/seatintent").info(
+                "SEATINTENT send carriage={} seat={} local={},{},{} world={},{},{} playerYaw={}",
+                carriageIndex, best,
+                String.format("%.2f", local.x), String.format("%.2f", local.y), String.format("%.2f", local.z),
+                String.format("%.2f", player.getX()), String.format("%.2f", player.getY()),
+                String.format("%.2f", player.getZ()), String.format("%.1f", player.getYRot()));
         sent = true;
         lastSeat = best;
         lastCarriage = carriageIndex;
