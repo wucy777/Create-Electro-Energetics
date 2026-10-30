@@ -29,6 +29,21 @@ import net.minecraft.world.phys.Vec3;
  */
 public final class SeatIntentTracker {
 
+    private static int diagTicks;
+
+    private static void diag(String why, LocalPlayer player) {
+        if (++diagTicks % 40 != 0)
+            return;
+        var root = player == null ? null : player.getRootVehicle();
+        org.slf4j.LoggerFactory.getLogger("electroenergetics/seatintent").info(
+                "SEATINTENT idle reason={} root={} vehicle={}",
+                why,
+                root == null ? "none" : root.getClass().getSimpleName(),
+                player == null || player.getVehicle() == null ? "none"
+                        : player.getVehicle().getClass().getSimpleName());
+    }
+
+
     private SeatIntentTracker() {}
 
     private static boolean sent;
@@ -78,6 +93,7 @@ public final class SeatIntentTracker {
         }
         if (carriage == null) {
             sent = false;
+            diag("no-carriage", player);
             return;
         }
         var cc = carriage.getCarriage();
@@ -93,10 +109,15 @@ public final class SeatIntentTracker {
         }
         if (contraption.getSeatMapping().containsKey(player.getUUID())) {
             sent = false;                                  // seated: nothing to report
+            diag("seated-per-mapping", player);
             return;
         }
-        if (Math.abs(train.speed) < RiderSeatGate.CREATE_CEILING_BPT) {
-            sent = false;                                  // standing below the ceiling is legal
+        // Report from well below the ceiling, not only at it. The server needs the answer BEFORE the train
+        // arrives at 28; waiting until 28 meant the first tick of the rule had nothing to use and fell back
+        // to its own lagging position. Edge-triggered, so a steady speed costs no packets.
+        if (Math.abs(train.speed) < 1.0d) {
+            sent = false;                                  // standing on a stopped train is not a case
+            diag("train-stopped", player);
             return;
         }
 
