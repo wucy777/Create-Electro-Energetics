@@ -167,7 +167,6 @@ public final class RiderViewFollow {
         // Otherwise apply the angle Create would have used, or - when it reports no rotation at all -
         // the one the contraption's own direction of travel gives.
         // Only reached when Create is NOT turning this rider (the early return above covers that), so the
-        // angle to apply is the one derived from the contraption's own movement - including the standing
         // case, where Create cannot see the player at all and its angle is irrelevant to their view.
         float delta = headingDelta;
         delta = Mth.clamp(delta, -MAX_STEP, MAX_STEP);
@@ -175,30 +174,6 @@ public final class RiderViewFollow {
             return;
 
         player.setYRot(player.getYRot() + delta);
-    }
-
-    /** The carriage a standing player is on, found by intersection against the client's own trains. */
-    private static AbstractContraptionEntity standingContraption(Player player) {
-        var railways = com.simibubi.create.CreateClient.RAILWAYS;
-        if (railways == null)
-            return null;
-        AbstractContraptionEntity found = null;
-        double best = Double.MAX_VALUE;
-        for (var train : railways.trains.values()) {
-            for (var car : train.carriages) {
-                var e = car.anyAvailableEntity();
-                if (e == null)
-                    continue;
-                if (!RiderSeatGate.isOnContraption(player, e))
-                    continue;
-                double d = e.distanceToSqr(player);
-                if (d < best) {
-                    best = d;
-                    found = e;
-                }
-            }
-        }
-        return found;
     }
 
     private static void forget() {

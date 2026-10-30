@@ -63,13 +63,6 @@ public final class RiderSeatGate {
 
     private RiderSeatGate() {}
 
-    /**
-     * How far a player may be moved to a seat, in Blocks.
-     *
-     * <p>Generous enough for the length of a carriage bay, small enough that the player can see where they
-     * ended up. Beyond this the situation is treated as "no seat for you", which is the honest answer.
-     */
-    public static final double MAX_SEAT_TRANSFER_BLOCKS = 4d;
 
     /** Create's own ceiling, in Blocks per second. Above this its rider model does not hold. */
     public static final double CREATE_CEILING_BPS = 28d;
@@ -594,8 +587,11 @@ public final class RiderSeatGate {
                         .append(String.format("@%.2f", Math.sqrt(d)))
                         .append("[w").append(String.format("%.1f,%.1f,%.1f",
                                 seatWorld.x, seatWorld.y, seatWorld.z)).append("]");
-                if (d > MAX_SEAT_TRANSFER_BLOCKS * MAX_SEAT_TRANSFER_BLOCKS)
-                    continue;
+                // No distance cap. The owner's ruling: seat the nearest free seat on THIS train,
+                // however far down the carriage it is. Being picked out of another train or off the
+                // platform is prevented upstream by isOnContraption - only players actually standing
+                // on this carriage's own blocks are ever considered - so a cap on top of that only
+                // produced false "over capacity" reports with empty seats in sight.
                 if (best == null
                         || d < bestDistance - 1.0e-9d
                         || (Math.abs(d - bestDistance) <= 1.0e-9d

@@ -85,11 +85,14 @@ public final class TrainControlModeLogic {
         // A working pantograph hands the train back to this mod, from whatever state it was in.
         // This is the only route out of CREATE, and it requires the driver to have raised a
         // pantograph onto live wire - there is no automatic raise.
-        if (data.hasWorkingPantograph) {
-            return powered
-                    ? TrainControlMode.ELECTRIC
-                    : TrainControlMode.DEAD_COAST;
-        }
+        // A pantograph that is up and collecting is this mod's to drive, at ANY speed - including a
+        // standstill at a platform, where the driver must be able to select accelerate and pull away.
+        //
+        // A pantograph that is up but NOT energised is the opposite case: it is no different from having
+        // no pantograph, so it falls through to the same speed-gated handover below rather than sitting in
+        // DEAD_COAST forever. That was the defect: an unpowered train could never be handed back.
+        if (data.hasWorkingPantograph && powered)
+            return TrainControlMode.ELECTRIC;
 
         // An emergency brake application must FINISH before the train changes hands, and this is
         // tested BEFORE the "already handed over" case below.
