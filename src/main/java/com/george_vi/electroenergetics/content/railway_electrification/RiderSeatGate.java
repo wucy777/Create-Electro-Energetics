@@ -336,6 +336,17 @@ public final class RiderSeatGate {
             if (root == carriage || entity.getVehicle() == carriage)
                 return i;
         }
+
+        // Standing players have no vehicle: their root vehicle is themselves. Testing only riders meant every
+        // client seat report was rejected here and fell back to the server's own position - the lagging one.
+        // Standing on a carriage is still being on that carriage, so intersection decides which one.
+        for (int i = 0; i < train.carriages.size(); i++) {
+            CarriageContraptionEntity carriage = train.carriages.get(i).anyAvailableEntity();
+            if (carriage == null)
+                continue;
+            if (carriage.getBoundingBox().inflate(1.0).intersects(entity.getBoundingBox()))
+                return i;
+        }
         return -1;
     }
 

@@ -109,7 +109,16 @@ public final class RiderViewFollow {
             contraption = (AbstractContraptionEntity) vehicle;
         else if (vehicle instanceof SeatEntity && vehicle.getRootVehicle() instanceof AbstractContraptionEntity root)
             contraption = root;
-        else {
+        else if (vehicle == null) {
+            // Standing on a carriage is the case the owner reported: seated riders already turn, because
+            // Create's own hook handles them, and a player on their feet has no vehicle for that hook to
+            // see. Found by intersection, same as the seat reporter.
+            contraption = standingContraption(player);
+            if (contraption == null) {
+                forget();
+                return;
+            }
+        } else {
             forget();
             return;
         }
@@ -162,12 +171,39 @@ public final class RiderViewFollow {
 
         // Otherwise apply the angle Create would have used, or - when it reports no rotation at all -
         // the one the contraption's own direction of travel gives.
-        float delta = createIsTurning ? viewDelta : headingDelta;
+        // Only reached when Create is NOT turning this rider (the early return above covers that), so the
+        // angle to apply is the one derived from the contraption's own movement - including the standing
+        // case, where Create cannot see the player at all and its angle is irrelevant to their view.
+        float delta = headingDelta;
         delta = Mth.clamp(delta, -MAX_STEP, MAX_STEP);
         if (Math.abs(delta) < EPSILON)
             return;
 
         player.setYRot(player.getYRot() + delta);
+    }
+
+    /** The carriage a standing player is on, found by intersection against the client's own trains. */
+    private static AbstractContraptionEntity standingContraption(Player player) {
+        var railways = com.simibubi.create.CreateClient.RAILWAYS;
+        if (railways == null)
+            return null;
+        AbstractContraptionEntity found = null;
+        double best = Double.MAX_VALUE;
+        for (var train : railways.trains.values()) {
+            for (var car : train.carriages) {
+                var e = car.anyAvailableEntity();
+                if (e == null)
+                    continue;
+                if (!e.getBoundingBox().inflate(1.0).intersects(player.getBoundingBox()))
+                    continue;
+                double d = e.distanceToSqr(player);
+                if (d < best) {
+                    best = d;
+                    found = e;
+                }
+            }
+        }
+        return found;
     }
 
     private static void forget() {
