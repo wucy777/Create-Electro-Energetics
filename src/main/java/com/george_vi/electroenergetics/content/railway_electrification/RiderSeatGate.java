@@ -172,7 +172,7 @@ public final class RiderSeatGate {
             // collidingEntities is filled by the collision pass, so a player who walked in and stopped may
             // never appear in it. Their own box against the carriage's is the cheap exact test.
             for (var nearby : entity.level().players())
-                if (entity.getBoundingBox().intersects(nearby.getBoundingBox()))
+                if (isOnContraption(nearby, entity))
                     collect(nearby, seated, out);
         }
         out.sort(Comparator.comparing(Player::getUUID));

@@ -224,7 +224,7 @@ public class GameEvents {
             // has seen, so a player who walked in and stopped can be missing from it - and they are the one
             // the message is for.
             for (var nearby : entity.level().players())
-                if (entity.getBoundingBox().intersects(nearby.getBoundingBox()))
+                if (RiderSeatGate.isOnContraption(nearby, entity))
                     notifyOne(nearby, langKey, sent);
         }
     }
