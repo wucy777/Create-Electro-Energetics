@@ -90,6 +90,12 @@ import java.util.Optional;
 @EventBusSubscriber(modid = CreateElectroEnergetics.ID)
 public class GameEvents {
 
+    @SubscribeEvent
+    public static void onPlayerLogin(net.neoforged.neoforge.event.entity.player.PlayerEvent.PlayerLoggedInEvent event) {
+        if (event.getEntity() instanceof net.minecraft.server.level.ServerPlayer player)
+            RiderSeatGate.restoreSeatOnLogin(player);
+    }
+
     @OnlyIn(Dist.CLIENT)
     @SubscribeEvent
     public static void tickClient(ClientTickEvent.Pre event) {

@@ -69,6 +69,12 @@ import net.minecraft.world.phys.Vec3;
  */
 public final class RiderViewFollow {
 
+    // Temporary: one line a second while riding, so a view that does not turn can be diagnosed from which
+    // branch is taken instead of guessed at.
+    private static final org.slf4j.Logger LOG =
+            org.slf4j.LoggerFactory.getLogger("electroenergetics/viewdiag");
+    private static int diagTicks;
+
     private RiderViewFollow() {}
 
     /** Angle below which a change is float noise rather than motion [degrees]. */
@@ -143,6 +149,14 @@ public final class RiderViewFollow {
         // A rider Create can see is already being turned whenever the angle it reads is moving; adding
         // anything here would turn them twice.
         boolean createIsTurning = Math.abs(viewDelta) > EPSILON;
+        if (++diagTicks % 60 == 0) {
+            LOG.info("VIEWDIAG vehicle={} createCanSee={} viewYaw={} viewDelta={} headingDelta={} "
+                            + "createTurning={}",
+                    vehicle == null ? "none" : vehicle.getClass().getSimpleName(),
+                    createCanSeeRider, String.format("%.3f", viewYaw),
+                    String.format("%.3f", viewDelta), String.format("%.3f", headingDelta),
+                    createIsTurning);
+        }
         if (createCanSeeRider && createIsTurning)
             return;
 

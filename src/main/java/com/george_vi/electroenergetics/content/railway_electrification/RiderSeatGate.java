@@ -213,6 +213,39 @@ public final class RiderSeatGate {
     }
 
     /**
+     * Puts a returning player back in the seat they left.
+     *
+     * <p>Rejoining a train that is still moving otherwise lands the player at their saved world position with
+     * no seat: the train has moved on, and whatever seating happens next is decided from that stale position
+     * - a different seat. The seat map still has them, because an offline player keeps their entry, so the
+     * seat index is read from there and applied directly instead of being recomputed.
+     */
+    public static void restoreSeatOnLogin(net.minecraft.server.level.ServerPlayer player) {
+        try {
+            for (com.simibubi.create.content.trains.entity.Train train
+                    : com.simibubi.create.Create.RAILWAYS.trains.values()) {
+                for (var carriage : train.carriages) {
+                    var entity = carriage.anyAvailableEntity();
+                    if (entity == null)
+                        continue;
+                    Contraption contraption = entity.getContraption();
+                    if (contraption == null)
+                        continue;
+                    Integer seat = contraption.getSeatMapping().get(player.getUUID());
+                    if (seat == null)
+                        continue;
+                    if (player.getVehicle() == entity)
+                        return;                          // already back in it
+                    entity.addSittingPassenger(player, seat);
+                    return;
+                }
+            }
+        } catch (Throwable ignored) {
+            // A failed restore leaves the player standing, which the normal rules handle.
+        }
+    }
+
+    /**
      * Whether a dismount by this player must be refused: they are in a seat on a train carriage, and the
      * train is at or above the ceiling.
      *

@@ -65,8 +65,18 @@ public final class SeatIntentTracker {
             return;
         }
 
+        // A player who NEEDS a seat is standing: their root vehicle is themselves, so testing only
+        // getRootVehicle() meant this never reported for the one case it exists for - and the server fell
+        // back to its own position, which is the lagging one. Standing players find the carriage by
+        // intersection instead.
         Entity root = player.getRootVehicle();
-        if (!(root instanceof CarriageContraptionEntity carriage)) {
+        CarriageContraptionEntity carriage;
+        if (root instanceof CarriageContraptionEntity riding) {
+            carriage = riding;
+        } else {
+            carriage = standingCarriage(player);
+        }
+        if (carriage == null) {
             sent = false;
             return;
         }
@@ -102,6 +112,35 @@ public final class SeatIntentTracker {
         sent = true;
         lastSeat = best;
         lastCarriage = carriageIndex;
+    }
+
+    /**
+     * The carriage this player is standing on, found by intersection, or null.
+     *
+     * <p>Client side, so the position used is the one the player sees themselves at - which is the entire
+     * point of reporting from here rather than letting the server guess.
+     */
+    private static CarriageContraptionEntity standingCarriage(LocalPlayer player) {
+        var railways = com.simibubi.create.CreateClient.RAILWAYS;
+        if (railways == null)
+            return null;
+        CarriageContraptionEntity found = null;
+        double best = Double.MAX_VALUE;
+        for (Train t : railways.trains.values()) {
+            for (var car : t.carriages) {
+                var e = car.anyAvailableEntity();
+                if (e == null)
+                    continue;
+                if (!e.getBoundingBox().inflate(1.0).intersects(player.getBoundingBox()))
+                    continue;
+                double d = e.distanceToSqr(player);
+                if (d < best) {
+                    best = d;
+                    found = e;
+                }
+            }
+        }
+        return found;
     }
 
     private static int nearestFreeSeat(CarriageContraptionEntity carriage, Contraption contraption, Vec3 world) {
