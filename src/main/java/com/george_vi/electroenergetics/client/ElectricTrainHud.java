@@ -289,7 +289,7 @@ public class ElectricTrainHud implements LayeredDraw.Layer {
         // the one readout that says whether the set is holding its speed.
         String status = statusLine();
         if (!status.isEmpty())
-            graphics.drawString(font, status, x, y + LINE_HEIGHT * 6 + 2, statusColor(), true);
+            graphics.drawString(font, status, x, y + LINE_HEIGHT * 7 + 2, statusColor(), true);
     }
 
     /**
@@ -507,8 +507,11 @@ public class ElectricTrainHud implements LayeredDraw.Layer {
         // to flat it actually is, and a real gradient readout is the one thing that explains why a train
         // is not holding its speed.
         double percent = grade * 100d;
-        if (Math.abs(grade) < 0.0005d)
-            return String.format("%+.2f%% %s", percent, tr("electroenergetics.train.grade.level"));
+        if (Math.abs(grade) < 0.0005d) {
+            // No sign on the level: the measurement wobbles either side of zero, and "+0.00%" and
+            // "-0.00%" alternating is a light that flickers for no information.
+            return String.format("0.00%% %s", tr("electroenergetics.train.grade.level"));
+        }
         return String.format("%+.2f%% %s", percent,
                 tr(grade > 0 ? "electroenergetics.train.grade.uphill"
                              : "electroenergetics.train.grade.downhill"));
