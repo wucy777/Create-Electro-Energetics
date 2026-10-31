@@ -173,39 +173,13 @@ public record SetTrainGearPacket(UUID trainId, int gearOrdinal, boolean confirm,
             if (!electricData.gearAvailable(gear))
                 return;
 
-            // Reverse while already moving arms the emergency brake instead of
-            // commanding reverse traction: a real handle cannot be thrown against
-            // the direction of travel, and "stop hard" is what the driver means.
-            if (gear == TrainGear.REVERSE && Math.abs(train.speed) > TrainTractionModel.CRUISE_MIN_SPEED) {
-                state.gear = gear;
-                // The SAME three flags the emergency button sets, because this is the same
-                // emergency brake.
-                //
-                // It used to set only `emergencyArmed`. That left the panel live: the lockout for
-                // the lever is keyed on emergencyArmed and so still held, but the lockout for the
-                // PANTOGRAPHS is keyed on controlsLocked, and SetPantographPacket consults nothing
-                // else. A driver who slammed the handle into reverse at speed could therefore raise a
-                // pantograph in the middle of an emergency stop - the one thing the operator's rule
-                // forbids, and the case that matters, since the point of the lock is that a driver
-                // whose supply failed mid-stop must not bring the motors back to finish it.
-                //
-                // TrainDriverState.controlsLocked documents that the two flags "are set together, so
-                // the brake cannot be running while the panel is live". This is the line that made
-                // that untrue.
-                state.emergencyTicks = 0;
-                state.emergencyPenalty = true;
-                // Same reason as the emergency button: a new application starts a new leg.
-                state.penaltyStationReached = false;
-                state.penaltyDistance = 0d;
-                state.controlsLocked = true;
-                state.emergencyArmed = true;
-                // Same reason as the emergency button: the tail must restart, or a second application
-                // inherits the first one's count and the panel unlocks before LOCKOUT_TAIL_TICKS have
-                // passed since THIS stop.
-                state.lockoutTailTicks = 0;
-            } else {
-                state.gear = gear;
-            }
+            // Engaging only SELECTS the position. Throwing the handle into reverse while
+            // rolling forward gives the strong reverse-gear brake the traction model already
+            // applies (brake + motors dragged against the motion) - but it is NOT the
+            // emergency brake: the operator's ruling is that engaging only READIES it and
+            // the K press fires it. Firing on engagement made every reverse engagement a
+            // full emergency stop with the whole penalty chain attached.
+            state.gear = gear;
             // Cruise captures the speed it is to hold at the moment it is engaged.
             if (gear == TrainGear.CRUISE)
                 state.cruiseSpeed = Math.abs(train.speed) * 20d;
