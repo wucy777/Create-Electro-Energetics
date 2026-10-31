@@ -379,7 +379,8 @@ public class TrainMixin implements ICEETrainExtension {
         // driver would recognise. The vigilance clock still runs while unmanned and
         // still brakes the train at TRIP_TICKS, so this defers the stop, it does not
         // remove it.
-        if (data.underElectricControl() && data.driver.underGearControl()) {
+        if (data.underElectricControl() && data.driver.underGearControl()
+                && !data.driver.autoArrive) {
             applyGearLaw(self, data);
             return;
         }
@@ -441,10 +442,6 @@ public class TrainMixin implements ICEETrainExtension {
         // negative magnitude into a mirror-symmetric law would cancel the mirror rather
         // than reverse the train - the mirror already carries "which way is forward".
         double cruiseCommand = st.cruiseSpeed;
-        if (st.autoArrive && !st.vigilanceTripped) {
-            effectiveGear = TrainGear.CRUISE;
-            cruiseCommand = Math.abs(self.targetSpeed);
-        }
 
         // Release the station before commanding traction.
         //
@@ -563,6 +560,17 @@ public class TrainMixin implements ICEETrainExtension {
             next = 0d;
 
         self.speed = next;
+
+        // The emergency penalty caps the ACTUAL speed, not just Create's target: the gear
+        // law writes train.speed directly and never consults maxSpeed(), so a cap that
+        // lives only there is display-only while this mode is driving - reported as the
+        // 40 km/h limit being "just a hint". After the stop the train starts at zero and
+        // the gear law's own effort curve presses against the cap, so the clamp is smooth.
+        if (data.driver.emergencyPenalty) {
+            double cap = com.george_vi.electroenergetics.content.railway_electrification.TrainDriverState.PENALTY_SPEED / 20.0;
+            if (Math.abs(self.speed) > cap)
+                self.speed = Math.signum(self.speed) * cap;
+        }
 
         // Regeneration is reported for the next circuit build, which runs before the
         // following tick's motion.
