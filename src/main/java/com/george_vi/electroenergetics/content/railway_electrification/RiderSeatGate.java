@@ -215,27 +215,69 @@ public final class RiderSeatGate {
      */
     public static void restoreSeatOnLogin(net.minecraft.server.level.ServerPlayer player) {
         try {
-            for (com.simibubi.create.content.trains.entity.Train train
-                    : com.simibubi.create.Create.RAILWAYS.trains.values()) {
-                for (var carriage : train.carriages) {
-                    var entity = carriage.anyAvailableEntity();
-                    if (entity == null)
-                        continue;
-                    Contraption contraption = entity.getContraption();
-                    if (contraption == null)
-                        continue;
-                    Integer seat = contraption.getSeatMapping().get(player.getUUID());
-                    if (seat == null)
-                        continue;
-                    if (player.getVehicle() == entity)
-                        return;                          // already back in it
-                    entity.addSittingPassenger(player, seat);
-                    return;
-                }
-            }
+            restoreClaim(player);
         } catch (Throwable ignored) {
             // A failed restore leaves the player standing, which the normal rules handle.
         }
+    }
+
+    /**
+     * The carriage whose seat map still claims this player, nearest to where they are, or null.
+     *
+     * <p>"Nearest" rather than "first found": a player can hold a seat entry on more than one carriage -
+     * an old claim that was never released, plus the one they actually sit in - and the offline-preserving
+     * prune keeps both. Taking the first match put returning players in whichever carriage happened to be
+     * earlier in the consist, which is how a driver came back from a relogin sitting in the second car.
+     */
+    private static CarriageContraptionEntity nearestClaimed(Entity player) {
+        CarriageContraptionEntity best = null;
+        double bestDistance = Double.MAX_VALUE;
+        for (com.simibubi.create.content.trains.entity.Train train
+                : com.simibubi.create.Create.RAILWAYS.trains.values()) {
+            for (var carriage : train.carriages) {
+                CarriageContraptionEntity entity = carriage.anyAvailableEntity();
+                if (entity == null || entity.level().isClientSide())
+                    continue;
+                Contraption contraption = entity.getContraption();
+                if (contraption == null || !contraption.getSeatMapping().containsKey(player.getUUID()))
+                    continue;
+                double d = entity.distanceToSqr(player);
+                if (d < bestDistance) {
+                    bestDistance = d;
+                    best = entity;
+                }
+            }
+        }
+        return best;
+    }
+
+    /**
+     * Seats the player back in their claimed seat, without moving them.
+     *
+     * <p>The teleport that used to run here was the problem: it moved the player to the seat's world
+     * position during login, before their client had finished joining, and it did so on a train that was
+     * still moving - reported as the world refusing to load normally afterwards. Create's own
+     * addSittingPassenger already carries a rider to the seat; nothing here has to place them by hand.
+     *
+     * <p>If the train is further away than a rider could plausibly have logged off from, the claim is stale
+     * and is left alone - the capacity rules will seat them normally.
+     */
+    private static boolean restoreClaim(net.minecraft.server.level.ServerPlayer player) {
+        CarriageContraptionEntity entity = nearestClaimed(player);
+        if (entity == null)
+            return false;
+        Contraption contraption = entity.getContraption();
+        if (contraption == null)
+            return false;
+        Integer seat = contraption.getSeatMapping().get(player.getUUID());
+        if (seat == null || seat < 0 || seat >= contraption.getSeats().size())
+            return false;
+        if (player.getVehicle() == entity)
+            return true;
+        if (entity.distanceToSqr(player) > 64d * 64d)
+            return false;
+        entity.addSittingPassenger(player, seat);
+        return player.getVehicle() == entity;
     }
 
     /**
@@ -439,33 +481,10 @@ public final class RiderSeatGate {
             net.minecraft.server.level.ServerPlayer player = server.getPlayerList().getPlayer(entry.getKey());
             if (player == null)
                 continue;                               // dropped again before the train loaded
-            if (now > entry.getValue()) {
+            if (now > entry.getValue() || restoreClaim(player) || nearestClaimed(player) == null) {
                 PENDING_RESTORE.remove(entry.getKey());
-                continue;
             }
-            for (com.simibubi.create.content.trains.entity.Train train
-                    : com.simibubi.create.Create.RAILWAYS.trains.values()) {
-                for (var carriage : train.carriages) {
-                    var entity = carriage.anyAvailableEntity();
-                    if (entity == null || entity.level().isClientSide())
-                        continue;
-                    Contraption contraption = entity.getContraption();
-                    if (contraption == null)
-                        continue;
-                    Integer seat = contraption.getSeatMapping().get(entry.getKey());
-                    if (seat == null)
-                        continue;
-                    if (player.getVehicle() == entity)
-                        return;                          // already back in it
-                    Vec3 seatWorld = entity.toGlobalVector(
-                            Vec3.atCenterOf(contraption.getSeats().get(seat)), 1.0f);
-                    player.teleportTo((net.minecraft.server.level.ServerLevel) entity.level(),
-                            seatWorld.x, seatWorld.y, seatWorld.z, player.getYRot(), player.getXRot());
-                    entity.addSittingPassenger(player, seat);
-                    PENDING_RESTORE.remove(entry.getKey());
-                    return;
-                }
-            }
+            // Otherwise the train has not loaded yet: keep waiting until the deadline.
         }
     }
 

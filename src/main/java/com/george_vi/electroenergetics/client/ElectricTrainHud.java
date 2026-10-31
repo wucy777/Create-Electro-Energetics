@@ -447,8 +447,12 @@ public class ElectricTrainHud implements LayeredDraw.Layer {
         // longer has to change - and one format for the row is easier to read than a
         // bracket convention invented for the unpowered case. The catenary row already
         // carries "0.0 kV (unpowered)" and explains why the train is not pulling.
-        textSpeed = String.format("%.1f / %.1f m/s  ·  %.0f / %.0f km/h",
-                speed / 10d, cap / 10d, speed / 3.6d, cap / 3.6d);
+        // Both units, one value each. The divisor was wrong twice over: the inputs are TENTHS of a
+        // m/s, and the conversion is m/s * 3.6 to reach km/h - dividing by 3.6 printed 278 where
+        // 100 m/s is 360. The ceiling is printed in m/s only; repeating it in km/h doubled the width
+        // of the row for a number the driver can already read on the left half.
+        textSpeed = String.format("%.1f / %.1f m/s  ·  %.0f km/h",
+                speed / 10d, cap / 10d, speed / 10d * 3.6d);
         textGear = gear < 0 || gear >= TrainGear.values().length
                 ? "--"
                 : TrainControlHud.label(TrainGear.values()[gear]);
