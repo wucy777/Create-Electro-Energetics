@@ -97,44 +97,36 @@ public record ReportSeatIntentPacket(UUID trainId, int carriageIndex, int seatIn
             return;
         }
 
-        CarriageContraptionEntity entity = train.carriages.get(actual).anyAvailableEntity();
-        if (entity == null)
+        // The SEAT's carriage is the client's call, and it travels in the packet: the client is the side
+        // that sees which seat is nearest, and that seat may be on a neighbouring carriage. Overwriting it
+        // with the server's own standing-carriage guess put the client's seat index into the wrong
+        // carriage's seat table - the reported "nearest seat" that never was. Only range and reachability
+        // are server-checked here, so a packet cannot name a carriage across the world.
+        if (carriageIndex < 0 || carriageIndex >= train.carriages.size()) {
+            SeatIntentStore.clear(player.getUUID());
             return;
-        Contraption contraption = entity.getContraption();
-        if (contraption == null)
+        }
+        CarriageContraptionEntity seatEntity = train.carriages.get(carriageIndex).anyAvailableEntity();
+        if (seatEntity == null || seatEntity.distanceToSqr(player) > 16d * 16d) {
+            SeatIntentStore.clear(player.getUUID());
             return;
+        }
+        Contraption seatContraption = seatEntity.getContraption();
+        if (seatContraption == null || seatIndex < 0 || seatIndex >= seatContraption.getSeats().size()) {
+            SeatIntentStore.clear(player.getUUID());
+            return;
+        }
 
-        // Remember the report whichever way the seating goes: the server may need it later, when the train
-        // reaches the ceiling and this player still has no seat.
+        // Store ONLY. Seating happens in RiderSeatGate.trySeatAll, the single decision point - a second
+        // seat-er here raced the gate and assigned seats the gate's own rules never chose.
         SeatIntentStore.put(player.getUUID(), new SeatIntentStore.Intent(
-                train.id, actual, seatIndex, localX, localY, localZ));
-
-        if (contraption.getSeatMapping().containsKey(player.getUUID()))
-            return;                                     // already seated; nothing to do
-
-        boolean legal = seatIndex >= 0
-                && seatIndex < contraption.getSeats().size()
-                && !contraption.getSeatMapping().containsValue(seatIndex);
-
-        int target = legal ? seatIndex : RiderSeatGate.nearestFreeSeat(entity, new Vec3(localX, localY, localZ));
-        if (target < 0)
-            return;                                     // no seat anywhere: the capacity rule takes over
+                train.id, carriageIndex, seatIndex, localX, localY, localZ));
 
         org.slf4j.LoggerFactory.getLogger("electroenergetics/seatintent").info(
-                "SEATINTENT recv reportedCarriage={} reportedSeat={} actualCarriage={} legal={} target={} "
-                        + "local={},{},{} occupiedBefore={}",
-                carriageIndex, seatIndex, actual, legal, target,
-                String.format("%.2f", localX), String.format("%.2f", localY), String.format("%.2f", localZ),
-                contraption.getSeatMapping().values());
+                "SEATINTENT recv seatCarriage={} seat={} standingCarriage={} local={},{},{}",
+                carriageIndex, seatIndex, actual,
+                String.format("%.2f", localX), String.format("%.2f", localY), String.format("%.2f", localZ));
 
-        entity.addSittingPassenger(player, target);
-
-        org.slf4j.LoggerFactory.getLogger("electroenergetics/seatintent").info(
-                "SEATINTENT done playerSeatAfter={} passengers={}",
-                contraption.getSeatMapping().get(player.getUUID()),
-                entity.getPassengers().size());
-
-        CatnipServices.NETWORK.sendToClient(player, new SeatAssignedPacket(actual, target));
     }
 
     @Override

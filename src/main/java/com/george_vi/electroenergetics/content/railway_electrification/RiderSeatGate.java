@@ -405,6 +405,9 @@ public final class RiderSeatGate {
         return best;
     }
 
+    /** Ticks the gate waits for a client's seat answer before using its own frame. */
+    public static final int SEAT_INTENT_GRACE_TICKS = 10;
+
     /** World position of a seat, for the client's own distance comparison. */
     public static Vec3 seatWorld(CarriageContraptionEntity entity, int index) {
         Contraption contraption = entity == null ? null : entity.getContraption();
@@ -484,6 +487,12 @@ public final class RiderSeatGate {
      * independent of iteration order.
      */
     public static int trySeatAll(Train train) {
+        // Debug entry: the grace window is pre-expired, so the pass seats immediately
+        // from the server's own frame - which is what a standstill test wants anyway.
+        return trySeatAll(train, Long.MAX_VALUE);
+    }
+
+    public static int trySeatAll(Train train, long serverTick) {
         List<Player> unseated = unseatedPlayers(train);
         if (unseated.isEmpty())
             return 0;
@@ -537,6 +546,25 @@ public final class RiderSeatGate {
                     }
                 }
             }
+            // No usable intent: ask the client which seat it sees, and WAIT for the answer
+            // before falling back to the server's own frame. The server's copy of a standing
+            // player's position lags at speed, so seating from it right away is exactly what
+            // produced the "not the seat I saw" reports. The wait is one to two ticks - the
+            // client answers on its next tick - with a grace cap so a silent client still gets
+            // seated. The capacity rules keep running; only the CHOICE waits.
+            if (best == null) {
+                Long requested = SeatIntentStore.requestedTick(player.getUUID());
+                if (requested == null) {
+                    SeatIntentStore.markRequested(player.getUUID(), serverTick);
+                    if (player instanceof net.minecraft.server.level.ServerPlayer serverPlayer)
+                        net.createmod.catnip.platform.CatnipServices.NETWORK.sendToClient(
+                                serverPlayer, new RequestSeatIntentPacket());
+                    continue;
+                }
+                if (serverTick - requested < SEAT_INTENT_GRACE_TICKS)
+                    continue;
+            }
+
             StringBuilder diag = null;   // SEATDIAG
             for (Candidate candidate : best == null ? free : java.util.List.<Candidate>of()) {
                 // Compared in the carriage's own frame. Converting the seat to world coordinates and the
@@ -611,6 +639,11 @@ public final class RiderSeatGate {
             // Create's own entry point for sitting somebody on a moving contraption. It writes the seat
             // mapping and starts the ride, so nothing here has to know how either works.
             best.entity().addSittingPassenger(player, best.index());
+            // Tell the client which seat it landed in, so its intent state resets against
+            // the authoritative choice instead of guessing from the render.
+            if (player instanceof net.minecraft.server.level.ServerPlayer serverPlayer)
+                net.createmod.catnip.platform.CatnipServices.NETWORK.sendToClient(
+                        serverPlayer, new SeatAssignedPacket(best.carriage(), best.index()));
             SeatIntentStore.clear(player.getUUID());
             seated++;
         }

@@ -334,7 +334,7 @@ public class GameEvents {
                                     serverPlayer, new RequestSeatIntentPacket());
                         }
                     }
-                    RiderSeatGate.trySeatAll(train);
+                    RiderSeatGate.trySeatAll(train, server.getTickCount());
                     unseated = RiderSeatGate.anyUnseated(train);
                 }
 

@@ -121,8 +121,41 @@ public final class SeatIntentTracker {
             return;
         }
 
-        int best = nearestFreeSeat(carriage, contraption, player.position());
-        int carriageIndex = RiderSeatGate.carriageIndexOf(train, player);
+        // The pick spans ALL carriages of the train, in the client's own rendered frame -
+        // exactly what the player sees. Restricting it to the carriage the player stands on
+        // hid every nearer seat that happened to be across a coupling.
+        int best = -1;
+        int bestCarriage = -1;
+        double bestDistance = Double.MAX_VALUE;
+        for (int ci = 0; ci < train.carriages.size(); ci++) {
+            CarriageContraptionEntity e = train.carriages.get(ci).anyAvailableEntity();
+            if (e == null)
+                continue;
+            Contraption c2 = e.getContraption();
+            if (c2 == null)
+                continue;
+            java.util.Set<Integer> taken =
+                    new java.util.HashSet<>(c2.getSeatMapping().values());
+            java.util.List<net.minecraft.core.BlockPos> seats = c2.getSeats();
+            for (int i = 0; i < seats.size(); i++) {
+                if (taken.contains(i))
+                    continue;
+                Vec3 seat = RiderSeatGate.seatWorld(e, i);
+                if (seat == null)
+                    continue;
+                double d = seat.distanceToSqr(player.position());
+                if (d < bestDistance) {
+                    bestDistance = d;
+                    best = i;
+                    bestCarriage = ci;
+                }
+            }
+        }
+        if (best < 0 || bestCarriage < 0) {
+            sent = false;
+            return;
+        }
+        int carriageIndex = bestCarriage;
 
         if (sent && best == lastSeat && carriageIndex == lastCarriage)
             return;                                        // nothing changed: no traffic
@@ -131,11 +164,11 @@ public final class SeatIntentTracker {
         CatnipServices.NETWORK.sendToServer(new ReportSeatIntentPacket(train.id, carriageIndex, best,
                 local.x, local.y, local.z, true));
         org.slf4j.LoggerFactory.getLogger("electroenergetics/seatintent").info(
-                "SEATINTENT send carriage={} seat={} local={},{},{} world={},{},{} playerYaw={}",
+                "SEATINTENT send seatCarriage={} seat={} local={},{},{} world={},{},{}",
                 carriageIndex, best,
                 String.format("%.2f", local.x), String.format("%.2f", local.y), String.format("%.2f", local.z),
                 String.format("%.2f", player.getX()), String.format("%.2f", player.getY()),
-                String.format("%.2f", player.getZ()), String.format("%.1f", player.getYRot()));
+                String.format("%.2f", player.getZ()));
         sent = true;
         lastSeat = best;
         lastCarriage = carriageIndex;
@@ -170,22 +203,4 @@ public final class SeatIntentTracker {
         return found;
     }
 
-    private static int nearestFreeSeat(CarriageContraptionEntity carriage, Contraption contraption, Vec3 world) {
-        java.util.Set<Integer> taken = new java.util.HashSet<>(contraption.getSeatMapping().values());
-        int best = -1;
-        double bestDistance = Double.MAX_VALUE;
-        for (int i = 0; i < contraption.getSeats().size(); i++) {
-            if (taken.contains(i))
-                continue;
-            Vec3 seat = RiderSeatGate.seatWorld(carriage, i);
-            if (seat == null)
-                continue;
-            double d = seat.distanceToSqr(world);
-            if (d < bestDistance) {
-                bestDistance = d;
-                best = i;
-            }
-        }
-        return best;
-    }
 }

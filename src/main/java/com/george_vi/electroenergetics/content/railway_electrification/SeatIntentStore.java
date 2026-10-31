@@ -24,15 +24,29 @@ public final class SeatIntentStore {
 
     private static final Map<UUID, Intent> INTENTS = new HashMap<>();
 
+    /** Server tick of the first unanswered seat-intent request, per player. */
+    private static final Map<UUID, Long> REQUESTED = new HashMap<>();
+
     public static void put(UUID player, Intent intent) {
         INTENTS.put(player, intent);
+        REQUESTED.remove(player);   // the answer arrived; any wait deadline is moot
     }
 
     public static Intent get(UUID player) {
         return INTENTS.get(player);
     }
 
+    public static void markRequested(UUID player, long tick) {
+        REQUESTED.putIfAbsent(player, tick);
+    }
+
+    /** Server tick of the first unanswered request, or null when none is in flight. */
+    public static Long requestedTick(UUID player) {
+        return REQUESTED.get(player);
+    }
+
     public static void clear(UUID player) {
         INTENTS.remove(player);
+        REQUESTED.remove(player);
     }
 }
