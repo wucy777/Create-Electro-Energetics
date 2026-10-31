@@ -93,9 +93,11 @@ public class GameEvents {
     @SubscribeEvent
     public static void onPlayerLogin(net.neoforged.neoforge.event.entity.player.PlayerEvent.PlayerLoggedInEvent event) {
         if (event.getEntity() instanceof net.minecraft.server.level.ServerPlayer player) {
-            RiderSeatGate.restoreSeatOnLogin(player);
-            // One-shot restore often runs before Create has loaded its trains; register a
-            // retrying restore so a seated relogin lands back in their own seat even then.
+            // Nothing is done inside the login event itself. A seated player's seat is a binding, and
+            // restoring it moves them - possibly a very long way, to a train that kept running while they
+            // were away. Doing that during the join, before their client has settled, is what produced the
+            // "world failed to load" reports. It is registered instead and performed on the next server
+            // tick, once, per retry window.
             RiderSeatGate.registerPendingRestore(player, player.getServer().getTickCount() + 600L);
         }
     }

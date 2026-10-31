@@ -213,13 +213,6 @@ public final class RiderSeatGate {
      * - a different seat. The seat map still has them, because an offline player keeps their entry, so the
      * seat index is read from there and applied directly instead of being recomputed.
      */
-    public static void restoreSeatOnLogin(net.minecraft.server.level.ServerPlayer player) {
-        try {
-            restoreClaim(player);
-        } catch (Throwable ignored) {
-            // A failed restore leaves the player standing, which the normal rules handle.
-        }
-    }
 
     /**
      * The carriage whose seat map still claims this player, nearest to where they are, or null.
@@ -274,8 +267,18 @@ public final class RiderSeatGate {
             return false;
         if (player.getVehicle() == entity)
             return true;
-        if (entity.distanceToSqr(player) > 64d * 64d)
-            return false;
+
+        // The seat is a binding, not a proximity test. A player who logs out seated keeps that seat no
+        // matter how far the train travels while they are gone, and rejoining must put them back in it -
+        // twenty million Blocks away included. Create already knows where the carriage is, so it is
+        // asked, and the player is moved to the seat before being attached; attaching alone would leave
+        // their client outside the loaded area.
+        if (entity.level() instanceof net.minecraft.server.level.ServerLevel level) {
+            Vec3 seatWorld = entity.toGlobalVector(
+                    Vec3.atCenterOf(contraption.getSeats().get(seat)), 1.0f);
+            player.teleportTo(level, seatWorld.x, seatWorld.y, seatWorld.z,
+                    player.getYRot(), player.getXRot());
+        }
         entity.addSittingPassenger(player, seat);
         return player.getVehicle() == entity;
     }
@@ -481,10 +484,11 @@ public final class RiderSeatGate {
             net.minecraft.server.level.ServerPlayer player = server.getPlayerList().getPlayer(entry.getKey());
             if (player == null)
                 continue;                               // dropped again before the train loaded
-            if (now > entry.getValue() || restoreClaim(player) || nearestClaimed(player) == null) {
+            if (now > entry.getValue() || restoreClaim(player)) {
                 PENDING_RESTORE.remove(entry.getKey());
             }
-            // Otherwise the train has not loaded yet: keep waiting until the deadline.
+            // Otherwise the carriage is not loaded yet or the restore did not take: keep retrying until
+            // the deadline. The claim itself is never dropped early - it is a binding.
         }
     }
 
