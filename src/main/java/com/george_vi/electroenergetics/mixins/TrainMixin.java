@@ -541,7 +541,11 @@ public class TrainMixin implements ICEETrainExtension {
             // Cruise holds the speed it is engaged at, which is where the train just
             // arrived. Captured here because this lever move did not come from a packet,
             // and CRUISE with a stale or zero target would command the wrong speed.
-            st.cruiseSpeed = Math.abs(next) * 20d;
+            // Cruise holds the DESIGN ceiling, not the speed at the switch: the handover
+            // band fires up to half a m/s early, and capturing the current speed pinned
+            // the train at 99.5 forever. Holding the ceiling itself is safe there - at the
+            // ceiling the hold branch meets drag with traction and never brakes.
+            st.cruiseSpeed = TrainTractionModel.designMaxSpeed();
         }
 
         // Bring a stop to rest instead of through it.

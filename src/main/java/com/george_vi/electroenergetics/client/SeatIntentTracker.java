@@ -124,10 +124,18 @@ public final class SeatIntentTracker {
         // The pick spans ALL carriages of the train, in the client's own rendered frame -
         // exactly what the player sees. Restricting it to the carriage the player stands on
         // hid every nearer seat that happened to be across a coupling.
+        int ownCarriage = RiderSeatGate.carriageIndexOf(train, player);
         int best = -1;
         int bestCarriage = -1;
         double bestDistance = Double.MAX_VALUE;
+        // Two passes with the operator's priority: nearest on the player's OWN carriage
+        // first; the other carriages only when the own one has no free seat.
+        for (int pass = 0; pass < 2 && best < 0; pass++) {
         for (int ci = 0; ci < train.carriages.size(); ci++) {
+            if (pass == 0 && ci != ownCarriage)
+                continue;
+            if (pass == 1 && ci == ownCarriage)
+                continue;
             CarriageContraptionEntity e = train.carriages.get(ci).anyAvailableEntity();
             if (e == null)
                 continue;
@@ -150,6 +158,7 @@ public final class SeatIntentTracker {
                     bestCarriage = ci;
                 }
             }
+        }
         }
         if (best < 0 || bestCarriage < 0) {
             sent = false;

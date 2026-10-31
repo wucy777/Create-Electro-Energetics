@@ -408,6 +408,67 @@ public final class RiderSeatGate {
     /** Ticks the gate waits for a client's seat answer before using its own frame. */
     public static final int SEAT_INTENT_GRACE_TICKS = 10;
 
+    /**
+     * Players whose seat is being restored after a relogin, with a deadline tick. A seated
+     * player who logs out keeps their claim, and the restore has to survive the gap between
+     * PlayerLoggedInEvent (too early: Create has not loaded its trains yet) and the first tick
+     * where the train actually exists.
+     */
+    private static final java.util.Map<java.util.UUID, Long> PENDING_RESTORE = new java.util.HashMap<>();
+
+    /** Register a retrying restore for a player who logged out while seated. */
+    public static void registerPendingRestore(net.minecraft.server.level.ServerPlayer player, long deadlineTick) {
+        PENDING_RESTORE.put(player.getUUID(), deadlineTick);
+    }
+
+    /** Whether this player's seat claim must not be pruned yet (a restore is pending). */
+    public static boolean hasPendingRestore(java.util.UUID playerId) {
+        return PENDING_RESTORE.containsKey(playerId);
+    }
+
+    /**
+     * One retry per tick for every pending restore: when the train exists again, snap the
+     * player back into their own claim. Deadline or missing train drops the pending state -
+     * the player is then online and standing, and the normal prune releases the seat.
+     */
+    public static void tickPendingRestores(net.minecraft.server.MinecraftServer server) {
+        if (PENDING_RESTORE.isEmpty())
+            return;
+        long now = server.getTickCount();
+        for (var entry : java.util.Map.copyOf(PENDING_RESTORE).entrySet()) {
+            net.minecraft.server.level.ServerPlayer player = server.getPlayerList().getPlayer(entry.getKey());
+            if (player == null)
+                continue;                               // dropped again before the train loaded
+            if (now > entry.getValue()) {
+                PENDING_RESTORE.remove(entry.getKey());
+                continue;
+            }
+            for (com.simibubi.create.content.trains.entity.Train train
+                    : com.simibubi.create.Create.RAILWAYS.trains.values()) {
+                for (var carriage : train.carriages) {
+                    var entity = carriage.anyAvailableEntity();
+                    if (entity == null || entity.level().isClientSide())
+                        continue;
+                    Contraption contraption = entity.getContraption();
+                    if (contraption == null)
+                        continue;
+                    Integer seat = contraption.getSeatMapping().get(entry.getKey());
+                    if (seat == null)
+                        continue;
+                    if (player.getVehicle() == entity)
+                        return;                          // already back in it
+                    Vec3 seatWorld = entity.toGlobalVector(
+                            Vec3.atCenterOf(contraption.getSeats().get(seat)), 1.0f);
+                    player.teleportTo((net.minecraft.server.level.ServerLevel) entity.level(),
+                            seatWorld.x, seatWorld.y, seatWorld.z, player.getYRot(), player.getXRot());
+                    entity.addSittingPassenger(player, seat);
+                    PENDING_RESTORE.remove(entry.getKey());
+                    return;
+                }
+            }
+        }
+    }
+
     /** World position of a seat, for the client's own distance comparison. */
     public static Vec3 seatWorld(CarriageContraptionEntity entity, int index) {
         Contraption contraption = entity == null ? null : entity.getContraption();
@@ -458,6 +519,8 @@ public final class RiderSeatGate {
             java.util.Iterator<Map.Entry<UUID, Integer>> it = mapping.entrySet().iterator();
             while (it.hasNext()) {
                 UUID id = it.next().getKey();
+                if (hasPendingRestore(id))
+                    continue;                           // waiting for their train to load again
                 if (aboard.contains(id))
                     continue;
                 // Online and not aboard: they really did leave the seat.
@@ -566,7 +629,13 @@ public final class RiderSeatGate {
             }
 
             StringBuilder diag = null;   // SEATDIAG
+            int ownCarriage = RiderSeatGate.carriageIndexOf(train, player);
             for (Candidate candidate : best == null ? free : java.util.List.<Candidate>of()) {
+                // Same carriage first (the operator's refinement): the nearest free seat on the
+                // carriage the player stands on beats a nearer-looking one across a coupling.
+                // Cross-carriage candidates are only considered when the own carriage has none.
+                if (ownCarriage >= 0 && candidate.carriage() != ownCarriage)
+                    continue;
                 // Compared in the carriage's own frame. Converting the seat to world coordinates and the
                 // player to world coordinates as well looked equivalent but was not: the transform is
                 // anchored on the contraption, so mixing the two put the seats in the wrong places and the
@@ -626,6 +695,17 @@ public final class RiderSeatGate {
                             && candidate.local().compareTo(best.local()) < 0)) {
                     best = candidate;
                     bestDistance = d;
+                }
+            }
+            if (best == null && ownCarriage >= 0) {
+                // Own carriage full: nearest free seat across the other carriages.
+                for (Candidate candidate : free) {
+                    double d = candidate.entity().toLocalVector(player.position(), 1.0f)
+                            .distanceToSqr(Vec3.atCenterOf(candidate.local()));
+                    if (best == null || d < bestDistance) {
+                        best = candidate;
+                        bestDistance = d;
+                    }
                 }
             }
             if (diag != null)

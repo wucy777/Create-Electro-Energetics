@@ -92,8 +92,12 @@ public class GameEvents {
 
     @SubscribeEvent
     public static void onPlayerLogin(net.neoforged.neoforge.event.entity.player.PlayerEvent.PlayerLoggedInEvent event) {
-        if (event.getEntity() instanceof net.minecraft.server.level.ServerPlayer player)
+        if (event.getEntity() instanceof net.minecraft.server.level.ServerPlayer player) {
             RiderSeatGate.restoreSeatOnLogin(player);
+            // One-shot restore often runs before Create has loaded its trains; register a
+            // retrying restore so a seated relogin lands back in their own seat even then.
+            RiderSeatGate.registerPendingRestore(player, player.getServer().getTickCount() + 600L);
+        }
     }
 
     @OnlyIn(Dist.CLIENT)
@@ -239,6 +243,7 @@ public class GameEvents {
     }
 
     private static void tickDriverState(MinecraftServer server) {
+        RiderSeatGate.tickPendingRestores(server);
         if (Create.RAILWAYS.trains.isEmpty())
             return;
 

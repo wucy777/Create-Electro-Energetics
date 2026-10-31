@@ -354,7 +354,7 @@ public class ElectricTrainHud implements LayeredDraw.Layer {
     private static final int LAMP_W = 5;
     private static final int LAMP_H = 5;
     /** Gap between one lamp's caption and the next lamp. */
-    private static final int LAMP_GAP = 6;
+    private static final int LAMP_GAP = 3;
     /** Distance from the strip to the first row of figures. */
     private static final int LAMP_STRIP_GAP = 3;
 
@@ -447,7 +447,8 @@ public class ElectricTrainHud implements LayeredDraw.Layer {
         // longer has to change - and one format for the row is easier to read than a
         // bracket convention invented for the unpowered case. The catenary row already
         // carries "0.0 kV (unpowered)" and explains why the train is not pulling.
-        textSpeed = String.format("%.1f / %.1f m/s", speed / 10d, cap / 10d);
+        textSpeed = String.format("%.1f / %.1f m/s  ·  %.0f / %.0f km/h",
+                speed / 10d, cap / 10d, speed / 3.6d, cap / 3.6d);
         textGear = gear < 0 || gear >= TrainGear.values().length
                 ? "--"
                 : TrainControlHud.label(TrainGear.values()[gear]);
@@ -482,7 +483,7 @@ public class ElectricTrainHud implements LayeredDraw.Layer {
                          int valueColor, String value) {
         int rowY = y + row * LINE_HEIGHT;
         graphics.drawString(font, label, x, rowY, labelColor, true);
-        graphics.drawString(font, value, x + 58, rowY, valueColor, true);
+        graphics.drawString(font, value, x + 38, rowY, valueColor, true);
     }
 
     private static String formatPowerKw(int kw) {
