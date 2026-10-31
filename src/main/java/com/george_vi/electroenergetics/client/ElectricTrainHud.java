@@ -95,6 +95,7 @@ public class ElectricTrainHud implements LayeredDraw.Layer {
     // Row text plus the quantised values it was built from. Rebuilt only when a
     // displayed digit actually changes, since this renders every frame.
     private String textSpeed = "";
+    private String textSpeedKmh = "";
     private String textGear = "";
     private String textGrade = "";
     private String textPower = "";
@@ -184,8 +185,11 @@ public class ElectricTrainHud implements LayeredDraw.Layer {
         // Not done, because it is cosmetic and this is the safe, known-good value.
         // Along-track speed, eased for display. train.speed is a scalar in the train's own frame, so
         // this is smooth along the railway and cannot be disturbed by a curve - see the field comment.
-        float speed = electroEnergetics$smooth((float) Math.abs(train.speed) * 20f);
-        lerp(speed, manualCap, sample.power(), partialTicks);
+        // One easing, not two. This used to pass through electroEnergetics$smooth and then through
+        // lerp() as well, so the number lagged twice and still stepped: train.speed itself only
+        // changes when the server syncs it. lerp() below now eases with a real time constant.
+        float speed = (float) Math.abs(train.speed) * 20f;
+        lerp(speed, manualCap, sample.power());
 
         // Bottom-left, with the rows stacked upwards from the bottom margin, so
         // the readout sits under the eye instead of across the middle of the view.
@@ -193,7 +197,7 @@ public class ElectricTrainHud implements LayeredDraw.Layer {
 
         var font = mc.font;
         int x = MARGIN;
-        int y = graphics.guiHeight() - MARGIN - LINE_HEIGHT * 7;
+        int y = graphics.guiHeight() - MARGIN - LINE_HEIGHT * 8;
 
         int label = 0x9AA0A6;
         int value = 0xFFFFFF;
@@ -250,14 +254,15 @@ public class ElectricTrainHud implements LayeredDraw.Layer {
         }
 
         drawRow(graphics, font, x, y, 0, label, tr("electroenergetics.train.row.speed"), value, textSpeed);
-        drawRow(graphics, font, x, y, 1, label, tr("electroenergetics.train.row.gear"), value, textGear);
-        drawRow(graphics, font, x, y, 2, label, tr("electroenergetics.train.row.gradient"),
+        drawRow(graphics, font, x, y, 1, label, "", value, textSpeedKmh);
+        drawRow(graphics, font, x, y, 2, label, tr("electroenergetics.train.row.gear"), value, textGear);
+        drawRow(graphics, font, x, y, 3, label, tr("electroenergetics.train.row.gradient"),
                 gradeColor(sample.grade()), textGrade);
-        drawRow(graphics, font, x, y, 3, label, tr("electroenergetics.train.row.power"), value, textPower);
-        drawRow(graphics, font, x, y, 4, label, tr("electroenergetics.train.row.catenary"), value, textCatenary);
+        drawRow(graphics, font, x, y, 4, label, tr("electroenergetics.train.row.power"), value, textPower);
+        drawRow(graphics, font, x, y, 5, label, tr("electroenergetics.train.row.catenary"), value, textCatenary);
         // Carriage count and how many of them actually pull, so the rating above
         // can be sanity-checked at a glance.
-        drawRow(graphics, font, x, y, 5, label, tr("electroenergetics.train.row.cars"), value, textCars);
+        drawRow(graphics, font, x, y, 6, label, tr("electroenergetics.train.row.cars"), value, textCars);
 
         // Warning lamps, as a strip above the rows.
         //
@@ -451,8 +456,8 @@ public class ElectricTrainHud implements LayeredDraw.Layer {
         // m/s, and the conversion is m/s * 3.6 to reach km/h - dividing by 3.6 printed 278 where
         // 100 m/s is 360. The ceiling is printed in m/s only; repeating it in km/h doubled the width
         // of the row for a number the driver can already read on the left half.
-        textSpeed = String.format("%.1f / %.1f m/s  ·  %.0f km/h",
-                speed / 10d, cap / 10d, speed / 10d * 3.6d);
+        textSpeed = String.format("%.1f / %.1f m/s", speed / 10d, cap / 10d);
+        textSpeedKmh = String.format("%.0f km/h", speed / 10d * 3.6d);
         textGear = gear < 0 || gear >= TrainGear.values().length
                 ? "--"
                 : TrainControlHud.label(TrainGear.values()[gear]);
@@ -498,9 +503,12 @@ public class ElectricTrainHud implements LayeredDraw.Layer {
 
     /** Uphill reads as a positive grade, which is what the model uses. */
     private static String describeGrade(double grade) {
-        if (Math.abs(grade) < 0.0005d)
-            return tr("electroenergetics.train.grade.level");
+        // Always numeric, including on the level: "平道" alone tells the driver nothing about how close
+        // to flat it actually is, and a real gradient readout is the one thing that explains why a train
+        // is not holding its speed.
         double percent = grade * 100d;
+        if (Math.abs(grade) < 0.0005d)
+            return String.format("%+.2f%% %s", percent, tr("electroenergetics.train.grade.level"));
         return String.format("%+.2f%% %s", percent,
                 tr(grade > 0 ? "electroenergetics.train.grade.uphill"
                              : "electroenergetics.train.grade.downhill"));
@@ -514,18 +522,31 @@ public class ElectricTrainHud implements LayeredDraw.Layer {
         return 0xFFFFFF;
     }
 
-    private void lerp(float speed, float maxSpeed, float power, float partialTicks) {
-        float factor = Mth.clamp(0.25f * Math.max(partialTicks, 0.05f), 0f, 1f);
-        if (!initialised) {
+    private static long lerpNanos;
+
+    /**
+     * Eases the displayed figures towards the sampled ones with a real time constant.
+     *
+     * <p>Per-frame factors make a readout that behaves differently at 60 fps and at 240 fps, and this one
+     * was a tenth of a second, so the number still moved in visible steps whenever the server sync landed.
+     * Easing on elapsed time instead means the same motion at any frame rate; long enough to read, short
+     * enough that a brake application is not hidden.
+     */
+    private void lerp(float speed, float maxSpeed, float power) {
+        long now = System.nanoTime();
+        double dt = lerpNanos == 0L ? 0d : (now - lerpNanos) / 1e9d;
+        lerpNanos = now;
+        if (!initialised || dt <= 0d || dt > 0.5d) {
             shownSpeed = speed;
             shownMaxSpeed = maxSpeed;
             shownPower = power;
             initialised = true;
             return;
         }
-        shownSpeed += (speed - shownSpeed) * factor;
-        shownMaxSpeed += (maxSpeed - shownMaxSpeed) * factor;
-        shownPower += (power - shownPower) * factor;
+        float k = (float) (1d - Math.exp(-dt / 0.30d));
+        shownSpeed += (speed - shownSpeed) * k;
+        shownMaxSpeed = maxSpeed;                       // the ceiling does not need easing
+        shownPower += (power - shownPower) * k;
     }
 
     /** The carriage whose controls the local player currently holds, if any. */

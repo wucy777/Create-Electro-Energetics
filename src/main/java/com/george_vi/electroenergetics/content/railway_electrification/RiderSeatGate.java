@@ -56,6 +56,9 @@ import java.util.UUID;
  */
 public final class RiderSeatGate {
 
+    private static final org.slf4j.Logger LOG =
+            org.slf4j.LoggerFactory.getLogger("electroenergetics/seatrestore");
+
     // Temporary: one line per seating event, so a wrong seat can be diagnosed from the log instead of
     // guessed at. Costs nothing when nobody is being seated.
     private static final org.slf4j.Logger LOGGER =
@@ -223,6 +226,28 @@ public final class RiderSeatGate {
      * earlier in the consist, which is how a driver came back from a relogin sitting in the second car.
      */
     private static CarriageContraptionEntity nearestClaimed(Entity player) {
+        CarriageContraptionEntity result = nearestClaimed0(player);
+        LOG.info("SEATRESTORE nearestClaimed={} claims={}", result == null ? "none" : "found",
+                claimCount(player));
+        return result;
+    }
+
+    private static int claimCount(Entity player) {
+        int n = 0;
+        for (com.simibubi.create.content.trains.entity.Train train
+                : com.simibubi.create.Create.RAILWAYS.trains.values()) {
+            for (var carriage : train.carriages) {
+                CarriageContraptionEntity e = carriage.anyAvailableEntity();
+                if (e == null || e.getContraption() == null)
+                    continue;
+                if (e.getContraption().getSeatMapping().containsKey(player.getUUID()))
+                    n++;
+            }
+        }
+        return n;
+    }
+
+    private static CarriageContraptionEntity nearestClaimed0(Entity player) {
         CarriageContraptionEntity best = null;
         double bestDistance = Double.MAX_VALUE;
         for (com.simibubi.create.content.trains.entity.Train train
@@ -280,7 +305,12 @@ public final class RiderSeatGate {
                     player.getYRot(), player.getXRot());
         }
         entity.addSittingPassenger(player, seat);
-        return player.getVehicle() == entity;
+        boolean riding = player.getVehicle() == entity;
+        LOG.info("SEATRESTORE claim seat={} seats={} dist={} ridingBefore={} ridingAfter={}",
+                seat, contraption.getSeats().size(),
+                String.format("%.1f", Math.sqrt(entity.distanceToSqr(player))),
+                false, riding);
+        return riding;
     }
 
     /**

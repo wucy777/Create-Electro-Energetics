@@ -73,7 +73,11 @@ public final class TrainTractionModel {
     }
 
     /** How far below the design ceiling still counts as having reached it [m/s]. */
-    private static final double CEILING_HANDOVER_BAND = 0.5d;
+    // Tight, not half a metre per second. The handover to CRUISE fires when the train is this close to
+    // the design ceiling; at 0.5 it fired at 99.5 and the driver never saw 100, on a train that had
+    // another half a m/s of headroom. Handing over at 99.95 changes nothing about stability - the
+    // hold branch meets drag with traction at the ceiling and never brakes there.
+    private static final double CEILING_HANDOVER_BAND = 0.05d;
 
     /** Peak tractive effort in the constant-effort region [N]. */
     public static double startingEffort(int carriages) {
