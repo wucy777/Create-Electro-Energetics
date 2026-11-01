@@ -487,11 +487,11 @@ public class TrainControlHud implements LayeredDraw.Layer {
     private static final int MAX_CARRIAGES = 40;
 
     /**
-     * Longest consist still drawn on a single row.
+     * Longest consist still drawn on a single row, counted in SLOTS after merging.
      *
-     * <p>Twelve is where one row stops reading as carriages: the row shares its line with the
-     * pantograph detail text, so it owns a fixed width, and past roughly a dozen carriages each one
-     * is a tick mark. A second row gives each half a readable width again.
+     * <p>Slots rather than carriages: a slot is one drawn unit, so it is what decides the width of
+     * the row. Merging a long run of pantograph-less carriages into one slot can bring a forty-car
+     * train back onto a single row, and that is the point of the merge.
      */
     private static final int SINGLE_ROW_MAX = 12;
 
@@ -499,8 +499,8 @@ public class TrainControlHud implements LayeredDraw.Layer {
      * Height of a carriage body, in pixels.
      *
      * <p>Three rows is what lets two rows of carriages, each with its own mark row, plus the one-row
-     * link between them fit in the strip's ten-row band; the arrow then still has somewhere inside
-     * the panel to go.
+     * link between them fit in the strip's ten-row band; the arrow and the count then still have
+     * somewhere inside the panel to go.
      */
     private static final int CARRIAGE_H = 3;
 
@@ -508,16 +508,64 @@ public class TrainControlHud implements LayeredDraw.Layer {
      * Rows the strip may use inside the panel, counted down from the y the caller passes in.
      *
      * <p>Read out of the layout rather than restated: the panel's pantograph row is the last of its
-     * three footer rows, so the band is everything from that row down to the panel's bottom edge. The
-     * arrow has to end on the band's last row. It used to be drawn eight rows below the strip, which
-     * put three of its five rows outside the card - the operator's "箭头也在没背景板的位置".
+     * three footer rows, so the band is everything from that row down to the panel's bottom edge.
+     * Its last row is the panel's own one-pixel outline, which nothing here paints over.
      */
     private static final int PANTO_BAND_ROWS = TrainControlLayout.TOTAL_H
             - TrainControlLayout.footerRowY(0, TrainControlLayout.FOOTER_ROW_PANTO);
 
     /**
-     * The consist, drawn as one or two rows of carriage silhouettes, each pantograph above the
-     * carriage it is fitted to, and a left arrow for the direction of travel.
+     * A merged segment's block, deliberately darker than a carriage.
+     *
+     * <p>It has to be unmistakable that this is not one carriage but a compressed stretch of them,
+     * and the count drawn with it is what says how many. Insetting the block's ends would not be
+     * enough on its own at this size.
+     */
+    private static final int MERGED_BLOCK = 0xFF3A424C;
+
+    /** Width of a count digit, and the gap between two of them. */
+    private static final int COUNT_DIGIT_W = 3;
+    private static final int COUNT_DIGIT_GAP = 1;
+
+    /** Rows of a count digit. */
+    private static final int COUNT_ROWS = 4;
+
+    /**
+     * Extra width a two-row merged block needs around its count.
+     *
+     * <p>In the single-row layout the count sits under the block, so the block only has to be wide
+     * enough to look like a block. In the two-row layout there is no row below the block to put the
+     * count on - the row under the top row is the bottom row - so the count is drawn inside the
+     * block, and without a margin around it the block reads as a bright blob rather than a number.
+     */
+    private static final int COUNT_PAD = 4;
+
+    /**
+     * The count glyphs: ten digits, four rows of three columns each, {@code #} = ink.
+     *
+     * <p>Static strings and {@code charAt} only. This is the one place the strip draws a number, and
+     * it must not allocate on the render path; the whole table is a few bytes in the constant pool
+     * and the runtime never touches it. Three pixels wide is the widest a count can afford - a
+     * two-carriage block on a busy line is only a few pixels wide - and four rows is the shortest
+     * shape that still tells 2 from 3 and 5 from 6.
+     */
+    private static final String[] COUNT_GLYPHS = {
+            "###" + "#.#" + "#.#" + "###",   // 0
+            "..#" + "..#" + "..#" + "..#",   // 1
+            "###" + "..#" + "#.." + "###",   // 2
+            "###" + "..#" + "..#" + "###",   // 3
+            "#.#" + "#.#" + "###" + "..#",   // 4
+            "###" + "#.." + "..#" + "###",   // 5
+            "###" + "#.." + "#.#" + "###",   // 6
+            "###" + "..#" + "..#" + "..#",   // 7
+            "###" + "#.#" + "###" + "###",   // 8
+            "###" + "#.#" + "###" + "..#",   // 9
+    };
+
+    /**
+     * The consist, drawn as one or two rows of carriage silhouettes, with each pantograph above the
+     * carriage it is fitted to, the runs of pantograph-less carriages merged into counted blocks, and
+     * a left arrow for the direction of travel.
      *
      * <h2>Why a drawing rather than a glyph string</h2>
      *
@@ -533,13 +581,25 @@ public class TrainControlHud implements LayeredDraw.Layer {
      * count comes from the server in the sync packet because {@code train.carriages} is empty on the
      * client: Carriage is server state there, the same reason the control gate cannot read it.
      *
+     * <h2>Merged segments</h2>
+     *
+     * <p>A train can carry its arms on very few carriages, and drawing every one of the carriages in
+     * between as its own rectangle leaves no width for any of them. So a maximal run of consecutive
+     * pantograph-less carriages is drawn as ONE merged block with its length written next to it.
+     * The two end carriages are never merged: they are the cabs and they keep their wedges, so only
+     * display positions 1..n-2 take part.
+     *
+     * <p>The count is the part that must not be lost. It is drawn as pixel digits from
+     * {@link #COUNT_GLYPHS}: three by four pixels per digit, two digits at most, under the block in
+     * the single-row layout and inside it when two rows leave no row beneath.
+     *
      * <h2>Two rows for a coupled unit</h2>
      *
-     * <p>Up to {@link #SINGLE_ROW_MAX} carriages the strip is one row. Beyond that it wraps onto two,
-     * the top row carrying the leading half and the bottom row the trailing half. Both rows read from
-     * the leading end, so the reading direction never reverses, and the break is drawn as a link line
-     * from the end of the top row back to above the start of the bottom row. No caption: it would not
-     * fit on the row, and the line says which half continues where in one glance.
+     * <p>Up to {@link #SINGLE_ROW_MAX} SLOTS the strip is one row; beyond that it wraps onto two, the
+     * top row carrying the leading half and the bottom row the trailing half. Slots, not carriages:
+     * the drawn width is per slot. Both rows read from the leading end, so the reading direction
+     * never reverses, and the break is drawn as a link line from the end of the top row back to above
+     * the start of the bottom row. No caption: it would not fit on the row.
      *
      * <h2>Shape</h2>
      *
@@ -550,30 +610,26 @@ public class TrainControlHud implements LayeredDraw.Layer {
      * one-sided taper does not say "nose" anyway.
      *
      * <p>The selected carriage is marked by its body colour alone - bright against the dim ones,
-     * the same cue the lever's handle row uses. The one-pixel underline it used to have was dropped
-     * with the move to three-row bodies: it would have touched the body and read as a taller
-     * carriage, and the row it freed is what keeps the direction arrow inside the card.
+     * the same cue the lever's handle row uses. Merged blocks never are: they carry no arm, so the
+     * selected one cannot be in them.
      *
-     * <h2>Where the arrow is drawn</h2>
+     * <h2>Where the arrow and the count go</h2>
      *
-     * <p>Inside the panel. The strip's band is {@link #PANTO_BAND_ROWS} rows, counted down from the
-     * y the caller passes. Under a single row of carriages the arrow takes the five rows starting at
-     * y+4 - not quite the band's last five, because the band's last row is the panel's own one-pixel
-     * outline and painting over it is what made the old arrow look detached from the card. With two
-     * rows of carriages the band's bottom is full, so it takes the four rows directly above the
-     * strip, which are still inside the panel because the status line above them ends a row
-     * higher. Keeping the strip itself at the caller's y and putting the arrow above it is a
-     * deliberate trade-off: shifting the whole strip up four rows to keep the arrow below would
-     * bring the strip's top row within a quarter pixel of the status text and pull the detail text
-     * out of line - a new layout risk for no gain, since the gap above is a measured number (status
-     * ink ends at 117.75 in panel coordinates, the arrow starts at 118), not an estimate. Neither
-     * position depends on the GUI scale: the panel is anchored to the bottom-right corner and none
-     * of these numbers is scaled.
+     * <p>Inside the panel, and inside its ten-row band. The count needs four rows below the block, so
+     * a single row WITH merged segments puts the arrow in the four rows above the strip and the
+     * counts in the rows below it. A plain single row has no counts, so the arrow keeps the place the
+     * driver already knows it in: under the strip. The two-row layout has no row below either band,
+     * so a merged block carries its count inside itself and the arrow takes the four rows above.
+     * Every one of those placements is measured, not estimated: the status line's ink ends at y-4.25
+     * and the arrow above starts at y-4, while the arrow below ends on the band's second-to-last row
+     * because the band's last row is the panel's own one-pixel outline. None of it depends on the GUI
+     * scale: the panel is anchored to the bottom-right corner and none of these numbers is scaled.
      *
      * <h2>Cost</h2>
      *
-     * <p>Fills only, and nothing is allocated: the pantograph list is walked by index rather than
-     * with an iterator, and no string is built. This runs every frame while the driver holds the cab.
+     * <p>Fills only, and nothing is allocated: the pantograph list is walked by index, the arms are
+     * a bit mask in a {@code long}, and the count digits come from a static table. This runs every
+     * frame while the driver holds the cab.
      */
     private static void drawPantographConsist(GuiGraphics graphics, Train train,
                                               java.util.List<
@@ -583,25 +639,77 @@ public class TrainControlHud implements LayeredDraw.Layer {
                                               int x, int y) {
         int n = Math.max(1, Math.min(MAX_CARRIAGES, TrainHudData.carriageCount(train.id)));
 
-        // One row or two, and the split between them: the top row is the leading half.
-        boolean singleRow = n <= SINGLE_ROW_MAX;
-        int topCount = singleRow ? n : (n + 1) / 2;
-        int bottomCount = n - topCount;
+        // The leading end is ALWAYS on the left, whatever the train is doing - the owner's rule. A
+        // multiple unit has a cab at both ends, so which end leads changes with the direction of
+        // travel and cannot be inferred from the model; it has to be drawn. When the train is running
+        // the other way the whole strip is mirrored, carriages, marks and both wedges together.
+        boolean leadingEndIsFirst = train.speed >= 0;
+
+        // Where the arms are, one bit per carriage in DISPLAY order (bit 0 = leading end). A long
+        // rather than an array or a list of per-carriage flags: the merge rule and the icon placement
+        // only ever ask "has this carriage got an arm", and a bit test answers that with no
+        // allocation at all.
+        long arms = displayPantographMask(pantographs, n, leadingEndIsFirst);
+
+        // Slots: a maximal run of pantograph-less interior carriages is one slot, EVERYTHING ELSE -
+        // an arm carriage, or either end carriage, which must keep its wedge - is one slot per
+        // carriage.
+        int slots = 0;
+        for (int pos = 0; pos < n; pos += consistUnitLength(pos, n, arms))
+            slots++;
+
+        boolean singleRow = slots <= SINGLE_ROW_MAX;
+        int topSlots = singleRow ? slots : (slots + 1) / 2;
+        int bottomSlots = slots - topSlots;
 
         // Width. The row shares its line with the pantograph detail text, which starts PANTO_DETAIL_X
-        // from the panel's inset, so the strip owns PANTO_DETAIL_X - 8 pixels. The leading nose and
-        // the trailing tail take two of those each. When even one-pixel carriages with a gap do not
-        // fit, the gap goes first - that is the "past forty it still compresses" rule.
+        // from the panel's inset, so the strip owns PANTO_DETAIL_X - 8 pixels; the leading nose and
+        // the trailing tail take two of those each. Every slot gets the same base width, except a
+        // merged slot, which is widened when it needs the room for its count. The base width is the
+        // largest one both rows can afford; if even one-pixel slots with a gap do not fit, the gap
+        // goes first - that is the "past forty it still compresses" rule.
         int avail = PANTO_DETAIL_X - 8;
-        int widest = Math.max(topCount, bottomCount);
-        int gap = 1;
-        int carW = (avail - 4 - gap * (widest - 1)) / widest;
-        if (carW < 1) {
-            gap = 0;
-            carW = (avail - 4) / widest;
+        int budget = avail - 4;
+        int topOneDigit = 0;
+        int topTwoDigit = 0;
+        int bottomOneDigit = 0;
+        int bottomTwoDigit = 0;
+        int slot = 0;
+        for (int pos = 0; pos < n; ) {
+            int len = consistUnitLength(pos, n, arms);
+            if (len >= 2) {
+                boolean top = slot < topSlots;
+                if (len >= 10) {
+                    if (top)
+                        topTwoDigit++;
+                    else
+                        bottomTwoDigit++;
+                } else {
+                    if (top)
+                        topOneDigit++;
+                    else
+                        bottomOneDigit++;
+                }
+            }
+            slot++;
+            pos += len;
         }
-        if (carW < 1)
-            carW = 1;
+        int gap = 1;
+        int baseW = 0;
+        for (int attempt = 0; attempt < 2 && baseW < 1; attempt++) {
+            gap = 1 - attempt;   // one-pixel gap first, none if that cannot fit
+            for (int candidate = budget; candidate >= 1; candidate--) {
+                if (consistRowWidth(candidate, gap, topSlots, topOneDigit, topTwoDigit, !singleRow) <= budget
+                        && consistRowWidth(candidate, gap, bottomSlots, bottomOneDigit, bottomTwoDigit,
+                                true) <= budget) {
+                    baseW = candidate;
+                    break;
+                }
+            }
+        }
+        if (baseW < 1)
+            baseW = 1;
+        boolean hasMerged = topOneDigit + topTwoDigit + bottomOneDigit + bottomTwoDigit > 0;
 
         // The nose reaches two pixels left of the body, so the bodies start two pixels in. Both rows
         // start at that same column, which is what makes the two halves read as one train.
@@ -613,59 +721,81 @@ public class TrainControlHud implements LayeredDraw.Layer {
                 Math.max(0, pantographs.size() - 1));
         int selectedCarriage = pantographs.isEmpty() ? -1 : pantographs.get(selected).carriageIndex();
 
-        // The leading end is ALWAYS on the left, whatever the train is doing - the owner's rule. A
-        // multiple unit has a cab at both ends, so which end leads changes with the direction of
-        // travel and cannot be inferred from the model; it has to be drawn. When the train is running
-        // the other way the whole strip is mirrored, carriages, marks and both wedges together.
-        boolean leadingEndIsFirst = train.speed >= 0;
+        int topX = bodyX;
+        int bottomX = bodyX;
+        slot = 0;
+        for (int pos = 0; pos < n; ) {
+            int len = consistUnitLength(pos, n, arms);
+            int row = slot < topSlots ? 0 : 1;
+            int band = row == 0 ? topBand : bottomBand;
+            int bodyY = band + 1;
+            int sx = row == 0 ? topX : bottomX;
+            int width = len >= 2
+                    ? Math.max(baseW, consistCountWidth(len) + (singleRow ? 0 : COUNT_PAD))
+                    : baseW;
 
-        for (int slot = 0; slot < n; slot++) {
-            // slot counts from the leading end; i is the carriage's index in the train, which is what
-            // the server's pantograph entries are keyed by.
-            int i = leadingEndIsFirst ? slot : n - 1 - slot;
-            int row = slot < topCount ? 0 : 1;
-            int col = row == 0 ? slot : slot - topCount;
-            int cx = bodyX + col * (carW + gap);
-            int bodyY = (row == 0 ? topBand : bottomBand) + 1;
-            int colour = i == selectedCarriage ? TEXT : TEXT_DIM;
+            if (len >= 2) {
+                // A compressed stretch: a block darker than a carriage, inset at both ends, with the
+                // number of carriages it stands for. The count cannot be inferred from the block's
+                // width, and it is not meant to be - the number is the honest part.
+                int inset = width >= 4 ? 1 : 0;
+                int blockTop = singleRow ? bodyY : bodyY - 1;
+                graphics.fill(sx + inset, blockTop, sx + width - inset, bodyY + CARRIAGE_H, MERGED_BLOCK);
+                int countX = sx + (width - consistCountWidth(len)) / 2;
+                int countY = singleRow ? y + PANTO_BAND_ROWS - COUNT_ROWS - 1 : blockTop;
+                drawConsistCount(graphics, countX, countY, len, TEXT);
+            } else {
+                // One carriage. slot counts from the leading end; pos is its display position, and
+                // i = the carriage's index in the train, which is what the selection is keyed by.
+                int i = leadingEndIsFirst ? pos : n - 1 - pos;
+                int colour = i == selectedCarriage ? TEXT : TEXT_DIM;
 
-            graphics.fill(cx, bodyY, cx + carW, bodyY + CARRIAGE_H, colour);
+                graphics.fill(sx, bodyY, sx + width, bodyY + CARRIAGE_H, colour);
 
-            // Wedges on the two end cars only, symmetric about the centre line: the middle body row
-            // reaches one pixel further than the rows above and below it. A plain rectangle
-            // everywhere else, because a one-sided step is exactly what read as a flipped carriage.
-            if (slot == 0) {
-                graphics.fill(cx - 1, bodyY, cx, bodyY + CARRIAGE_H, colour);
-                graphics.fill(cx - 2, bodyY + 1, cx - 1, bodyY + 2, colour);
+                // Wedges on the two end cars only, symmetric about the centre line: the middle body
+                // row reaches one pixel further than the rows above and below it. A plain rectangle
+                // everywhere else, because a one-sided step is exactly what read as a flipped car.
+                if (slot == 0) {
+                    graphics.fill(sx - 1, bodyY, sx, bodyY + CARRIAGE_H, colour);
+                    graphics.fill(sx - 2, bodyY + 1, sx - 1, bodyY + 2, colour);
+                }
+                if (slot == slots - 1) {
+                    graphics.fill(sx + width, bodyY, sx + width + 1, bodyY + CARRIAGE_H, colour);
+                    graphics.fill(sx + width + 1, bodyY + 1, sx + width + 2, bodyY + 2, colour);
+                }
+
+                // The carriage's arms, above it and in its own column. Two arms on one carriage
+                // overdraw each other at the same spot, exactly as they always have.
+                if ((arms & (1L << pos)) != 0L) {
+                    int mx = sx + (width - 1) / 2;
+                    int barW = Math.min(5, width);
+                    int barX = mx - (barW - 1) / 2;
+                    for (int k = 0; k < pantographs.size(); k++) {
+                        var entry = pantographs.get(k);
+                        int carriageIndex = Math.max(0, Math.min(n - 1, entry.carriageIndex()));
+                        int displayPos = leadingEndIsFirst ? carriageIndex : n - 1 - carriageIndex;
+                        if (displayPos != pos)
+                            continue;
+                        int iconColour = entry.autoRaise() ? DANGER
+                                : (entry.active() ? TEXT : TEXT_DIM);
+                        graphics.fill(barX, band, barX + barW, band + 1, iconColour);
+                        graphics.fill(mx, band + 1, mx + 1, band + 2, iconColour);
+                    }
+                }
             }
-            if (slot == n - 1) {
-                graphics.fill(cx + carW, bodyY, cx + carW + 1, bodyY + CARRIAGE_H, colour);
-                graphics.fill(cx + carW + 1, bodyY + 1, cx + carW + 2, bodyY + 2, colour);
-            }
-        }
 
-        // Pantographs above their own carriage, in the same row and column as the carriage they are
-        // fitted to. On a two-row strip a shared mark line would put a mark on the wrong row.
-        for (int k = 0; k < pantographs.size(); k++) {
-            var entry = pantographs.get(k);
-            int i = Math.max(0, Math.min(n - 1, entry.carriageIndex()));
-            int slot = leadingEndIsFirst ? i : n - 1 - i;
-            int row = slot < topCount ? 0 : 1;
-            int col = row == 0 ? slot : slot - topCount;
-            int cx = bodyX + col * (carW + gap);
-            int mx = cx + (carW - 1) / 2;
-            int barW = Math.min(5, carW);
-            int barX = mx - (barW - 1) / 2;
-            int iconY = row == 0 ? topBand : bottomBand;
-            int colour = entry.autoRaise() ? DANGER : (entry.active() ? TEXT : TEXT_DIM);
-            graphics.fill(barX, iconY, barX + barW, iconY + 1, colour);
-            graphics.fill(mx, iconY + 1, mx + 1, iconY + 2, colour);
+            if (row == 0)
+                topX = sx + width + gap;
+            else
+                bottomX = sx + width + gap;
+            slot++;
+            pos += len;
         }
 
         // The link between the two rows: off the end of the top row, one row down, back along the gap
         // to above the start of the bottom row. Both hooks are one pixel because the gap between the
         // bands is one pixel. This is the only thing that says the two lines are one train.
-        int topSpan = topCount * (carW + gap) - gap;
+        int topSpan = topX - bodyX - gap;
         if (!singleRow) {
             int linkY = topBand + CARRIAGE_H + 1;
             int topEnd = bodyX + topSpan;
@@ -675,21 +805,19 @@ public class TrainControlHud implements LayeredDraw.Layer {
         }
 
         // Direction. Forward is left, so the arrow is always a left arrow and always inside the
-        // panel. A shaft with a stepped head, because the three-pixel triangle this replaced was
-        // small enough to read as a smudge.
+        // panel. It goes above the strip whenever the strip needs the rows below it: under a single
+        // row with merged segments that is where the counts are, and below the two-row layout there
+        // is no room at all. A plain single row has nothing to put down there, so the arrow keeps the
+        // place the driver already knows it in - under the strip.
         //
-        // Under one row of carriages the strip ends at y+3, so the five-row head takes y+4..y+8. The
-        // band's last row is deliberately left alone: it is the panel's own one-pixel outline, and
-        // painting over the outline is how the old arrow started to look detached from the card.
-        // With two rows of carriages the strip fills the band down to y+8, so the arrow goes in the
-        // four rows directly above it instead - also inside the panel, because the status line above
-        // them ends a row higher. Measured, not estimated: that ink stops at y-4.25 and the arrow
-        // starts at y-4. Moving the strip up to keep the arrow underneath was considered and
-        // rejected: it would put the strip's top row against the status line and pull the detail
-        // text out of line, for no gain.
+        // Both positions are measured, not estimated: the status line's ink ends a quarter pixel
+        // above the upper one, and the lower one ends on the band's second-to-last row because the
+        // band's last row is the panel's own one-pixel outline. Moving the strip up to keep a single
+        // placement was rejected - it would put the strip's top row against the status line and pull
+        // the detail text out of line, for no gain.
         int arrowLen = Math.max(10, Math.min(avail - 2, topSpan + 2));
         int arrowX = x;
-        if (singleRow) {
+        if (singleRow && !hasMerged) {
             int arrowY = y + PANTO_BAND_ROWS - 6;
             graphics.fill(arrowX + 2, arrowY, arrowX + 3, arrowY + 5, TEXT_DIM);              // head base
             graphics.fill(arrowX + 1, arrowY + 1, arrowX + 2, arrowY + 4, TEXT_DIM);          // head step
@@ -701,6 +829,100 @@ public class TrainControlHud implements LayeredDraw.Layer {
             graphics.fill(arrowX + 1, arrowY + 1, arrowX + 2, arrowY + 3, TEXT_DIM);          // head step
             graphics.fill(arrowX, arrowY + 1, arrowX + 1, arrowY + 3, TEXT_DIM);              // tip
             graphics.fill(arrowX + 2, arrowY + 1, arrowX + arrowLen, arrowY + 3, TEXT_DIM);   // shaft
+        }
+    }
+
+    /**
+     * Where the arms are, one bit per carriage, in display order.
+     *
+     * <p>A long, not an array: the merge rule and the icon placement both only ask "has this carriage
+     * got an arm", and a bit test answers that without allocating. The mask is built once per frame -
+     * at most forty shifts - and the carriage index is clamped first with the same clamp the icon
+     * placement always used, so a stale index from the server draws somewhere rather than nowhere.
+     */
+    private static long displayPantographMask(java.util.List<
+            com.george_vi.electroenergetics.content.railway_electrification.pantograph
+                    .SyncTrainPantographsPacket.Entry> pantographs, int n,
+                                              boolean leadingEndIsFirst) {
+        long arms = 0L;
+        for (int k = 0; k < pantographs.size(); k++) {
+            int i = Math.max(0, Math.min(n - 1, pantographs.get(k).carriageIndex()));
+            int displayPos = leadingEndIsFirst ? i : n - 1 - i;
+            arms |= 1L << displayPos;
+        }
+        return arms;
+    }
+
+    /**
+     * How many carriages the slot starting at display position {@code pos} stands for.
+     *
+     * <p>1 for an arm carriage and for either end carriage - those are the cabs and keep their
+     * wedges - and the length of the maximal run of pantograph-less carriages in between. A run of
+     * two or more is drawn as one merged block; a run of one is a normal carriage.
+     */
+    private static int consistUnitLength(int pos, int n, long arms) {
+        if (pos == 0 || pos == n - 1)
+            return 1;
+        if ((arms & (1L << pos)) != 0L)
+            return 1;
+        int run = 1;
+        while (pos + run < n - 1 && (arms & (1L << (pos + run))) == 0L)
+            run++;
+        return run;
+    }
+
+    /** Width of a merged segment's count: three pixels per digit, one between them. */
+    private static int consistCountWidth(int carriages) {
+        return carriages >= 10 ? COUNT_DIGIT_W * 2 + COUNT_DIGIT_GAP : COUNT_DIGIT_W;
+    }
+
+    /**
+     * Pixels a row of slots needs: a base width each, a gap between them, and whatever a merged slot
+     * needs beyond the base width to hold its count.
+     *
+     * <p>{@code countInside} adds the margin a block needs when its count is drawn inside it rather
+     * than under it.
+     */
+    private static int consistRowWidth(int baseW, int gap, int slotCount, int oneDigit, int twoDigit,
+                                       boolean countInside) {
+        if (slotCount <= 0)
+            return 0;
+        int pad = countInside ? COUNT_PAD : 0;
+        int extra = oneDigit * Math.max(0, COUNT_DIGIT_W + pad - baseW)
+                + twoDigit * Math.max(0, COUNT_DIGIT_W * 2 + COUNT_DIGIT_GAP + pad - baseW);
+        return baseW * slotCount + gap * (slotCount - 1) + extra;
+    }
+
+    /** A merged segment's count, one or two digits (a run is two to thirty-eight carriages). */
+    private static void drawConsistCount(GuiGraphics graphics, int x, int y, int carriages, int colour) {
+        if (carriages >= 10) {
+            drawCountDigit(graphics, x, y, carriages / 10, colour);
+            drawCountDigit(graphics, x + COUNT_DIGIT_W + COUNT_DIGIT_GAP, y, carriages % 10, colour);
+        } else {
+            drawCountDigit(graphics, x, y, carriages, colour);
+        }
+    }
+
+    /**
+     * One count digit: four rows of three pixels, read out of the static table.
+     *
+     * <p>Only {@code charAt} and {@code fill}: no string is built and no boxed value is created, so
+     * the count costs nothing per frame beyond its pixels.
+     */
+    private static void drawCountDigit(GuiGraphics graphics, int x, int y, int digit, int colour) {
+        String glyph = COUNT_GLYPHS[digit];
+        for (int row = 0; row < COUNT_ROWS; row++) {
+            int col = 0;
+            while (col < COUNT_DIGIT_W) {
+                if (glyph.charAt(row * COUNT_DIGIT_W + col) != '#') {
+                    col++;
+                    continue;
+                }
+                int start = col;
+                while (col < COUNT_DIGIT_W && glyph.charAt(row * COUNT_DIGIT_W + col) == '#')
+                    col++;
+                graphics.fill(x + start, y + row, x + col, y + row + 1, colour);
+            }
         }
     }
 
