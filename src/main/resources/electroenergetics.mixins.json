@@ -26,6 +26,7 @@
     "RiderDismountLockMixin",
     "RiderStopRidingLockMixin",
     "CarriageFloorMixin",
+    "TrainPantographAutoStateMixin",
     "CarriageChunkProbeMixin",
     "BlockStateBaseMixin",
     "CarriageContraptionEntityMixin",

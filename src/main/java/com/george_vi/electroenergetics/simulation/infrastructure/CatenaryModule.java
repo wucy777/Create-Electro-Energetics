@@ -876,7 +876,15 @@ public class CatenaryModule {
             Carriage carriage = train.carriages.get(i);
             if (!(carriage instanceof IPantographList list))
                 continue;
+            var autoState = ((com.george_vi.electroenergetics.mixin_interfaces.IPantographAutoState) train)
+                    .electroEnergetics$pantoAutoState();
             for (TrainPantographEntry pe : list.electroEnergetics$getPantographList()) {
+                // Restore the saved switch onto the freshly built entry, so the panel and the automatic
+                // raise/lower behave the same after a reload as they did before it.
+                Boolean saved = autoState.get(
+                        com.george_vi.electroenergetics.mixin_interfaces.IPantographAutoState.key(i, pe.originalPos));
+                if (saved != null)
+                    pe.autoRaise = saved;
                 entries.add(new SyncTrainPantographsPacket.Entry(
                         i, pe.originalPos, pe.active, pe.reachable,
                         pe.type == CEEPantographTypes.RAIL_CONTACT_SHOE.get(), pe.autoRaise));

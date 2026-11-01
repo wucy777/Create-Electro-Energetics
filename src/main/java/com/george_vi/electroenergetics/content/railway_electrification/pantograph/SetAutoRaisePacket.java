@@ -71,6 +71,12 @@ public record SetAutoRaisePacket(UUID trainId, int carriageIndex, BlockPos local
             return;
 
         entry.autoRaise = autoRaise;
+        // Remembered on the train, not just on this tick's entry object: the entries are rebuilt from the
+        // carriage on every load, which is why the switch used to reset on every restart.
+        ((com.george_vi.electroenergetics.mixin_interfaces.IPantographAutoState) train)
+                .electroEnergetics$pantoAutoState()
+                .put(com.george_vi.electroenergetics.mixin_interfaces.IPantographAutoState.key(
+                        carriageIndex, localPos), autoRaise);
 
         // Turning the switch OFF must lower the arms it raised, or the driver turns it off and nothing
         // observable happens until the next bend - the arms would simply stay wherever the automatic
