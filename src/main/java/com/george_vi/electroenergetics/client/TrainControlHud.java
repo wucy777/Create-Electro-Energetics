@@ -543,8 +543,12 @@ public class TrainControlHud implements LayeredDraw.Layer {
             // most that can say so. On the leading carriage (the leftmost slot, always) it slopes down to
             // the left; the trailing carriage gets a shorter taper so the set reads as double-ended.
             if (slot == 0) {
-                graphics.fill(cx - 2, y + 3, cx - 1, y + 5, colour);
-                graphics.fill(cx - 1, y + 2, cx + 1, y + 5, colour);
+                // One more pixel of rake on the middle row: a high-speed nose is a wedge, and at this size
+                // the only way to say "pointed" is for the centre to reach further out than the rows above
+                // and below it.
+                graphics.fill(cx - 3, y + 2, cx - 2, y + 4, colour);
+                graphics.fill(cx - 2, y + 1, cx - 1, y + 4, colour);
+                graphics.fill(cx - 1, y + 1, cx + 1, y + 5, colour);
             }
             if (slot == n - 1) {
                 graphics.fill(cx + carW - 1, y + 2, cx + carW, y + 5, colour);
@@ -574,13 +578,20 @@ public class TrainControlHud implements LayeredDraw.Layer {
         // A left arrow, drawn with a five-tall head and a one-pixel shaft: the previous three-pixel marker
         // was small enough to read as a smudge. It is always left and always in the same place, because the
         // strip above it is always drawn leading-end-left.
-        int arrowX = x - 2;
+        // Shaped like the arrow the operator asked for, not a blob: a one-pixel shaft with a stepped
+        // triangular head, tip at the far left.
+        //      ##
+        //    ####
+        //  ######================
+        //    ####
+        //      ##
+        int arrowX = x - 3;
         int arrowY = y + 8;
-        int arrowLen = Math.max(8, n * (carW + gap) - gap + 2);
-        graphics.fill(arrowX + 5, arrowY + 2, arrowX + arrowLen, arrowY + 3, TEXT_DIM);   // shaft
-        graphics.fill(arrowX + 3, arrowY + 1, arrowX + 5, arrowY + 4, TEXT_DIM);          // head body
-        graphics.fill(arrowX + 1, arrowY, arrowX + 3, arrowY + 5, TEXT_DIM);              // head ramp
-        graphics.fill(arrowX, arrowY + 1, arrowX + 1, arrowY + 4, TEXT_DIM);              // tip
+        int arrowLen = Math.max(10, n * (carW + gap) - gap + 3);
+        graphics.fill(arrowX + 2, arrowY, arrowX + 3, arrowY + 5, TEXT_DIM);              // head base
+        graphics.fill(arrowX + 1, arrowY + 1, arrowX + 2, arrowY + 4, TEXT_DIM);          // head step
+        graphics.fill(arrowX, arrowY + 2, arrowX + 1, arrowY + 3, TEXT_DIM);              // tip
+        graphics.fill(arrowX + 2, arrowY + 2, arrowX + arrowLen, arrowY + 3, TEXT_DIM);   // shaft
     }
 
     /**
