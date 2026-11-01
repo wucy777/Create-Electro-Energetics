@@ -381,6 +381,24 @@ public final class TrainTractionModel {
     private static final double CRUISE_DEADBAND = 0.5d;
 
     /**
+     * Speed below which cruise treats the train as standing still [m/s].
+     *
+     * <p>Not the same thing as {@link #CRUISE_DEADBAND}, which is how close the speed has to be
+     * to the SETPOINT to count as held. This one is about zero: once cruise has decided the train
+     * should be stopped (a zero setpoint, or a setpoint taken in the wrong direction), a train at
+     * a stand may still be nudged a few centimetres per tick by the physics, and switching between
+     * "brake" and "hold" on that jitter would show up on the ammeter and the regeneration lamp as
+     * a flicker - a stopped train that appears to be working. Below this band the train is treated
+     * as standing: the pads hold whatever the gradient demands and no traction is applied, so a
+     * stopped train stays stopped.
+     *
+     * <p>Kept small enough that it is not a speed control of its own: at 0.2 m/s the electric
+     * brake has faded to nothing anyway (see {@link #dynamicBrakeFade}), so this only decides
+     * whether the pads are reported as doing the work.
+     */
+    private static final double CRUISE_STANDSTILL_SPEED = 0.2d;
+
+    /**
      * How much more adhesion the emergency brake can find than the service brake.
      *
      * <p>Emergency braking is not a different mechanism, it is the same friction
@@ -547,7 +565,11 @@ public final class TrainTractionModel {
      * @param signedSpeedMs current speed, positive towards +x
      * @param gradeToPlusX rise over run towards +x; positive is uphill towards +x
      * @param powerScale    fraction of the rating the supply can deliver
-     * @param cruiseSpeedMs speed the cruise position holds, as a magnitude
+     * @param cruiseSpeedMs speed cruise is holding, SIGNED in this same frame: positive holds
+     *                      that speed in the direction the position drives (the cab's +x after
+     *                      the caller's mirror), negative means the setpoint was taken while the
+     *                      train was running the other way, which cruise cannot hold and brakes
+     *                      to a stand. See the CRUISE branch for the reasoning.
      * @param brakeMs2      configured FRICTION service braking rate
      * @param emergency     whether the emergency brake is being applied
      * @param out           filled with the acceleration and the motor-brake share;
@@ -595,9 +617,6 @@ public final class TrainTractionModel {
         // obeyed by both schemes. Enforcing it here as well would have been a second copy that
         // could silently disagree with the first.
         double ceiling = designMaxSpeed();
-        // Which way the train is going, or would go if released from rest. Used
-        // only to aim traction and the brake; gravity never needs it.
-        double heading = speed < 1e-6d ? 1d : Math.signum(v);
 
         // The direction the BRAKE should push at a standstill.
         //
@@ -751,10 +770,29 @@ public final class TrainTractionModel {
                 // The held speed is capped by the design ceiling. The emergency cap is NOT applied
                 // here - it lives on Train.maxSpeed(), which is what Create obeys once the train has
                 // been handed over.
-                double target = Math.min(Math.max(cruiseSpeedMs, 0d), ceiling);
-                // Commanded to STOP, which is how an automatic arrival at a station
-                // finishes: Create's navigation zeroes its target speed once the train is
-                // inside the braking distance.
+                //
+                // The setpoint is SIGNED, in the same (cab) frame as `v`; see
+                // TrainDriverState.cruiseSpeed. Cruise holds speed in the direction this position
+                // drives - the cab's forward - so a negative setpoint means the notch was taken while
+                // the train was running the other way. That is a DIRECTION MISMATCH, not a speed to
+                // hold, and it is exactly what this branch used to get wrong: it compared |speed| with
+                // the setpoint's magnitude only, so a train reversing at 5 m/s "exactly matched" a
+                // captured 5 m/s, the hold branch below concluded there was nothing to do, and the
+                // train went on reversing at a constant speed under a hold position. Worse, the force
+                // that hold branch applied to keep the speed constant was the motor brake, so the
+                // regeneration report claimed the motors were recovering energy while the train
+                // neither slowed nor stopped - the display half and the motion half of the reported
+                // bug are the same magnitude comparison. A speed-hold position cannot hold speed
+                // against the direction it drives: the honest action is the service brake, which is
+                // regenerative while the motors still turn and blends into the pads as they fade out.
+                // That is the BRAKE position's own blend, so the stop is governed by the same numbers
+                // as a driver-applied one.
+                double target = Math.min(Math.abs(cruiseSpeedMs), ceiling);
+                boolean setpointOpposesMotion = cruiseSpeedMs < 0d;
+                // Commanded to STOP: either the setpoint is zero (how an automatic arrival at a
+                // station finishes - Create's navigation zeroes its target speed once the train is
+                // inside the braking distance), or it was captured in the direction cruise does not
+                // drive.
                 //
                 // This has to be handled as its own case rather than left to the
                 // deadband below, because the deadband is a BAND and the hold branch
@@ -763,28 +801,65 @@ public final class TrainTractionModel {
                 // towards the platform at a walking pace and never arriving. Braking to a
                 // genuine stand and then holding it is what an approach needs, and it is
                 // also what the driver expects of a lever set to hold zero.
-                if (target < CRUISE_DEADBAND) {
-                    if (speed > 1e-6d) {
+                //
+                // The reverse engagement (setpointOpposesMotion) gets the same treatment for the same
+                // reason: the captured speed lies in the direction a hold position cannot drive, so
+                // it can never be reached, and stopping is the only honest thing this position can do
+                // about motion against it. It then STAYS stopped instead of pulling away forwards:
+                // the driver captured a reverse speed, so accelerating forwards would be inventing a
+                // command they did not give. The direction is theirs to restore by selecting
+                // ACCELERATE, which is a separate, visible decision.
+                if (target < CRUISE_DEADBAND || setpointOpposesMotion) {
+                    if (speed > CRUISE_STANDSTILL_SPEED) {
                         leverBrakeForce = -brakeHeading * brakeTotal * mass;
                         force += leverBrakeForce;
                         dynamicApplied = dynamicPart;
                     } else {
-                        // At a stand. Friction only, aimed by brakeHeading exactly as the
-                        // BRAKE position aims it: on the level brakeHeading is zero and
-                        // NOTHING is applied, so a train held at zero has no force on it
-                        // and cannot be walked off by a rounding error; on a gradient it
-                        // pushes against the fall, which is what actually keeps a stopped
-                        // train stopped. No motors here, because a stationary machine has
-                        // no back-EMF and holding with one would draw line current to
-                        // stand still.
+                        // At a stand, or close enough that it counts as one. Friction only, aimed by
+                        // brakeHeading exactly as the BRAKE position aims it: on the level
+                        // brakeHeading is zero and NOTHING is applied, so a train held at zero has no
+                        // force on it and cannot be walked off by a rounding error; on a gradient it
+                        // pushes against the fall, which is what actually keeps a stopped train
+                        // stopped. No motors here, because a stationary machine has no back-EMF and
+                        // holding with one would draw line current to stand still - and claiming
+                        // regeneration there would be a quieter version of the same lie this fix
+                        // removes.
+                        //
+                        // The band is on speed, not an exact zero, and it is deliberately smaller
+                        // than the hold deadband: a stopped train is nudged a few centimetres per
+                        // tick, and switching between "brake" and "hold" on that jitter would flicker
+                        // the regeneration lamp and the ammeter on a train that is standing still.
+                        // The pads are still applied while the train is creeping below the band -
+                        // this is friction braking, not "apply nothing" - so a train finishing a
+                        // stop still finishes it instead of drifting at a walking pace.
                         force -= brakeHeading * frictionBrake() * mass;
                     }
-                } else if (speed < target - CRUISE_DEADBAND) {
+                } else if (v < -CRUISE_STANDSTILL_SPEED) {
+                    // A forward setpoint with the train genuinely running backwards: it lost a climb
+                    // and is rolling back, or a reverse engagement that has already crossed zero.
+                    // Motion against the direction the notch drives is braked, not chased, and the
+                    // service brake is what opposes it at every speed. The threshold is the
+                    // standstill band rather than the hold deadband: below it the train is for
+                    // practical purposes at a stand and the traction branch is the right one (it
+                    // pulls forwards), whereas braking a tenth of a metre per second would only pump
+                    // the speed through zero.
+                    leverBrakeForce = -brakeHeading * brakeTotal * mass;
+                    force += leverBrakeForce;
+                    dynamicApplied = dynamicPart;
+                } else if (v <= 0d || speed < target - CRUISE_DEADBAND) {
+                    // Below the setpoint: traction TOWARDS THE SETPOINT'S DIRECTION (the cab's +x,
+                    // which is this position's whole meaning), not along the current direction of
+                    // travel. The old `heading * effort` followed the motion instead, so a train
+                    // rolling backwards under a forward setpoint was pushed further backwards - the
+                    // same direction confusion, one branch over. A train at a stand is included in
+                    // the `v <= 0` test so a cruise setpoint taken while stopped still pulls away
+                    // forwards.
+                    //
                     // Holding a speed takes traction; an emergency brake takes that
                     // away and lets the brake do the work instead, exactly as it does
                     // in the other positions.
                     if (!tractionCut && speed < ceiling)
-                        force += heading * effort;
+                        force += effort;
                 } else if (speed > target + CRUISE_DEADBAND || tractionCut) {
                     leverBrakeForce = -brakeHeading * brakeTotal * mass;
                     force += leverBrakeForce;
@@ -929,6 +1004,24 @@ public final class TrainTractionModel {
                 boolean gravityPullsForward = -gradeResistance(gradeToPlusX, carriages) > 0d;
                 if (gravityPullsForward) {
                     hold = frictionBrake() + motorReverseBrake(0d, carriages, powerScale);
+                    braked = true;
+                }
+            } else if (gear == TrainGear.CRUISE) {
+                // Cruise that has decided to STOP: a zero setpoint (automatic arrival, or the
+                // lever taken at a stand) or a setpoint captured in the direction this position
+                // does not drive. Once the train is actually stopped the pads hold it exactly as
+                // the BRAKE position does - and the snap below is what makes "hold" mean held
+                // rather than "full pad force against the slope, pushed back by gravity, every
+                // tick". That residual is what a driver sees as brake/traction flicker on a
+                // stopped train, and it is the same creep this test exists to remove for BRAKE.
+                //
+                // Friction only, for the BRAKE position's reason: a generator has no back-EMF at
+                // zero speed, so crediting the electric brake here would let the train appear to
+                // hold a grade it would really roll down.
+                boolean stopsAtSetpoint = Math.abs(cruiseSpeedMs) < CRUISE_DEADBAND
+                        || cruiseSpeedMs < 0d;
+                if (stopsAtSetpoint) {
+                    hold = frictionBrake();
                     braked = true;
                 }
             }

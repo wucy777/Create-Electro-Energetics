@@ -44,11 +44,13 @@ public class PantographMovementBehaviour implements MovementBehaviour {
      * a lookup on a hot path (every catenary segment, every tick, for every arm) to fetch a number
      * that is fixed by the model.
      *
-     * <p>The coupling is deliberate and asserted by {@code _cache/check_pantograph_reach.py}: if the
-     * two ever drift, the visible symptom is an arm dropping into a bend while the train is still
-     * drawing current, which is exactly the bug this constant replaced.
+     * <p>3.5 rather than upstream's 2.0, for the same measured reason as the server constant: the
+     * operator's loop has turns of about 14.5 Blocks radius, a carriage is 25 Blocks long, and a rigid
+     * carriage on such a turn carries its pantograph up to 3.11 Blocks off the wire's chord. The two
+     * guards are asserted by {@code _cache/check_auto_raise_and_reach.py}; if they drift, the visible
+     * symptom is an arm dropping into a bend while the train is still drawing current.
      */
-    private static final float CONTACT_HALF_WIDTH = 2.5f;
+    private static final float CONTACT_HALF_WIDTH = 3.5f;
 
     @Override
     public void tick(MovementContext context) {
@@ -62,17 +64,35 @@ public class PantographMovementBehaviour implements MovementBehaviour {
         if (!(context.contraption.entity instanceof CarriageContraptionEntity e))
             return;
 
-        // The ARM follows the driver's handle. It does NOT set it.
+        // Create's Contraption Controls block is upstream's own pantograph switch, and upstream's
+        // treatment of it is restored here: the block's disabled flag is pushed into the entry's
+        // `active` flag, so a controls block fitted to the train works in this fork exactly as it does
+        // in the original mod. This runs on both sides; the client carriage's list is empty, so there
+        // it only affects the animation through `context.disabled` below.
+        boolean prevDisabled = context.data.getBoolean("Disabled");
+        if (context.disabled) {
+            if (!prevDisabled)
+                ((IPantographList) e.getCarriage()).changePantographState(context.localPos, false);
+            targetExtensionState = 0f;
+        } else if (prevDisabled) {
+            ((IPantographList) e.getCarriage()).changePantographState(context.localPos, true);
+            targetExtensionState = 0.75f;
+        }
+
+        // The ARM follows the per-arm handle (`active`). It does not set it.
         //
-        // This used to be the other way round, and it was the only way a pantograph could be
-        // worked at all: Create's Contraption Controls block toggled `context.disabled`, and this
-        // method pushed that into the entry's `active` flag. That is gone. Whether a pantograph is
-        // up is now a per-pantograph decision the driver makes from the cab, sent to the server and
-        // validated there against the catenary geometry - see SetPantographPacket. So this method
-        // only reads the flag and animates the arm to match.
+        // Who writes that handle depends on the mode, and the DEFAULT is upstream's behaviour:
         //
-        // Create's controls block is still honoured as a physical override, because it is a real
-        // block a player may have fitted and silently ignoring it would be worse than obeying it.
+        //   automatic mode (autoRaise, default)   CatenaryModule raises the arm when catenary is in
+        //                                         reach and lowers it when the wire is lost - the same
+        //                                         up-over-the-wire / down-when-it-ends behaviour the
+        //                                         original mod produced, only decided on the server so
+        //                                         it cannot disagree with the current-collection test;
+        //   manual mode (driver turned auto off)  the driver's key is the only writer, validated
+        //                                         against the same geometry in SetPantographPacket.
+        //
+        // Restoring the upstream default is what this method must not break: nothing here writes
+        // `active` except the controls-block mirroring above, which is upstream's own override.
         //
         // A NULL entry means one of two very different things, and they must not be confused.
         //
@@ -86,11 +106,6 @@ public class PantographMovementBehaviour implements MovementBehaviour {
         // bogeys and the spacing - it never goes through Carriage.read, which is the only thing that
         // populates the list. So the client's list is empty and this lookup returns null for a
         // pantograph that the server knows perfectly well is lowered.
-        //
-        // Treating that as "not in the list, so use the controls block" made the arm render RAISED
-        // whenever no controls block was fitted, whatever the driver had commanded: the electrical
-        // state was correct and the picture contradicted it. The driver lowers a pantograph, the
-        // train stops collecting, and the arm sits up against the wire anyway.
         //
         // The client's only source of per-pantograph truth is the state the server syncs to the
         // driver, so that is asked below before falling back.
@@ -119,11 +134,10 @@ public class PantographMovementBehaviour implements MovementBehaviour {
         //   raised, nothing in reach-> targetExtensionState = 0, so it comes down
         //   NOT raised              -> this whole block is skipped and the arm stays down
         //
-        // That last line is the removal of automatic raising. Previously the arm was pushed up
-        // whenever wire was in reach, whoever wanted it; now a pantograph only goes up when the
-        // driver raises it, and the geometry here only decides how high the arm has to sit to touch
-        // what is already there. Automatic LOWERING is kept, because a real pantograph cannot be
-        // left pressing against nothing.
+        // `raised` is maintained by the server from the same geometry (automatic mode, the default,
+        // restores upstream's raise/lower behaviour that way) or by the driver's key (manual mode).
+        // This block therefore only decides how high the arm has to sit to touch what the server has
+        // already found; it never decides WHETHER the arm is up.
         if (context.world.isClientSide && !context.disabled && raised) {
             double pantographX = context.state.getValue(PantographBlock.FACING).getAxisDirection() == Direction.AxisDirection.NEGATIVE ? 0.5 : -0.5;
             if (!isDouble)

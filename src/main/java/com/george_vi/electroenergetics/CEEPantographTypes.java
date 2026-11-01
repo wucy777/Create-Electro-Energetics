@@ -12,46 +12,52 @@ public class CEEPantographTypes {
     /**
      * Half-width of the contact strip, in Blocks - the sideways tolerance for collecting current.
      *
-     * <p>Upstream used 2.0. Raised to 2.5 for the two overhead types.
+     * <p>Upstream used 2.0. The operator's own loop then measured a real failure at 2.5, so it is 3.5.
      *
      * <p>Why: a rigid carriage cannot keep its pantograph under a curved catenary. The arm is fixed
-     * in the carriage's frame while the wire follows the arc, so on a compact loop the lateral offset
-     * at the middle of a carriage reaches past 2 Blocks and the train drops its pantograph on every
-     * bend - then has to be re-raised on every straight, by which time it has lost speed. 2.0 was not
-     * enough for the operator's layout.
+     * in the carriage's frame while the wire follows the arc, so the arm is pulled off the wire by
+     * the chord of the carriage between its two bogeys. On the operator's layout the turns are tight
+     * (about 14.5 Blocks of radius) while the carriages are 25 Blocks long, and a sweep of a rigid
+     * carriage around the whole loop measured a worst-case sideways offset of 3.11 Blocks. 2.5 left
+     * positions on the tightest turns where one arm lost contact while the other - mounted at a
+     * different point of the same train - did not, which is exactly the reported "two identical arms,
+     * only one works" symptom.
      *
-     * <p>2.5 rather than an arbitrary larger number because that is the width the contact strip is
-     * understood to be: the debug range box in {@code PantographMovementBehaviour} traces
-     * z = -1.5 .. +1.5 Blocks, i.e. a three-Block strip, so 2.5 is the value at which the tolerance
-     * stops being narrower than the metal it is modelling.
+     * <p>The asymmetry was never the facing: the arm's facing only ever shifted its test point along
+     * the track (+-backOffset), and reconstructing the operator's save showed that offset changes the
+     * lateral distance by less than 0.02 Blocks. What differs between two arms on one train is their
+     * POSITION along the carriage, and on a tight curve that is what crosses the tolerance first.
      *
-     * <p>The cost, stated plainly: this is a wider net than the metal, so a pantograph can collect
-     * from a wire up to three Blocks laterally rather than two. On adjacent parallel tracks that
-     * could mean contact with the neighbouring line. That is the deliberate trade - a train that keeps
-     * its supply through a bend is worth more than a strict reading of the strip's width, and the
-     * operator's layout has one wire above each track.
+     * <p>The cost, stated plainly: this is 1.7 Blocks wider per side than upstream's net, so a
+     * pantograph can collect from a wire up to three and a half Blocks laterally. The consequence is
+     * that an ADJACENT PARALLEL LINE's catenary can now be picked up as well if it runs closer than
+     * that - in a station throat or a double-track section, a train could draw from the neighbouring
+     * line's wire. The operator's own layout has one wire above each track and no such pair, so this
+     * was accepted; a server with two electrified tracks 3 Blocks apart should treat 3.5 as a known
+     * limitation rather than a bug, and the value is one constant to change if that ever bites. The
+     * alternative - a curvature-dependent tolerance - was considered and rejected because the server
+     * only sees the two bogey anchors and has no cheap curvature estimate on this hot path.
      *
      * <p>A constant rather than a config option: it is geometry that has to stay in step with the
      * model, and the third-rail type below must NOT be widened with it.
      */
     // The electrical tolerance, in Blocks either side of the pantograph's centre.
     //
-    // Upstream used 2.0. That is too tight for a catenary that curves while the carriage stays rigid: a
-    // train two Blocks into a bend would lose contact and stop. 2.5 keeps half a Block of margin on top of
-    // upstream without allowing a train to draw power from a wire it is not under.
-    public static final float CONTACT_HALF_WIDTH = 2.5f;
+    // Upstream used 2.0, then this fork used 2.5 after the first round of lost contact on bends. The
+    // operator's own track then showed the remaining failure, and a carriage-against-catenary sweep
+    // measured 3.11 Blocks of worst-case sideways offset, so 3.5 is the first value with margin.
+    public static final float CONTACT_HALF_WIDTH = 3.5f;
 
     // The width the collector bar is DRAWN at. Deliberately narrower than the tolerance above.
     //
-    // These two numbers used to disagree by a factor of three: the tolerance had been widened to three
-    // Blocks while the model still spanned a little over one, so a train three Blocks off the wire still
-    // drew power and the bar visibly floated under nothing. Drawing to the full tolerance fixes that but
-    // makes the bar five Blocks wide, which is not what a pantograph looks like. Drawing to 2.0 leaves
-    // the half-Block of curve margin as the only gap, which is small enough not to read as a gap.
+    // These two numbers used to disagree by a factor of three: the tolerance had been widened while the
+    // model still spanned a little over one Block, so a train well off the wire still drew power and the bar
+    // visibly floated under nothing. Drawing to the full tolerance fixes that but makes the bar seven Blocks
+    // wide, which is not what a pantograph looks like. A drawn half-width of 1.5625 is what the operator
+    // asked for: the model's own 17/16 plus half a Block per side.
     //
-    // 1.5625 is the model's own 17/16 plus half a Block per side. Widening it to the full 2.5 tolerance was
-    // tried and rejected: the strip nearly doubled and stopped looking like part of the machine. Half a Block
-    // is the most this shape takes before it stops reading as a collector bar.
+    // The gap between this and CONTACT_HALF_WIDTH is the deliberate part of the judgement: the contact test
+    // answers "could the strip reach that wire on this curve", not "is the bar drawn underneath it".
     public static final float CONTACT_DRAW_HALF_WIDTH = 1.5625f;
 
     // The collector bar in connecting_surface.json runs from x=-9 to x=25 model units about a centre at

@@ -321,7 +321,7 @@ public class GameEvents {
                 if (!atCeiling && driver.overloadBraking) {
                     driver.overloadBraking = false;
                     if (driver.gear == TrainGear.BRAKE) {
-                        driver.cruiseSpeed = Math.abs(train.speed) * 20d;
+                        driver.captureCruiseSetpointFromWorld(train.speed * 20d);
                         driver.gear = TrainGear.CRUISE;
                     }
                 }
@@ -371,13 +371,13 @@ public class GameEvents {
                                 // captured when the driver selects the position themselves. Forcing the
                                 // position without it left the target at its old value - zero, on a train
                                 // that had never cruised - so "hold this speed" meant "brake to a stand".
-                                driver.cruiseSpeed = Math.abs(train.speed) * 20d;
+                                driver.captureCruiseSetpointFromWorld(train.speed * 20d);
                                 driver.gear = TrainGear.CRUISE;
                             }
                         }
                         if (driver.gear == TrainGear.ACCELERATE) {
                             driver.gearBeforeOverloadDrop = TrainGear.ACCELERATE;
-                            driver.cruiseSpeed = Math.abs(train.speed) * 20d;
+                            driver.captureCruiseSetpointFromWorld(train.speed * 20d);
                             driver.gear = TrainGear.CRUISE;
                         }
                     }

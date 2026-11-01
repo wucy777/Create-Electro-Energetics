@@ -376,8 +376,64 @@ public class TrainDriverState {
         return spaceTicks > 0;
     }
 
-    /** Speed cruise is holding, in Blocks/Second. Captured when cruise is selected. */
+    /**
+     * The speed cruise is holding, in Blocks/Second, SIGNED in the driving cab's frame.
+     *
+     * <p>Positive is the normal case: the train was already running the way the ACCELERATE
+     * position drives, so cruise holds that speed in that direction. Negative means the notch
+     * was taken while the train was running the other way. That is not a speed this position
+     * can hold - cruise holds speed in the direction it drives - so it is a direction mismatch
+     * which the law has to brake away; see the CRUISE branch of
+     * {@code TrainTractionModel.gearAcceleration}.
+     *
+     * <p>Stored SIGNED on purpose, and never through {@code Math.abs}. The magnitude used to be
+     * taken here and compared with the magnitude of the live speed in the law, so a train
+     * reversing at 5 m/s "exactly matched" a captured 5 m/s: cruise concluded there was nothing
+     * to do, the train went on reversing at a constant speed, and the force the hold branch used
+     * to keep that speed constant was the motor brake - so the regeneration readout said the
+     * motors were recovering energy while the train neither slowed nor stopped. The sign is what
+     * lets the law tell "hold 5 forwards" from "was doing 5 backwards when the notch was taken".
+     */
     public double cruiseSpeed = 0d;
+
+    /**
+     * The lever position the gear law ran with on the previous tick.
+     *
+     * <p>Used only to notice the move INTO cruise, so the setpoint can be captured from the speed
+     * the train actually has at that moment. It is captured here, in the law, because this is the
+     * one place that has both the speed the law will use and the cab frame it is expressed in; a
+     * packet arrives between ticks and cannot know which cab is driving. The packet's own capture
+     * (and the capacity rule's) therefore only fill in a provisional value, which this overwrites
+     * on the tick the lever arrives at cruise - so every route into the position ends up with the
+     * same signed figure, from the same rule.
+     *
+     * <p>Not persisted: a reload leaves the lever in the brake, so there is no cruise setpoint to
+     * preserve either.
+     */
+    public TrainGear leverAtLastLaw = TrainGear.BRAKE;
+
+    /**
+     * Capture the speed cruise is to hold, from a speed already expressed in the driving cab's
+     * frame [Blocks/Second].
+     *
+     * <p>Every writer goes through here so the sign convention cannot drift between the driver's
+     * packet, the capacity rule and the gear law. The value is signed: see {@link #cruiseSpeed}.
+     */
+    public void captureCruiseSetpoint(double cabFrameSpeedBpt) {
+        cruiseSpeed = Double.isFinite(cabFrameSpeedBpt) ? cabFrameSpeedBpt : 0d;
+    }
+
+    /**
+     * Capture the speed cruise is to hold from the train's own (world-frame) speed
+     * [Blocks/Second].
+     *
+     * <p>The lever works in the driver's cab frame, so an inverted cab mirrors the figure - the
+     * same mirror the gear law applies to the speed it drives with. Callers that already hold a
+     * cab-frame speed (the gear law) use {@link #captureCruiseSetpoint} instead.
+     */
+    public void captureCruiseSetpointFromWorld(double worldSpeedBpt) {
+        captureCruiseSetpoint(worldSpeedBpt * (driverCabInverted ? -1d : 1d));
+    }
 
     /**
      * Whether the emergency brake is IN FORCE.

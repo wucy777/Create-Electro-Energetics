@@ -190,9 +190,20 @@ public record SetTrainGearPacket(UUID trainId, int gearOrdinal, boolean confirm,
             // the K press fires it. Firing on engagement made every reverse engagement a
             // full emergency stop with the whole penalty chain attached.
             state.gear = gear;
-            // Cruise captures the speed it is to hold at the moment it is engaged.
+            // Cruise captures the speed it is to hold at the moment it is engaged, SIGNED.
+            //
+            // Signed, not a magnitude: cruise holds speed in the direction its notch drives, so
+            // a setpoint taken while the train is reversing has to stay negative for the law to
+            // recognise it as a direction mismatch and brake it away. Storing Math.abs() turned
+            // "was reversing at 5 m/s" into "hold 5 m/s forwards", which is how a reversing train
+            // went on holding its speed under the cruise position.
+            //
+            // Provisional: the gear law re-captures the same figure on the tick the lever arrives
+            // at cruise, in the cab frame and from the speed it is about to act on (the packet
+            // arrives between ticks and cannot know which cab is driving). One rule, one wording
+            // of the setpoint - see TrainDriverState.captureCruiseSetpoint.
             if (gear == TrainGear.CRUISE)
-                state.cruiseSpeed = Math.abs(train.speed) * 20d;
+                state.captureCruiseSetpointFromWorld(train.speed * 20d);
         }
     }
 

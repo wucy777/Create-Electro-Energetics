@@ -16,7 +16,16 @@ public enum TrainGear {
     /** 加速: full tractive effort, then full power once past the base speed. */
     ACCELERATE("accelerate"),
 
-    /** 匀速: hold the current speed; climbs at full power if needed, brakes on a descent. */
+    /**
+     * 匀速: hold a speed in the direction this notch drives (the cab's forward); climbs at
+     * full power if needed, brakes on a descent.
+     *
+     * <p>The speed it holds is the one captured when it is engaged, in the direction the
+     * notch drives. A setpoint taken while the train is running the other way cannot be
+     * held - a hold position cannot hold speed against its own direction - so that case is
+     * braked to a stand instead. See {@code TrainTractionModel.gearAcceleration}'s CRUISE
+     * branch and {@code TrainDriverState.cruiseSpeed}.
+     */
     CRUISE("cruise"),
 
     /** 切断动力: traction off and no brake. Drag and gravity only, so it rolls on a slope. */

@@ -47,28 +47,14 @@ public class ElectricTrainData {
     public boolean hasWorkingPantograph = false;
 
     /**
-     * The driver's AUTOMATIC-RAISE switch, which restores upstream's behaviour while it is on.
+     * SUPERSEDED by the per-arm {@link com.george_vi.electroenergetics.content.railway_electrification.pantograph.TrainPantographEntry#autoRaise},
+     * which defaults to true (upstream behaviour restored). Kept only so the saved field and old code
+     * keep compiling; nothing reads it.
      *
-     * <p>Off by default, and that default is the feature: how many pantographs are up is the driver's
-     * call, and the only writer of a raise was the driver's packet. This switch is the one deliberate
-     * exception, and it is a switch the driver holds.
-     *
-     * <p>It exists because a rigid carriage on a curve cannot keep its pantograph under the wire.
-     * The operator's track is a compact loop: heading into a bend the arm loses the contact, the
-     * automatic lowering fires, and by the time the train is straight again the speed has already
-     * fallen. Selective manual raising cannot fix that - it is not a decision problem, it is a
-     * frequency problem - so upstream's "raise whenever there is wire in reach" is the right
-     * behaviour for that track, and the driver should be able to ask for it.
-     *
-     * <p>When on, the raise condition is exactly upstream's: wire in reach, no further test. The
-     * automatic LOWERING that is already kept then completes the pair, so on a bendy line the arm
-     * rides the wire instead of dropping off it. A manual lowering while the switch is on does not
-     * stick - the next solve raises it again, which is what "automatic" means and is why the switch is
-     * the thing the driver turns off.
-     *
-     * <p>Deliberately NOT persisted per train: it is an operating habit, not a property of the
-     * consist, and a train reassembled should not inherit a mode nobody chose again. See the config
-     * default for the default.
+     * <p>History: this was the driver's train-wide AUTOMATIC-RAISE switch, off by default because "how
+     * many pantographs are up is the driver's call". The switch moved to each arm (so one arm can be
+     * automatic while another is manual) and then became the default, restoring the original mod's
+     * automatic raise/lower.
      */
     public boolean autoRaisePantographs = false;
 

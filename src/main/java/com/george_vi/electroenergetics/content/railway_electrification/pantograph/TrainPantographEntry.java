@@ -16,10 +16,13 @@ public final class TrainPantographEntry {
      * not. Per arm, not per train - a consist can run one arm on auto through a bendy section while the
      * other stays the driver's.
      *
-     * <p>While set, the manual raise/lower key refuses to act on this arm, because the two would fight:
-     * the next solve would simply put it back. Turning auto off is the way to take manual control.
+     * <p>DEFAULT IS TRUE, because that is the original mod's behaviour and the operator asked for it
+     * back: an arm goes up over the wire on its own and comes down when the wire ends. The switch is
+     * kept per arm because a driver may still want to park one arm and work the other by hand; the
+     * manual key is refused while this is set, because the two would fight and the next solve would
+     * simply put the arm back.
      */
-    public boolean autoRaise;
+    public boolean autoRaise = true;
     public boolean facingForward;
 
     /**

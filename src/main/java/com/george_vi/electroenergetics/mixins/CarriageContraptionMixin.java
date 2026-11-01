@@ -79,44 +79,23 @@ public abstract class CarriageContraptionMixin extends Contraption implements IP
             if (pb.isSidewaysPantograph() == (facing.getAxis() == assemblyDirection.getAxis()))
                 electroEnergetics$sidewaysPantograph = true;
             else {
-                // Starts DOWN, because a train's pantographs only ever move when the driver moves them.
+                // Starts UP, which is upstream's assembly default and is restored here together with
+                // the rest of the original pantograph behaviour.
                 //
-                // The operator settled this twice, and the second answer supersedes the first. The
-                // earlier question was answered "default up (=true, keep as is)" while thinking of a
-                // pantograph as a BLOCK; the correction is that a train's pantograph is not that:
-                //
-                //   PLACED BLOCK        PantographBlockEntity.extended defaults to true and nothing
-                //                       ever lowers it. The block has no controls of its own - an
-                //                       unassembled train has no cab either - so it is always "up" and
-                //                       draws no power, because a loose block is not on a circuit in
-                //                       any way that matters. That behaviour is upstream's and is
-                //                       deliberately untouched here.
-                //
-                //   ASSEMBLED, ON A TRAIN  the same block becomes a TrainPantographEntry, driven by
-                //                       the cab's lever and by nothing else. Automatic raising was
-                //                       removed at the operator's request, so the ONLY writer of
-                //                       `active = true` in the whole mod is the driver's packet.
-                //
-                // A default of `true` would therefore be one remaining way for a pantograph to be up
-                // without the driver having put it there - and it would be inconsistent with the very
-                // mechanism the operator asked for: assembling a train under wire would start it
-                // collecting current, assembling it a block away would not. "Whether or not the train
-                // is being assembled" is the operator's own wording: the entity state has no automatic
-                // raising, so it must not have an automatic initial raise either.
-                //
-                // Nothing is lost operationally: a train assembled under live wire starts with its
-                // pantographs down and the driver presses the raise key once, which is exactly the
-                // handle this feature exists to give them.
+                // The first solve corrects it either way: automatic raise/lower is on by default, so an
+                // arm assembled away from the wire is lowered on that solve and an arm assembled under
+                // the wire keeps collecting. Starting true only means a train assembled under live wire
+                // is usable immediately, which is exactly upstream's behaviour.
                 //
                 // This is only the ASSEMBLY default. A carriage loaded from NBT takes its value from
-                // the saved "Active" tag (CarriageMixin.electroEnergetics$read), which is the
-                // driver's own state and is deliberately left alone - a world reload must not fold
-                // every raised pantograph.
+                // the saved "Active" tag (CarriageMixin.electroEnergetics$read), which is the saved
+                // state and is deliberately left alone - a world reload must not fold every raised
+                // pantograph.
                 electroEnergetics$pantographs.add(new TrainPantographEntry(toLocalPos(pos), toLocalPos(pos).rotate(
                         assemblyDirection == Direction.NORTH ? Rotation.COUNTERCLOCKWISE_90 :
                         assemblyDirection == Direction.EAST ? Rotation.CLOCKWISE_180 :
                         assemblyDirection == Direction.SOUTH ? Rotation.CLOCKWISE_90 : Rotation.NONE
-                ), pb.getPantographType(state), false, facing == assemblyDirection));
+                ), pb.getPantographType(state), true, facing == assemblyDirection));
             }
         }
         if (state.is(CEETags.TRAIN_ELECTRIC_MOTOR))

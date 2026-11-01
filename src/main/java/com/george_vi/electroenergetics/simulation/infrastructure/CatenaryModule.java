@@ -249,12 +249,13 @@ public class CatenaryModule {
                             // the driver is ALLOWED to raise it.
                             pantograph.reachable = true;
 
-                            // AUTOMATIC RAISING, behind the driver's switch - and it is the mirror
-                            // image of the automatic lowering further down.
-                            //
-                            // Off by default, because "how many pantographs are up is the driver's
-                            // call". On, it restores upstream's behaviour exactly: wire in reach,
+                            // AUTOMATIC RAISING - the DEFAULT, and upstream's behaviour restored. It is
+                            // the mirror image of the automatic lowering further down: wire in reach,
                             // therefore up, with no further test.
+                            //
+                            // It is ON by default (see TrainPantographEntry.autoRaise). The per-arm
+                            // switch exists so a driver can put one arm back in manual control - then
+                            // this branch does not run for it and its key is the only writer of a raise.
                             //
                             // The reason the switch exists at all is a rigid carriage on a curve. The
                             // arm is fixed in the carriage's frame while the catenary follows the
@@ -265,16 +266,14 @@ public class CatenaryModule {
                             // bend - so it is a switch rather than a key.
                             //
                             // Setting `active` here makes this the second writer of a raise in the
-                            // mod, which is exactly what the single-writer invariant was protecting.
-                            // It is allowed because it is not a silent raise: the driver turned the
-                            // switch on. The invariant is now "no raise without either the driver's
-                            // packet or the driver's switch", and both are the driver.
+                            // mod. The invariant is "no raise without either the driver's packet or
+                            // the driver's switch", and both are the driver.
                             // Per arm: this one's own switch, not the consist's.
                             if (!raised && pantograph.autoRaise)
                                 pantograph.active = true;
 
-                            // A raised this tick (by the driver earlier, or by the switch just above)
-                            // is what the electrical work below requires.
+                            // An arm raised this tick (by the driver earlier, or by the switch just
+                            // above) is what the electrical work below requires.
                             raised = pantograph.active;
 
                             // The electrical work below only applies to a raised pantograph. A

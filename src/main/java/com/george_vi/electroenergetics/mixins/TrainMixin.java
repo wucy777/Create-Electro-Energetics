@@ -510,6 +510,28 @@ public class TrainMixin implements ICEETrainExtension {
         // m/s² -> Blocks/Tick². 1 block = 1 m, so only the tick conversion is needed.
         double next = self.speed + a / 400d;
 
+        // THE LEVER HAS JUST ARRIVED AT CRUISE: capture the speed it is to hold, SIGNED.
+        //
+        // The capture must keep the direction, because cruise holds speed in the direction its
+        // notch drives (the cab's forward) and a setpoint taken while the train is running
+        // backwards is a direction mismatch the law has to brake away rather than a speed to
+        // hold - see TrainTractionModel's CRUISE branch and TrainDriverState.cruiseSpeed.
+        // Storing Math.abs() would throw that away and turn "was reversing at 5" into "hold 5
+        // forwards", which is precisely the silent reinterpretation being removed.
+        //
+        // Captured HERE, from the mirrored speed exactly as the law sees it, rather than only in
+        // the packet: this is the one place that has the cab frame and the speed the law will
+        // act on, and it covers every route into the position (the driver's packet, the capacity
+        // rule's forced drop, and nothing else - the accelerate handover below captures its own
+        // value). The packet's capture is provisional - it arrives between ticks, so it can be a
+        // tick stale and it has to guess the cab - and this re-captures the exact figure, so one
+        // rule decides what the setpoint means.
+        //
+        // The speed used is this tick's, before the integration step - the speed the train had
+        // when the driver moved the handle, not the speed one tick later.
+        if (st.gear == TrainGear.CRUISE && st.leverAtLastLaw != TrainGear.CRUISE)
+            st.captureCruiseSetpoint(signedSpeedMs);
+
         // ACCELERATE hands over to CRUISE once the train is at its design speed.
         //
         // This is the behaviour that was asked for and that the ACCELERATE branch alone
@@ -542,8 +564,19 @@ public class TrainMixin implements ICEETrainExtension {
             // band fires up to half a m/s early, and capturing the current speed pinned
             // the train at 99.5 forever. Holding the ceiling itself is safe there - at the
             // ceiling the hold branch meets drag with traction and never brakes.
-            st.cruiseSpeed = TrainTractionModel.designMaxSpeed();
+            //
+            // Sign taken from the CAB-frame speed the law just drove with, not from the world
+            // speed: an inverted cab reaches the ceiling with a negative world speed, and taking
+            // the sign from the world figure would store a setpoint pointing the other way - which
+            // the CRUISE branch would then brake to a stand instead of holding the ceiling.
+            st.captureCruiseSetpoint(
+                    Math.copySign(TrainTractionModel.designMaxSpeed(), signedSpeedMs));
         }
+
+        // The law owns the record of the lever it just acted on, which is what lets the capture
+        // above fire exactly once per move INTO cruise. Written after the accelerate handover so
+        // the handover's own setpoint is not re-captured from the current speed next tick.
+        st.leverAtLastLaw = st.gear;
 
         // Bring a stop to rest instead of through it.
         //
