@@ -147,6 +147,16 @@ public record SetTrainGearPacket(UUID trainId, int gearOrdinal, boolean confirm,
         if (state.emergencyArmed || state.controlsLocked)
             return;
 
+        // A vigilance trip is not a suggestion. Once it fires the brake is the train's, and the driver's
+        // only valid input is the acknowledgement that ends it - otherwise they can simply select another
+        // position and drive out of a brake the device applied. Reported as "the automatic brake after 35 s
+        // can still be changed to another gear".
+        //
+        // Acknowledge is deliberately still accepted here: it runs only at a stand (the branch below checks
+        // the speed), and refusing it would leave the driver with no way out of a tripped train at all.
+        if (state.vigilanceTripped && !confirm)
+            return;
+
         if (confirm) {
             // Acknowledge: reset the vigilance clock to zero. Pressing early therefore
             // resets the full 30 s, not just the warning - there is only one clock.

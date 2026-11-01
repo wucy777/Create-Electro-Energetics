@@ -516,7 +516,10 @@ public class TrainControlHud implements LayeredDraw.Layer {
         int n = Math.max(1, Math.min(20, TrainHudData.carriageCount(train.id)));
         int avail = PANTO_DETAIL_X - 8;
         int gap = n > 1 ? 1 : 0;
-        int carW = Math.max(4, (avail - gap * (n - 1)) / n);
+        // Five pixels is the narrowest a carriage still reads as a carriage rather than as a dash; at four
+        // it looked like tick marks. With more than ten carriages the strip has to give, so the floor drops
+        // back to four rather than letting the row overflow the panel.
+        int carW = Math.max(n > 10 ? 4 : 5, (avail - gap * (n - 1)) / n);
 
         int selected = Math.min(TrainControlInput.selectedPantograph(),
                 Math.max(0, pantographs.size() - 1));
@@ -532,13 +535,21 @@ public class TrainControlHud implements LayeredDraw.Layer {
             int cx = x + slot * (carW + gap);
             int colour = i == selectedCarriage ? TEXT : TEXT_DIM;
 
-            graphics.fill(cx + 1, y + 2, cx + carW - 1, y + 5, colour);
-            // A nose only on the outside of the two end carriages. The cars between them are flat, as
-            // they are on the real thing.
-            if (i == 0)
-                graphics.fill(cx, y + 3, cx + 1, y + 4, colour);
-            if (i == n - 1)
-                graphics.fill(cx + carW - 1, y + 3, cx + carW, y + 4, colour);
+            // Body: four pixels tall, inset a pixel at each end, so the silhouette is a carriage rather
+            // than a line of dots.
+            graphics.fill(cx + 1, y + 1, cx + carW - 1, y + 5, colour);
+
+            // Noses. A high-speed set has a long raked nose, and at this size three stepped pixels is the
+            // most that can say so. On the leading carriage (the leftmost slot, always) it slopes down to
+            // the left; the trailing carriage gets a shorter taper so the set reads as double-ended.
+            if (slot == 0) {
+                graphics.fill(cx - 2, y + 3, cx - 1, y + 5, colour);
+                graphics.fill(cx - 1, y + 2, cx + 1, y + 5, colour);
+            }
+            if (slot == n - 1) {
+                graphics.fill(cx + carW - 1, y + 2, cx + carW, y + 5, colour);
+                graphics.fill(cx + carW, y + 3, cx + carW + 1, y + 5, colour);
+            }
             if (i == selectedCarriage)
                 graphics.fill(cx, y + 6, cx + carW, y + 7, colour);
         }
@@ -560,14 +571,16 @@ public class TrainControlHud implements LayeredDraw.Layer {
         // solid head, four pixels tall, under the strip. The old marker was a three-pixel triangle that moved
         // from end to end with the direction of travel, which meant the driver had to work out which way it
         // was pointing before they knew which way the train was facing.
-        int arrowX = x;
+        // A left arrow, drawn with a five-tall head and a one-pixel shaft: the previous three-pixel marker
+        // was small enough to read as a smudge. It is always left and always in the same place, because the
+        // strip above it is always drawn leading-end-left.
+        int arrowX = x - 2;
         int arrowY = y + 8;
-        int arrowLen = Math.max(6, n * (carW + gap) - gap);
-        graphics.fill(arrowX + 4, arrowY + 1, arrowX + arrowLen, arrowY + 2, TEXT_DIM);
-        graphics.fill(arrowX + 3, arrowY, arrowX + 4, arrowY + 3, TEXT_DIM);
-        graphics.fill(arrowX + 2, arrowY - 1, arrowX + 3, arrowY + 1, TEXT_DIM);
-        graphics.fill(arrowX + 2, arrowY + 2, arrowX + 3, arrowY + 4, TEXT_DIM);
-        graphics.fill(arrowX, arrowY + 1, arrowX + 2, arrowY + 2, TEXT_DIM);
+        int arrowLen = Math.max(8, n * (carW + gap) - gap + 2);
+        graphics.fill(arrowX + 5, arrowY + 2, arrowX + arrowLen, arrowY + 3, TEXT_DIM);   // shaft
+        graphics.fill(arrowX + 3, arrowY + 1, arrowX + 5, arrowY + 4, TEXT_DIM);          // head body
+        graphics.fill(arrowX + 1, arrowY, arrowX + 3, arrowY + 5, TEXT_DIM);              // head ramp
+        graphics.fill(arrowX, arrowY + 1, arrowX + 1, arrowY + 4, TEXT_DIM);              // tip
     }
 
     /**
