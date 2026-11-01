@@ -75,11 +75,10 @@ public final class RiderSeatGate {
      * its train speed - the mod would cap a train below what Create itself allows, or fail to cap one above.
      */
     public static double createCeilingBps() {
-        try {
-            return com.simibubi.create.infrastructure.config.AllConfigs.server().trains.trainTopSpeed.get();
-        } catch (Throwable ignored) {
-            return 28d;                                  // Create not loaded: the old figure
-        }
+        // Hardcoded at the operator's request. Reading Create's own config was the right instinct but makes
+        // the limit move under a pack update, and this figure is part of the train's behaviour here, not a
+        // server preference.
+        return 28d;
     }
 
     /** The same figure in Blocks per tick, which is what {@code maxSpeed()} returns. */

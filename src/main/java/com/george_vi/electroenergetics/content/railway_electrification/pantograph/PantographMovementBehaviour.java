@@ -330,9 +330,13 @@ public class PantographMovementBehaviour implements MovementBehaviour {
                     .useLevelLight(context.world, matrices.getWorld())
                     .renderInto(ms, buffer.getBuffer(RenderType.cutout()));
 
+            // The collector bar is stretched on the train's copy as well. The block renderer had this and this
+            // one did not, so an assembled train still showed the original length while the placed block showed
+            // the widened one - the same machine looking different depending on whether it had been mounted.
             CachedBuffers.partial(CEEPartialModels.PANTOGRAPH_CONNECTING_SURFACE_DOUBLE, state)
                     .transform(matrices.getModel())
-                    .center().rotateYDegrees(yRot).uncenter()
+                    .center().rotateYDegrees(yRot)
+                    .scaleX(com.george_vi.electroenergetics.CEEPantographTypes.CONTACT_MODEL_SCALE).uncenter()
                     .translate(0, 0.5625 + a + armHingePosY, 1)
                     .light(light)
                     .useLevelLight(context.world, matrices.getWorld())
@@ -412,7 +416,8 @@ public class PantographMovementBehaviour implements MovementBehaviour {
             float upperArmRadians = (89 - extensionState * 50) * Mth.DEG_TO_RAD;
             CachedBuffers.partial(CEEPartialModels.PANTOGRAPH_CONNECTING_SURFACE, state)
                     .transform(matrices.getModel())
-                    .center().rotateYDegrees(yRot).uncenter()
+                    .center().rotateYDegrees(yRot)
+                    .scaleX(com.george_vi.electroenergetics.CEEPantographTypes.CONTACT_MODEL_SCALE).uncenter()
                     .translate(0, 0.375, 0.8125)
                     .translate(0, armHingePosY, armHingePosX)
                     .translate(0, Mth.cos(upperArmRadians) * 1.9, Mth.sin(upperArmRadians) * 1.9)
