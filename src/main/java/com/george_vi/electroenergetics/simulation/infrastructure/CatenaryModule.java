@@ -189,7 +189,15 @@ public class CatenaryModule {
                     // on `active`.
                     boolean raised = pantograph.active;
 
-                    Vec3 pantographPos = Vec3.atLowerCornerOf(pantograph.rotatedPos).add((pantograph.facingForward ? 1 : -1) * pantograph.type.backOffset, pantograph.type.reach / 2 + pantograph.type.topOffset, 0);
+                    // The contact point is the strip's CENTRE, with no forward/back offset. That offset used to shift
+                    // the test point half a block along the direction the arm faces, so two identical arms mounted
+                    // facing opposite ways produced test points a whole block apart - and one of them fell out of
+                    // the wire's reach while the other did not. Reported as "two identical single arms at the same
+                    // height, same track and same catenary: one raises, the other says no catenary in reach".
+                    //
+                    // Symmetry matters more here than the half block of end-of-span precision the offset bought:
+                    // the same machine installed the same way must behave the same, whichever way it was rotated.
+                    Vec3 pantographPos = Vec3.atLowerCornerOf(pantograph.rotatedPos).add(0, pantograph.type.reach / 2 + pantograph.type.topOffset, 0);
 
                     pantographPos = VecHelper.rotate(pantographPos, -pitch, Direction.Axis.Z);
                     pantographPos = VecHelper.rotate(pantographPos, -yaw + 180, Direction.Axis.Y);
