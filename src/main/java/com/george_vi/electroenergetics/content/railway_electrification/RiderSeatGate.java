@@ -67,11 +67,27 @@ public final class RiderSeatGate {
     private RiderSeatGate() {}
 
 
-    /** Create's own ceiling, in Blocks per second. Above this its rider model does not hold. */
-    public static final double CREATE_CEILING_BPS = 28d;
+    /**
+     * Create's own top speed for a player-driven train, in Blocks per second.
+     *
+     * <p>Read from Create's own config rather than hardcoded: 28 was simply whatever that config happened to
+     * say when this was written, and hardcoding it meant the two could disagree the moment the pack changed
+     * its train speed - the mod would cap a train below what Create itself allows, or fail to cap one above.
+     */
+    public static double createCeilingBps() {
+        try {
+            return com.simibubi.create.infrastructure.config.AllConfigs.server().trains.trainTopSpeed.get();
+        } catch (Throwable ignored) {
+            return 28d;                                  // Create not loaded: the old figure
+        }
+    }
 
     /** The same figure in Blocks per tick, which is what {@code maxSpeed()} returns. */
-    public static final double CREATE_CEILING_BPT = CREATE_CEILING_BPS / 20d;
+    public static double createCeilingBpt() {
+        return createCeilingBps() / 20d;
+    }
+
+    /** The same figure in Blocks per tick, which is what {@code maxSpeed()} returns. */
 
     private static final Map<UUID, Boolean> CACHE = new HashMap<>();
     private static long cacheStamp = -1L;
@@ -119,7 +135,7 @@ public final class RiderSeatGate {
      * have to exceed its own ceiling to arm anything.
      */
     public static boolean atOrAboveCeiling(Train train) {
-        return train != null && Math.abs(train.speed) >= CREATE_CEILING_BPT - 1.0e-4d;
+        return train != null && Math.abs(train.speed) >= createCeilingBpt() - 1.0e-4d;
     }
 
     /** Whether anybody aboard is standing, on the roof included. */
@@ -791,7 +807,7 @@ public final class RiderSeatGate {
      * apply.
      */
     public static float clamp(Train train, float blocksPerTick) {
-        if (blocksPerTick <= (float) CREATE_CEILING_BPT)
+        if (blocksPerTick <= (float) createCeilingBpt())
             return blocksPerTick;
 
         // Which side is asking matters here. The server owns the flag; the client is told it through the
@@ -807,6 +823,6 @@ public final class RiderSeatGate {
                     .getElectricTrainData();
             overloaded = data.driver.overloaded;
         }
-        return overloaded ? (float) CREATE_CEILING_BPT : blocksPerTick;
+        return overloaded ? (float) createCeilingBpt() : blocksPerTick;
     }
 }

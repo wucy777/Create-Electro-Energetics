@@ -48,7 +48,11 @@ public class CEEPantographTypes {
     // drew power and the bar visibly floated under nothing. Drawing to the full tolerance fixes that but
     // makes the bar five Blocks wide, which is not what a pantograph looks like. Drawing to 2.0 leaves
     // the half-Block of curve margin as the only gap, which is small enough not to read as a gap.
-    public static final float CONTACT_DRAW_HALF_WIDTH = 2.0f;
+    //
+    // 1.5625 is the model's own 17/16 plus half a Block per side. Widening it to the full 2.5 tolerance was
+    // tried and rejected: the strip nearly doubled and stopped looking like part of the machine. Half a Block
+    // is the most this shape takes before it stops reading as a collector bar.
+    public static final float CONTACT_DRAW_HALF_WIDTH = 1.5625f;
 
     // The collector bar in connecting_surface.json runs from x=-9 to x=25 model units about a centre at
     // x=8, so its half-length is 17/16 Blocks. The renderer scales by this ratio so the drawn bar matches

@@ -345,7 +345,7 @@ public class GameEvents {
                     // against it. Braking here would slow the train every time it reached the speed it is
                     // allowed to do, which is what it used to do.
                     double speed = Math.abs(train.speed);
-                    if (speed > RiderSeatGate.CREATE_CEILING_BPT + 1.0e-4d) {
+                    if (speed > RiderSeatGate.createCeilingBpt() + 1.0e-4d) {
                         // Above the ceiling: brake, and REMEMBER that the brake is ours. Reaching the ceiling
                         // has to release it - otherwise the train brakes past 28 and stops, which is a
                         // stop, not a speed limit.
