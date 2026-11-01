@@ -511,8 +511,14 @@ public class TrainControlHud implements LayeredDraw.Layer {
                 Math.max(0, pantographs.size() - 1));
         int selectedCarriage = pantographs.isEmpty() ? -1 : pantographs.get(selected).carriageIndex();
 
-        for (int i = 0; i < n; i++) {
-            int cx = x + i * (carW + gap);
+        // The strip is drawn so that the leading end is ALWAYS on the left, whatever the train is doing -
+        // the owner's rule. A multiple unit has a cab at both ends, so "which end leads" changes with the
+        // direction of travel and cannot be inferred from the model; it has to be drawn. When the train is
+        // running the other way the whole strip is mirrored, carriages and pantographs together.
+        boolean leadingEndIsFirst = train.speed >= 0;
+        for (int slot = 0; slot < n; slot++) {
+            int i = leadingEndIsFirst ? slot : n - 1 - slot;
+            int cx = x + slot * (carW + gap);
             int colour = i == selectedCarriage ? TEXT : TEXT_DIM;
 
             graphics.fill(cx + 1, y + 2, cx + carW - 1, y + 5, colour);
@@ -531,26 +537,26 @@ public class TrainControlHud implements LayeredDraw.Layer {
         // detail line says the same thing in words.
         for (var entry : pantographs) {
             int i = Math.max(0, Math.min(n - 1, entry.carriageIndex()));
-            int cx = x + i * (carW + gap);
+            int slot = leadingEndIsFirst ? i : n - 1 - i;
+            int cx = x + slot * (carW + gap);
             int mx = cx + carW / 2;
             int colour = entry.autoRaise() ? DANGER : (entry.active() ? TEXT : TEXT_DIM);
             graphics.fill(mx - 2, y, mx + 3, y + 1, colour);
             graphics.fill(mx, y + 1, mx + 1, y + 2, colour);
         }
 
-        // Direction of travel. The strip is in consist order, so this is what says which end leads:
-        // a filled triangle pointing the way the train is going.
-        boolean right = train.speed >= 0;
-        int ax = right ? x + n * (carW + gap) - gap - 2 : x;
-        if (right) {
-            graphics.fill(ax, y + 7, ax + 1, y + 8, TEXT_DIM);
-            graphics.fill(ax + 1, y + 8, ax + 2, y + 9, TEXT_DIM);
-            graphics.fill(ax, y + 9, ax + 1, y + 10, TEXT_DIM);
-        } else {
-            graphics.fill(ax + 1, y + 7, ax + 2, y + 8, TEXT_DIM);
-            graphics.fill(ax, y + 8, ax + 1, y + 9, TEXT_DIM);
-            graphics.fill(ax + 1, y + 9, ax + 2, y + 10, TEXT_DIM);
-        }
+        // Forward is left, so the arrow is always a left arrow and always in the same place: a shaft with a
+        // solid head, four pixels tall, under the strip. The old marker was a three-pixel triangle that moved
+        // from end to end with the direction of travel, which meant the driver had to work out which way it
+        // was pointing before they knew which way the train was facing.
+        int arrowX = x;
+        int arrowY = y + 8;
+        int arrowLen = Math.max(6, n * (carW + gap) - gap);
+        graphics.fill(arrowX + 4, arrowY + 1, arrowX + arrowLen, arrowY + 2, TEXT_DIM);
+        graphics.fill(arrowX + 3, arrowY, arrowX + 4, arrowY + 3, TEXT_DIM);
+        graphics.fill(arrowX + 2, arrowY - 1, arrowX + 3, arrowY + 1, TEXT_DIM);
+        graphics.fill(arrowX + 2, arrowY + 2, arrowX + 3, arrowY + 4, TEXT_DIM);
+        graphics.fill(arrowX, arrowY + 1, arrowX + 2, arrowY + 2, TEXT_DIM);
     }
 
     /**
