@@ -74,7 +74,52 @@ public final class TrainHudData {
 
     private static final Map<UUID, GearState> GEARS = new ConcurrentHashMap<>();
 
+    /**
+     * Who owns each train's controls, as the server last told us.
+     *
+     * <p>An {@link Optional} in the map rather than a plain UUID because "the server has
+     * not said" and "the server says nobody" are different states, and the difference is
+     * load-bearing: a client that treated an absent entry as "free" would show a read-only
+     * cab as interactive for the first tick after the panel opens. Absent means the client
+     * has not been told yet; present-with-empty means the train is genuinely free.
+     *
+     * <p>Fed by {@code DriverClaimPacket} on change only - see that class for why it does
+     * not ride the gauge broadcast. This is the client's copy of the one-driver rule: the
+     * cab's keys are gated on it, and the panel uses it to say "read only" instead of
+     * pretending a denied viewer can drive.
+     */
+    private static final Map<UUID, java.util.Optional<UUID>> DRIVER_CLAIMS =
+            new ConcurrentHashMap<>();
+
     private TrainHudData() {}
+
+    /** Record the server's answer to "who drives this train". */
+    public static void updateDriverClaim(UUID trainId, UUID driverId) {
+        DRIVER_CLAIMS.put(trainId, java.util.Optional.ofNullable(driverId));
+    }
+
+    /** Whether the server has stated who (if anybody) owns this train's controls. */
+    public static boolean hasDriverClaim(UUID trainId) {
+        return DRIVER_CLAIMS.containsKey(trainId);
+    }
+
+    /**
+     * The player who owns this train's controls, or {@code null}.
+     *
+     * <p>{@code null} also when the server has not said yet. Callers that need the
+     * difference ask {@link #hasDriverClaim}; the ones that just want to know whether this
+     * client may drive can use {@link #isDriver} instead.
+     */
+    public static UUID driverClaim(UUID trainId) {
+        return DRIVER_CLAIMS.getOrDefault(trainId, java.util.Optional.empty()).orElse(null);
+    }
+
+    /** Whether the given player owns this train's controls, as far as this client knows. */
+    public static boolean isDriver(UUID trainId, UUID playerId) {
+        if (playerId == null)
+            return false;
+        return playerId.equals(driverClaim(trainId));
+    }
 
     public static void update(UUID trainId, float maxSpeed, float power, float voltage,
                               double grade, boolean powered, int carriages, int motorCars,
@@ -253,6 +298,7 @@ public final class TrainHudData {
     public static void retain(java.util.function.Predicate<UUID> keep) {
         SAMPLES.keySet().removeIf(id -> !keep.test(id));
         GEARS.keySet().removeIf(id -> !keep.test(id));
+        DRIVER_CLAIMS.keySet().removeIf(id -> !keep.test(id));
         PANTOGRAPHS.keySet().removeIf(id -> !keep.test(id));
         PANTOGRAPH_LOCKED.removeIf(id -> !keep.test(id));
         AUTO_RAISE.removeIf(id -> !keep.test(id));

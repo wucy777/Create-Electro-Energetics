@@ -8,7 +8,9 @@
   "plugin": "com.george_vi.electroenergetics.CEEMixinPlugin",
   "client": [
     "CarriageSoundsMixin",
+    "ControlsHandlerGateMixin",
     "ControlsMovementBehaviourMixin",
+    "DriverClaimClientMixin",
     "HumanoidModelMixin",
     "ItemInHandRendererMixin",
     "KeyboardHandlerMixin",
@@ -33,6 +35,8 @@
     "CarriageContraptionMixin",
     "CarriageMixin",
     "ComparatorBlockMixin",
+    "ControlsInputGateMixin",
+    "DriverClaimServerMixin",
     "FluidPropagatorMixin",
     "LevelChunkMixin",
     "LivingEntityMixin",
@@ -41,7 +45,9 @@
     "SchematicPrinterMixin",
     "StructureTemplateMixin",
     "SubLevelAssemblyHelperMixin",
+    "TrainHUDUpdateAccessor",
     "TrainMixin",
+    "TrainThrottleGateMixin",
     "compat.ElectricFanBlockEntityMixin"
   ]
 }

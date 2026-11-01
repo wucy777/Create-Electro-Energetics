@@ -73,6 +73,13 @@ public class TrainHUDMixin {
         // suddenly grow a working throttle wheel because its supply dropped, and
         // then lose it again when the pantograph picks up. The same shared test the
         // lever panel uses, so the two can never disagree about which train this is.
+        //
+        // A non-driver is NOT tested here, even though the wheel is a control on a train Create
+        // is driving. The client cannot tell a handed-over electric train from a rail-shoe metro
+        // (both report CREATE, and the pantograph list that would distinguish them only arrives
+        // after a claim), and suppressing the wheel on a metro would take away upstream's throttle
+        // from a train this feature does not own. The authoritative refusal is server-side
+        // (TrainThrottleGateMixin), where "is this a train we gate" is knowable exactly.
         if (TrainHudData.leverDriven(train.id))
             cir.setReturnValue(false);
     }

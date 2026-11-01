@@ -270,17 +270,28 @@ public class TrainControlHud implements LayeredDraw.Layer {
         drawSmall(graphics, font, hintText(TrainHudData.pantographs(train.id).size()), x + 5,
                 TrainControlLayout.footerRowY(y, TrainControlLayout.FOOTER_ROW_HINTS), TEXT_DIM);
 
-        // The lock outranks everything on the status line. While the emergency brake is running -
+        // The one-driver rule comes before everything on the status line, including the lock.
+        // A player who is not this train's driver has the panel open but no controls at all:
+        // their keys are not sent, and the server would refuse them if they were. Without
+        // this line the panel looks exactly like a driver's, so they press keys, nothing
+        // happens, and the cab reads as broken. Read-only outranks the lock because it is
+        // the state that stays true - the lock lifts by itself, the missing controls do not.
+        String readOnly = DriverPanelClient.readOnlyStatus(train.id);
+
+        // The lock outranks the ordinary status text. While the emergency brake is running -
         // or until the next station after it - the whole panel is inert, and that is the single
         // most important thing to tell the driver: every key they press will do nothing, and
         // without being told why they will read the cab as broken.
-        String status = TrainHudData.controlsLocked(train.id)
-                ? tr("electroenergetics.train.status.locked")
-                : statusText(train, gear);
+        String status = readOnly != null
+                ? readOnly
+                : (TrainHudData.controlsLocked(train.id)
+                        ? tr("electroenergetics.train.status.locked")
+                        : statusText(train, gear));
         if (!status.isEmpty())
             drawSmall(graphics, font, status, x + 5,
                     TrainControlLayout.footerRowY(y, TrainControlLayout.FOOTER_ROW_STATUS),
-                    TrainHudData.controlsLocked(train.id) ? DANGER : statusColor(train, gear));
+                    readOnly != null ? WARN
+                            : (TrainHudData.controlsLocked(train.id) ? DANGER : statusColor(train, gear)));
 
         // Pantographs, over the status line: which one the keys will move, and whether each is up.
         //

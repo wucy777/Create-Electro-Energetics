@@ -1,6 +1,7 @@
 package com.george_vi.electroenergetics.content.railway_electrification;
 
 import com.simibubi.create.content.contraptions.Contraption;
+import com.simibubi.create.content.contraptions.actors.trainControls.ControlsBlock;
 import com.simibubi.create.content.trains.entity.Carriage;
 import com.simibubi.create.content.trains.entity.CarriageContraptionEntity;
 import com.simibubi.create.content.trains.entity.Train;
@@ -339,6 +340,11 @@ public final class RiderSeatGate {
             return false;
         if (player.level().isClientSide())
             return false;
+        // This dismount is the gate's own, moving a player out of the driver's seat. See
+        // FORCED_DISMOUNTS: the lock is about a player choosing to leave a fast train, not about a
+        // forced change of seat inside it.
+        if (FORCED_DISMOUNTS.contains(player.getUUID()))
+            return false;
 
         com.simibubi.create.content.trains.entity.CarriageContraptionEntity carriage = null;
         if (player.getVehicle()
@@ -495,10 +501,258 @@ public final class RiderSeatGate {
         return best;
     }
 
+    /**
+     * One seat, named by the carriage it is in and its index in that carriage's seat list.
+     *
+     * <p>The pair rather than a block position, because a seat index is only meaningful inside the
+     * contraption that owns it: the same index in two carriages is two different seats, and the
+     * contraption that carries the seat is also the one that has to be asked to seat somebody in it.
+     */
+    public record SeatRef(int carriageIndex, int seatIndex) {}
+
+    /**
+     * The seats held for a driver right now, as (carriage, seat) pairs.
+     *
+     * <h2>The rule</h2>
+     *
+     * <p>Every controls block in a carriage has a DRIVER'S SEAT: the seat nearest to it, measured in
+     * the carriage's own local coordinates. Local deliberately - the desk and the seats both come out
+     * of the contraption's own block map, so they share one origin and one rotation, and this file
+     * already does every other comparison that way. A world-space distance would be wrong for any
+     * carriage that is not axis-aligned.
+     *
+     * <p>With nobody driving, EVERY desk's seat is held empty: the next driver will need one, and the
+     * operator's ruling for a unit with a cab at each end is that both ends keep a driver's seat.
+     * With a driver, only the seat of the desk they actually claimed is held; the other cab's seat is
+     * an ordinary seat again, which is the same ruling read the other way.
+     *
+     * <p>Held seats are not offered to anybody in {@link #trySeatAll}: they are not legal free
+     * positions, so a train whose only empty seats are driver's seats is over capacity exactly as if
+     * those seats did not exist. That has a cost - a train with nobody at the controls carries fewer
+     * passengers than it has seats - and it is the intended one: the seat has to be there when
+     * somebody takes the controls, including at speed.
+     *
+     * <p>Only a train this mod's driving rules own has driver's seats. A fuel train, a motors-only
+     * set and a rail-shoe metro keep upstream's seating, where every seat is an ordinary seat.
+     */
+    public static Set<SeatRef> reservedDriverSeats(Train train) {
+        Set<SeatRef> held = new HashSet<>();
+        if (train == null || train.carriages == null || !DriverAuthority.appliesTo(train))
+            return held;
+
+        com.george_vi.electroenergetics.content.railway_electrification.TrainDriverState driverState =
+                ((com.george_vi.electroenergetics.mixin_interfaces.ICEETrainExtension) train)
+                        .getElectricTrainData().driver;
+        UUID claimed = driverState.claimOwner;
+        int claimedCarriage = driverState.driverCarriage;
+        BlockPos claimedDesk = driverState.driverDesk;
+
+        for (int carriageIndex = 0; carriageIndex < train.carriages.size(); carriageIndex++) {
+            Carriage carriage = train.carriages.get(carriageIndex);
+            CarriageContraptionEntity entity = carriage.anyAvailableEntity();
+            if (entity == null || entity.level().isClientSide())
+                continue;
+            Contraption contraption = entity.getContraption();
+            if (contraption == null)
+                continue;
+            List<BlockPos> seats = contraption.getSeats();
+            if (seats.isEmpty())
+                continue;
+            for (BlockPos desk : controlDesks(contraption)) {
+                // With a driver, the ONLY held seat is the one at the desk they claimed. The other
+                // cab's seat goes back to being an ordinary seat.
+                if (claimed != null
+                        && !(carriageIndex == claimedCarriage && desk.equals(claimedDesk)))
+                    continue;
+                int seat = nearestSeat(seats, desk);
+                if (seat >= 0)
+                    held.add(new SeatRef(carriageIndex, seat));
+            }
+        }
+        return held;
+    }
+
+    /** Every controls block in this contraption, in its own local coordinates. */
+    private static List<BlockPos> controlDesks(Contraption contraption) {
+        List<BlockPos> desks = new ArrayList<>();
+        var blocks = contraption.getBlocks();
+        if (blocks == null)
+            return desks;
+        for (var entry : blocks.entrySet()) {
+            if (entry.getValue() != null && entry.getValue().state().getBlock() instanceof ControlsBlock)
+                desks.add(entry.getKey());
+        }
+        return desks;
+    }
+
+    /**
+     * The index of the seat nearest to a control desk, in the carriage's own coordinates, or -1.
+     *
+     * <p>Local, for the same reason {@link #isOnContraption} is: the contraption's block map and its
+     * seat list share a frame, and mixing that frame with world coordinates is how this file used to
+     * pick seats that were nowhere near the player.
+     */
+    private static int nearestSeat(List<BlockPos> seats, BlockPos desk) {
+        Vec3 centre = Vec3.atCenterOf(desk);
+        int best = -1;
+        double bestDistance = Double.MAX_VALUE;
+        for (int i = 0; i < seats.size(); i++) {
+            double d = Vec3.atCenterOf(seats.get(i)).distanceToSqr(centre);
+            if (d < bestDistance) {
+                bestDistance = d;
+                best = i;
+            }
+        }
+        return best;
+    }
+
+    /**
+     * Seats the claimed driver in their held seat, moving a non-driver occupant out first.
+     *
+     * <p>Runs before the general pass, and only for a driver who is ABOARD and standing. A driver who
+     * already has a seat is left where they are - the operator's rule gives them priority "如果没座",
+     * not a compulsory seat - and a claimed driver who is not on the train is never moved onto it,
+     * because a claim can legitimately be held from the platform within reach of the desk.
+     *
+     * <p>The eviction is Create's own operation: {@code stopRiding()} on the occupant, whose
+     * {@code removePassenger} override drops the seat-mapping entry, syncs it to clients and puts the
+     * player where the seat is. Writing the seat map directly here would move the mapping without the
+     * passenger list, and the two would then disagree on both sides.
+     *
+     * <p>The evicted player is not lost: they are a standing player from that moment, so the caller
+     * re-reads {@code unseatedPlayers} and they compete for the remaining seats in this same pass -
+     * the rule is "按无座位参与本轮分配", and if nothing is left they count as over capacity.
+     *
+     * @return how many players this seated (0 or 1)
+     */
+    private static int seatClaimedDriver(Train train, Set<SeatRef> held, List<Player> unseated) {
+        if (held.isEmpty() || unseated.isEmpty())
+            return 0;
+        com.george_vi.electroenergetics.content.railway_electrification.TrainDriverState driverState =
+                ((com.george_vi.electroenergetics.mixin_interfaces.ICEETrainExtension) train)
+                        .getElectricTrainData().driver;
+        UUID claimed = driverState.claimOwner;
+        if (claimed == null)
+            return 0;   // nobody drives: the seats stay held empty for whoever takes the controls next
+
+        Player driver = null;
+        for (Player candidate : unseated) {
+            if (candidate.getUUID().equals(claimed)) {
+                driver = candidate;
+                break;
+            }
+        }
+        if (driver == null)
+            return 0;   // the driver is not standing aboard - nothing to seat
+
+        for (SeatRef seat : held) {
+            CarriageContraptionEntity entity = carriageEntity(train, seat.carriageIndex());
+            if (entity == null || entity.level().isClientSide())
+                continue;
+            Contraption contraption = entity.getContraption();
+            if (contraption == null)
+                continue;
+            List<BlockPos> seats = contraption.getSeats();
+            if (seat.seatIndex() < 0 || seat.seatIndex() >= seats.size())
+                continue;
+
+            UUID occupant = occupantOf(contraption, seat.seatIndex());
+            if (occupant != null && !occupant.equals(claimed) && !evict(entity, contraption, occupant))
+                continue;   // could not clear it: better to leave the driver standing than to claim a seat we do not hold
+
+            entity.addSittingPassenger(driver, seat.seatIndex());
+            if (!contraption.getSeatMapping().containsKey(claimed))
+                continue;   // Create refused (should not happen once the seat is clear); leave the driver standing
+
+            if (driver instanceof net.minecraft.server.level.ServerPlayer serverPlayer)
+                net.createmod.catnip.platform.CatnipServices.NETWORK.sendToClient(
+                        serverPlayer, new SeatAssignedPacket(seat.carriageIndex(), seat.seatIndex()));
+            SeatIntentStore.clear(claimed);
+            return 1;
+        }
+        return 0;
+    }
+
+    /** The player sitting in this seat, or null when it is free. */
+    private static UUID occupantOf(Contraption contraption, int seatIndex) {
+        for (var entry : contraption.getSeatMapping().entrySet()) {
+            if (entry.getValue() != null && entry.getValue() == seatIndex)
+                return entry.getKey();
+        }
+        return null;
+    }
+
+    /**
+     * Force a seated entity out of this carriage, and make sure the seat is usable afterwards.
+     *
+     * <p>{@code stopRiding()} rather than editing the seat mapping directly: Create's
+     * {@code removePassenger} override removes the mapping, sends the seat sync and drops the entity
+     * where the seat is. The direct write is only the fallback for a mapping entry that names
+     * somebody who is no longer a passenger at all - the stale-claim case {@link #pruneStaleSeats}
+     * exists for, which would otherwise stop the driver being seated while the seat looked free.
+     *
+     * @return whether the seat is now free
+     */
+    private static boolean evict(CarriageContraptionEntity entity, Contraption contraption,
+                                 UUID occupantId) {
+        Entity occupant = null;
+        for (Entity passenger : entity.getPassengers()) {
+            if (passenger.getUUID().equals(occupantId)) {
+                occupant = passenger;
+                break;
+            }
+        }
+        if (occupant == null) {
+            for (Entity passenger : entity.getIndirectPassengers()) {
+                if (passenger.getUUID().equals(occupantId)) {
+                    occupant = passenger;
+                    break;
+                }
+            }
+        }
+        if (occupant != null) {
+            FORCED_DISMOUNTS.add(occupantId);
+            try {
+                occupant.stopRiding();
+            } finally {
+                FORCED_DISMOUNTS.remove(occupantId);
+            }
+        }
+
+        var mapping = contraption.getSeatMapping();
+        if (mapping.containsKey(occupantId)) {
+            mapping.remove(occupantId);
+            try {
+                contraption.setSeatMapping(mapping);
+            } catch (Throwable ignored) {
+                // A copy we cannot write back is not worth a crash; report the failure instead of
+                // seating the driver into a seat somebody else still holds.
+            }
+        }
+        return !contraption.getSeatMapping().containsKey(occupantId);
+    }
+
+    /** The present entity of one carriage, or null when it is not loaded. */
+    private static CarriageContraptionEntity carriageEntity(Train train, int carriageIndex) {
+        if (carriageIndex < 0 || carriageIndex >= train.carriages.size())
+            return null;
+        return train.carriages.get(carriageIndex).anyAvailableEntity();
+    }
+
     /** Ticks the gate waits for a client's seat answer before using its own frame. */
     public static final int SEAT_INTENT_GRACE_TICKS = 10;
 
     /**
+     * Players the gate itself is moving out of a seat, so the speed dismount lock must let them go.
+     *
+     * <p>The lock exists to stop a player CHOOSING to get off a fast train. Evicting somebody from the
+     * driver's seat is not that: it is a forced change of seat inside the train, and the whole point
+     * of the ceiling rule is that they are then reseated (or counted as over capacity) in the same
+     * pass. Leaving the lock in the way would make the rule unreachable at exactly the speed it
+     * exists for - 28 Blocks/second and above - so the eviction marks the player for the duration of
+     * the one {@code stopRiding()} call that does it. Server thread only, and always removed.
+     */
+    private static final Set<UUID> FORCED_DISMOUNTS = new HashSet<>();    /**
      * Players whose seat is being restored after a relogin, with a deadline tick. A seated
      * player who logs out keeps their claim, and the restore has to survive the gap between
      * PlayerLoggedInEvent (too early: Create has not loaded its trains yet) and the first tick
@@ -623,9 +877,22 @@ public final class RiderSeatGate {
     }
 
     public static int trySeatAll(Train train, long serverTick) {
+        // The driver has first call on their own seat, before anybody else is considered, and a
+        // player sitting in it is moved out. That has to happen BEFORE the unseated list is read
+        // again: from that moment the evicted player is a standing player, and the rule is that they
+        // take part in this same pass as an unseated one ("按无座位参与本轮分配").
+        Set<SeatRef> held = reservedDriverSeats(train);
         List<Player> unseated = unseatedPlayers(train);
+        int seatedDriver = 0;
+        if (!held.isEmpty() && !unseated.isEmpty()) {
+            seatedDriver = seatClaimedDriver(train, held, unseated);
+            if (seatedDriver > 0) {
+                CACHE.remove(train.id);       // the seat mapping changed inside this tick
+                unseated = unseatedPlayers(train);   // the evicted player is standing now
+            }
+        }
         if (unseated.isEmpty())
-            return 0;
+            return seatedDriver;
 
         record Candidate(int carriage, CarriageContraptionEntity entity, int index, BlockPos local) {}
 
@@ -646,6 +913,10 @@ public final class RiderSeatGate {
             for (int i = 0; i < seats.size(); i++) {
                 if (taken.contains(i))
                     continue;
+                // Held for a driver. Not a legal free position for anybody else: it reduces the
+                // train's capacity rather than being handed out - see reservedDriverSeats.
+                if (held.contains(new SeatRef(carriageIndex, i)))
+                    continue;
                 free.add(new Candidate(carriageIndex, entity, i, seats.get(i)));
             }
         }
@@ -658,7 +929,7 @@ public final class RiderSeatGate {
 
         String seatedMapHint = "";   // SEATDIAG
         String aboardHint = "";      // SEATDIAG
-        int seated = 0;
+        int seatedHere = 0;
         for (Player player : unseated) {
             Candidate best = null;
             double bestDistance = Double.MAX_VALUE;
@@ -792,10 +1063,10 @@ public final class RiderSeatGate {
                 net.createmod.catnip.platform.CatnipServices.NETWORK.sendToClient(
                         serverPlayer, new SeatAssignedPacket(best.carriage(), best.index()));
             SeatIntentStore.clear(player.getUUID());
-            seated++;
+            seatedHere++;
         }
         CACHE.remove(train.id);
-        return seated;
+        return seatedDriver + seatedHere;
     }
 
     /**

@@ -35,6 +35,7 @@ import com.george_vi.electroenergetics.simulation.infrastructure.InWorldNodeData
 import com.george_vi.electroenergetics.simulation.infrastructure.InfrastructureSavedData;
 import com.simibubi.create.AllSoundEvents;
 import com.george_vi.electroenergetics.content.railway_electrification.ElectricTrainData;
+import com.george_vi.electroenergetics.content.railway_electrification.DriverAuthority;
 import com.george_vi.electroenergetics.content.railway_electrification.TrainDriverState;
 import com.george_vi.electroenergetics.content.railway_electrification.RiderSeatGate;
 import com.george_vi.electroenergetics.content.railway_electrification.SeatIntentStore;
@@ -113,6 +114,11 @@ public class GameEvents {
         ElectricalPanelClientTicker.tick();
 
         ElectricPropertiesOverlay.INSTANCE.ticks++;
+
+        // Keep the local cab in step with the server's answer to "who drives this train":
+        // repairs Create's synced mirror after a denied prediction, and closes the panel
+        // for everybody when the driver cancels.
+        com.george_vi.electroenergetics.client.DriverPanelClient.tick();
 
         // Read the cab keys once a tick. Does nothing at all unless the player is
         // driving an electric train, so it costs a few field reads when it is not.
@@ -241,18 +247,23 @@ public class GameEvents {
             ElectricTrainData data = ((ICEETrainExtension) train).getElectricTrainData();
             TrainDriverState driver = data.driver;
 
-            // Ask Create who is holding this train's controls, once a tick.
+            // Who is driving this tick.
             //
-            // This replaces a heartbeat set from control(), and the reason matters:
-            // control() is only invoked while the driver is HOLDING A KEY. Create's
-            // keepalive keeps the context alive for a few ticks after the last key
-            // press and then drops it, so a lever-driven train - where the driver
-            // mostly is not pressing anything - would time out and fall back to
-            // Create's controls after a few ticks, which is exactly the bug this
-            // fixes. getControllingPlayer() is set when the player grabs the controls
-            // and cleared only when they let go, so it is the honest signal for "is
-            // somebody driving this train".
-            driver.setDriverPresent(controllingPlayer(train));
+            // For a train this feature gates, the answer comes from the mod's own CLAIM
+            // (DriverAuthority) and not from Create. Create records a controlling player too,
+            // but that record is only a mirror kept for its own W/S path: it is written only
+            // for the claim owner in the first place, and it can be cleared by Create at any
+            // time (ESC, sneak, distance, a derail). The claim is what every permission check
+            // reads, and DriverAuthority decides each tick whether it is still corroborated.
+            //
+            // Every other train - a fuel train, a motor car with no pantograph, a rail-shoe
+            // metro - keeps upstream's behaviour exactly: Create's record IS the driver, as
+            // before.
+            if (DriverAuthority.appliesTo(train)) {
+                DriverAuthority.tickClaim(train, driver, server);
+            } else {
+                driver.setDriverPresent(controllingPlayer(train));
+            }
 
             driver.tickDriverPresence();
 

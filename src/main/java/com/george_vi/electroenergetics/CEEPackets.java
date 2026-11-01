@@ -65,6 +65,8 @@ public enum CEEPackets implements BasePacketPayload.PacketTypeProvider {
             com.george_vi.electroenergetics.content.railway_electrification.pantograph.SetAutoRaisePacket.STREAM_CODEC),
     SYNC_TRAIN_PANTOGRAPHS(com.george_vi.electroenergetics.content.railway_electrification.pantograph.SyncTrainPantographsPacket.class,
             com.george_vi.electroenergetics.content.railway_electrification.pantograph.SyncTrainPantographsPacket.STREAM_CODEC),
+    SYNC_DRIVER_CLAIM(com.george_vi.electroenergetics.content.railway_electrification.DriverClaimPacket.class,
+            com.george_vi.electroenergetics.content.railway_electrification.DriverClaimPacket.STREAM_CODEC),
     ;
 
     private final CatnipPacketRegistry.PacketType<?> type;

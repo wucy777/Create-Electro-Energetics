@@ -49,11 +49,71 @@ public class TrainDriverState {
     public TrainGear gear = TrainGear.BRAKE;
 
     /**
+     * The player who OWNS this train's controls, or {@code null} when the train is free.
+     *
+     * <p>This is the authority for the one-driver rule, and it is written by exactly two
+     * places: {@link #claim} when somebody right-clicks a controls block and the train is
+     * free, and {@link #releaseClaim} on the four documented cancel routes (see
+     * {@link com.george_vi.electroenergetics.content.railway_electrification.DriverAuthority}).
+     * Nothing derives it from Create's own control record: that record is only a MIRROR,
+     * kept so Create's own W/S path keeps working, and a player who is not this owner is
+     * never allowed to become Create's controlling player in the first place.
+     *
+     * <p>A claim is not the same thing as {@link #driverId}. {@code driverId} is "who is
+     * present at the controls this tick", refreshed once a tick from the claim (or from
+     * Create's record on a train this feature does not gate) and allowed to lapse for a
+     * few ticks; this field is "who is ALLOWED to be there", and it changes only when
+     * somebody interacts. Every control packet is checked against this field, so the
+     * moment a driver cancels, their next packet is already refused.
+     */
+    public java.util.UUID claimOwner = null;
+
+    /**
+     * The controls block the claim was taken at, in that carriage's local space, or
+     * {@code null} when there is no claim.
+     *
+     * <p>Recorded because the claim is about a DESK, not just a train: the cancel rule is
+     * "right-click a controls block of this train again", and the automatic release rule is
+     * "the driver is no longer within reach of this desk". Both need the position, and it
+     * is deliberately not re-read from Create - Create stores only the player, and the
+     * block a driver is standing at must not change under them.
+     */
+    public net.minecraft.core.BlockPos driverDesk = null;
+
+    /**
+     * Index into {@code train.carriages} of the carriage holding {@link #driverDesk}, or
+     * {@code -1} when there is no claim.
+     *
+     * <p>Stored as an index because that is how the carriage is named by every other part
+     * of this code (pantograph sync, seat gate), and because the carriage object itself is
+     * not stable across a reassembly - the index is revalidated each tick, and a claim whose
+     * carriage no longer exists is released.
+     */
+    public int driverCarriage = -1;
+
+    /**
+     * Consecutive ticks on which the claim could not be corroborated, so a momentary frame
+     * does not release a driver.
+     *
+     * <p>The checks behind it are: the player is still within reach of the desk, the
+     * claimed carriage still has a present entity, and Create's mirror record still says
+     * this player is at the controls. Any of those can flicker for a tick (a contraption
+     * entity being replaced, a position packet landing late), and dropping the claim on a
+     * flicker would take the controls away from a driver who did nothing wrong. Five ticks
+     * of continuous disagreement is the line; a real cancel (ESC, sneak, walking away)
+     * obviously persists past it.
+     */
+    public int claimInvalidTicks = 0;
+
+    /**
      * The player currently holding this train's controls, or {@code null}.
      *
-     * <p>Set once a tick from Create's own control record, so it is the authority on
-     * who is driving: it is what the lever packet is checked against, and what
-     * decides whether the gear law owns the train's speed at all.
+     * <p>"Holding" in the physical sense: set once a tick, from {@link #claimOwner} on a
+     * train this feature gates (see {@code DriverAuthority.appliesTo}) and from Create's
+     * own control record on any other train. It decides whether the gear law owns the
+     * train's speed at all, and it is what the HUD sync addresses. It is NOT the
+     * permission check - packets are checked against {@link #claimOwner}, which does not
+     * lag a tick.
      */
     public java.util.UUID driverId = null;
 
@@ -66,6 +126,46 @@ public class TrainDriverState {
      * two. A few ticks of grace, and no more.
      */
     public int driverTicks = 0;
+
+    /**
+     * Take the controls of this train, at the desk the player right-clicked.
+     *
+     * <p>Callers are the server-side controls-block interaction. The claim and the
+     * driver presence are set together, so a packet arriving in the same tick as the
+     * right-click already sees the new owner. Nothing here touches Create's record: the
+     * caller lets Create's own interaction run afterwards, which is what makes Create's
+     * W/S path work for the driver in CREATE mode.
+     */
+    public void claim(java.util.UUID player, int carriageIndex, net.minecraft.core.BlockPos desk) {
+        claimOwner = player;
+        driverDesk = desk;
+        driverCarriage = carriageIndex;
+        claimInvalidTicks = 0;
+        setDriverPresent(player);
+    }
+
+    /**
+     * Give up the claim, on any of the documented cancel routes.
+     *
+     * <p>Deliberately does NOT clear {@link #driverTicks}: that countdown is the grace that
+     * keeps the gear law running for a few ticks after the driver leaves, and it is what
+     * lets the train fall into {@link #unmanned} (the lever keeps its position, the
+     * vigilance clock keeps running) instead of being dropped to Create's friction brake.
+     * It does clear {@link #driverId}, so the very next control packet from the ex-driver
+     * is refused.
+     *
+     * <p>Does not message anybody and does not touch Create's record: those are the
+     * caller's job, because only the caller knows whether Create's record needs stopping
+     * (it does when the driver released from their own cab, it does not when Create already
+     * let go) and whether the player is still there to be told.
+     */
+    public void releaseClaim() {
+        claimOwner = null;
+        driverDesk = null;
+        driverCarriage = -1;
+        claimInvalidTicks = 0;
+        driverId = null;
+    }
 
     /** True while a driver is at the controls. */
     public boolean isDriven() {
@@ -191,9 +291,30 @@ public class TrainDriverState {
         driverCabInverted = inverted;
     }
 
-    /** Whether this player is the one driving, so may command the lever. */
+    /**
+     * Whether this player owns this train's controls, so may command the lever and the
+     * pantographs.
+     *
+     * <p>Checked against the CLAIM, not against {@link #driverId}. The claim is the
+     * server's authority and changes the instant a driver cancels, while {@code driverId}
+     * deliberately lags a few ticks so the gear law can survive a momentary absence. A
+     * permission check must not inherit that lag: a player who has just right-clicked a
+     * desk to release it must not be able to move the lever on the way out.
+     *
+     * <p>The {@link #driverId} fallback exists for trains this feature does not gate (no
+     * traction motors, or a rail-shoe-only metro). Those keep upstream's behaviour in
+     * full, including the old rule that the player Create records as controlling may work
+     * the pantographs; they never take a claim, so the fallback is the only path they
+     * reach. On a gated train the claim is non-null for every player who may control, and
+     * a released claim clears {@code driverId} on the same line, so the fallback can never
+     * resurrect an ex-driver.
+     */
     public boolean isDriver(java.util.UUID id) {
-        return id != null && id.equals(driverId);
+        if (id == null)
+            return false;
+        if (claimOwner != null)
+            return id.equals(claimOwner);
+        return id.equals(driverId);
     }
 
     /**

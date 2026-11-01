@@ -107,7 +107,28 @@ public final class TrainControlInput {
         if (mc.screen != null)
             return false;   // a menu is open: its keys are not ours to take
         Train train = drivenTrain();
-        return train != null && TrainHudData.leverDriven(train.id);
+        // The one-driver rule, client half: a player who is only VIEWING a cab must not send
+        // lever commands. The server refuses them regardless (SetTrainGearPacket and
+        // friends check the claim), but a viewer's key must not cost a packet either, and
+        // an interactive-looking lever that silently refuses is worse than a dead one.
+        // A train whose claim this client has not received yet counts as "not the driver":
+        // the claim packet follows the right-click within a tick, and a tick of dead keys is
+        // invisible, whereas a tick of accepted-looking input is not.
+        return train != null && TrainHudData.leverDriven(train.id) && isLocalDriver(train);
+    }
+
+    /**
+     * Whether the local player owns this train's controls, as far as the client has been
+     * told.
+     *
+     * <p>The claim is the server's answer to "who may drive"; Create's own synced record is
+     * not used here because on a refused client its local prediction has already overwritten
+     * it with the local player.
+     */
+    public static boolean isLocalDriver(Train train) {
+        Minecraft mc = Minecraft.getInstance();
+        return train != null && mc.player != null
+                && TrainHudData.isDriver(train.id, mc.player.getUUID());
     }
 
     /**
@@ -285,6 +306,26 @@ public final class TrainControlInput {
         Train train = drivenTrain();
         if (train == null) {
             pantoPrevWasDown = pantoNextWasDown = pantoToggleWasDown = pantoAutoWasDown = false;
+            return;
+        }
+
+        // A viewer at a read-only cab must not work the pantographs either. The keys are read
+        // here rather than inside the `!locked` branch below because this is a different rule
+        // from the emergency lock: it is about WHO is at the controls, not about what state
+        // the panel is in. The edge state is kept up to date so a key held through the whole
+        // visit does not fire the moment the player becomes the driver.
+        //
+        // Gated on the claim having been announced at all. A train this feature does not own - a
+        // fuel consist that happens to carry a pantograph - never gets a claim packet, and its
+        // driver keeps upstream's behaviour including these keys; treating "no claim" as "not the
+        // driver" would silently take the pantographs away from a train the one-driver rule does
+        // not apply to. On a gated train the first claim packet follows the right-click within a
+        // tick, and from then on this test is exact.
+        if (TrainHudData.hasDriverClaim(train.id) && !isLocalDriver(train)) {
+            pantoPrevWasDown = pantoPrev;
+            pantoNextWasDown = pantoNext;
+            pantoToggleWasDown = pantoToggle;
+            pantoAutoWasDown = pantoAuto;
             return;
         }
 
