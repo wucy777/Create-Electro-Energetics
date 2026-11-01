@@ -26,15 +26,6 @@ public class PantographRenderer extends SmartBlockEntityRenderer<PantographBlock
 
         int color = blockEntity.color.getTextureDiffuseColor();
 
-        // Uniform scale for the whole pantograph, about the base's centre at the bottom of the block, so
-        // the base stays on the roof and everything above it grows in proportion. This is what makes the
-        // drawn collector bar span exactly the electrical tolerance.
-        float pantoScale = CEEPantographTypes.CONTACT_MODEL_SCALE;
-        ms.pushPose();
-        ms.translate(0.5, 0.0, 0.5);
-        ms.scale(pantoScale, pantoScale, pantoScale);
-        ms.translate(-0.5, 0.0, -0.5);
-
         float yRot = state.getValue(FACING).toYRot();
         if (state.getValue(FACING).getAxis() == Direction.Axis.Z)
             yRot += 180;
@@ -74,7 +65,8 @@ public class PantographRenderer extends SmartBlockEntityRenderer<PantographBlock
                     .renderInto(ms, buffer.getBuffer(RenderType.cutout()));
 
             CachedBuffers.partial(CEEPartialModels.PANTOGRAPH_CONNECTING_SURFACE_DOUBLE, state)
-                    .center().rotateYDegrees(yRot).uncenter()
+                    .center().rotateYDegrees(yRot)
+                    .scaleX(CEEPantographTypes.CONTACT_MODEL_SCALE).uncenter()
                     .translate(0, 0.5625 + a + armHingePosY, 1)
                     .light(light)
                     .renderInto(ms, buffer.getBuffer(RenderType.cutout()));
@@ -140,7 +132,8 @@ public class PantographRenderer extends SmartBlockEntityRenderer<PantographBlock
 
             float upperArmRadians = (89 - extensionState * 50) * Mth.DEG_TO_RAD;
             CachedBuffers.partial(CEEPartialModels.PANTOGRAPH_CONNECTING_SURFACE, state)
-                    .center().rotateYDegrees(yRot).uncenter()
+                    .center().rotateYDegrees(yRot)
+                    .scaleX(CEEPantographTypes.CONTACT_MODEL_SCALE).uncenter()
                     .translate(0, 0.375, 0.8125)
                     .translate(0, armHingePosY, armHingePosX)
                     .translate(0, Mth.cos(upperArmRadians) * 1.9, Mth.sin(upperArmRadians) * 1.9)
@@ -163,7 +156,5 @@ public class PantographRenderer extends SmartBlockEntityRenderer<PantographBlock
                     .light(light)
                     .renderInto(ms, buffer.getBuffer(RenderType.cutout()));
         }
-
-        ms.popPose();
     }
 }
