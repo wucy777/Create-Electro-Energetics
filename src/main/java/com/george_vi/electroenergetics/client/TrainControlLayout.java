@@ -45,7 +45,7 @@ final class TrainControlLayout {
     static final int DIVIDER_H = 1;
 
     /**
-     * Footer rows: two lines of key hints and the status line, plus the consist strip below them.
+     * Footer rows: two lines of key hints, the status line, and the consist strip below them.
      *
      * <p>Two lines rather than one because the single line was wider than the panel and
      * ran off the edge of the screen - the reported "the up/down hint at the bottom
@@ -53,21 +53,25 @@ final class TrainControlLayout {
      * translated names ("up arrow key", "down arrow key"), which are long in every
      * language; they are drawn as arrow glyphs now, which is both shorter and clearer.
      *
-     * <p>36, not the 34 this was for one version, and not the 30 before that. The strip's
-     * carriages are six rows tall now that they are a picture rather than bars, which needs
-     * 1 mark row + 6 body rows + 4 rows for the merged count or the direction arrow = 11 rows
-     * below the strip's own row. The strip's band is therefore 12 rows, and the band is
-     * {@code FOOTER_H - FOOTER_INSET_TOP - FOOTER_ROW_PANTO} = 36 - 2 - 22. The last of those 12
-     * rows is the panel's own one-pixel outline, which nothing paints over, so 11 usable rows is
-     * exactly what the strip needs - no slack and no overflow.
+     * <p>38, not the 36 this was for one version, and not the 34 or 30 before that. The strip's
+     * carriages are five rows tall in BOTH layouts now (TrainControlHud.CARRIAGE_H), and the two-row
+     * layout draws two bands of (1 mark row + 5 body rows) with one link row between them:
+     * 2 * (1 + 5) + 1 = 13 rows. The band is {@code FOOTER_H - FOOTER_INSET_TOP - FOOTER_ROW_PANTO}
+     * = 38 - 2 - 22 = 14 rows, and its last row is the panel's own one-pixel outline, which nothing
+     * paints over - so 13 usable rows is exactly what the strip needs: no slack and no overflow. The
+     * single-row layout uses 1 + 5 + 4 = 10 of those rows, the merged count or the direction arrow
+     * taking the bottom four.
      *
-     * <p>Growing the footer rather than moving the strip up is deliberate: the three text rows stay
-     * where the driver already knows them, and the panel is anchored to the bottom-right corner, so
-     * the two extra rows extend it upward into empty space instead of pushing anything else around.
-     * 36 leaves 5.25 px below the last glyph row (2 + 22 + 6.75 = 30.75), which is more slack than
-     * the 34 version had, not less.
+     * <p>Growing the footer rather than moving the strip up is deliberate: the three text rows keep
+     * their place relative to the panel, and the panel is anchored to the bottom-right corner, so the
+     * two extra rows extend it upward into empty space instead of pushing anything else around.
+     * TOTAL_H 134 -> 136 together with FOOTER_H 36 -> 38 leaves the footer's top at the same distance
+     * from the panel's top (98), so nothing above the strip moves relative to the panel; the band,
+     * which is measured from the pantograph row down to the panel's bottom edge, grows by exactly the
+     * two rows the arc needs. 38 leaves 7.25 px below the last glyph row
+     * (2 + 22 + 6.75 = 30.75), two of them the band's new rows and 5.25 the slack the 36 version had.
      */
-    static final int FOOTER_H = 36;
+    static final int FOOTER_H = 38;
 
     /**
      * Where the footer's three rows sit, relative to the footer's top.

@@ -456,6 +456,11 @@ public class ElectricTrainHud implements LayeredDraw.Layer {
         // m/s, and the conversion is m/s * 3.6 to reach km/h - dividing by 3.6 printed 278 where
         // 100 m/s is 360. The ceiling is printed in m/s only; repeating it in km/h doubled the width
         // of the row for a number the driver can already read on the left half.
+        // Held at the ceiling, the readout shows the ceiling. A train doing design speed displayed as
+        // "99.9 / 100.0" reads as short of it, and the last tenth is the hold tolerance, not a speed the
+        // driver can do anything about. Everything below the top still moves in tenths.
+        if (cap > 0 && speed >= cap - 1)
+            speed = cap;
         textSpeed = String.format("%.1f / %.1f m/s", speed / 10d, cap / 10d);
         textSpeedKmh = String.format("%.0f km/h", speed / 10d * 3.6d);
         textGear = gear < 0 || gear >= TrainGear.values().length
