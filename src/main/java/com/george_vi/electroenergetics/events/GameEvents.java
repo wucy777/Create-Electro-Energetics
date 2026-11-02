@@ -356,6 +356,15 @@ public class GameEvents {
                     // against it. Braking here would slow the train every time it reached the speed it is
                     // allowed to do, which is what it used to do.
                     double speed = Math.abs(train.speed);
+                    // Hysteresis-free on purpose. The old form tested `speed > ceiling + 1e-4` to decide
+                    // "brake" and then relied on a latch (`overloadBraking`) to put the lever back into cruise
+                    // once the brake had done its work. The latch is cleared in two other places, and when one
+                    // of them wins the train brakes to the ceiling and then simply stays in BRAKE - reported as
+                    // "it brakes to 28 but never goes to cruise and holds it".
+                    //
+                    // Written as a two-sided rule instead: above the ceiling, brake; at or below it, hold the
+                    // ceiling. Neither branch depends on how the train got there, so a missed latch cannot
+                    // strand the brake on.
                     if (speed > RiderSeatGate.createCeilingBpt() + 1.0e-4d) {
                         // Above the ceiling: brake, and REMEMBER that the brake is ours. Reaching the ceiling
                         // has to release it - otherwise the train brakes past 28 and stops, which is a
@@ -364,19 +373,17 @@ public class GameEvents {
                         if (driver.gear != TrainGear.BRAKE)
                             driver.gear = TrainGear.BRAKE;
                     } else {
-                        if (driver.overloadBraking) {
-                            driver.overloadBraking = false;
-                            if (driver.gear == TrainGear.BRAKE) {
-                                // Cruise holds whatever speed it was TOLD to hold, and that number is only
-                                // captured when the driver selects the position themselves. Forcing the
-                                // position without it left the target at its old value - zero, on a train
-                                // that had never cruised - so "hold this speed" meant "brake to a stand".
-                                driver.captureCruiseSetpointFromWorld(train.speed * 20d);
-                                driver.gear = TrainGear.CRUISE;
-                            }
-                        }
-                        if (driver.gear == TrainGear.ACCELERATE) {
-                            driver.gearBeforeOverloadDrop = TrainGear.ACCELERATE;
+                        driver.overloadBraking = false;
+                        // At or under the ceiling: hold it, whatever the lever was doing. Braking is only ever
+                        // a way of getting DOWN to the ceiling; at the ceiling it is a fault, because it slows
+                        // a train that is already doing exactly what it is allowed to do.
+                        if (driver.gear == TrainGear.BRAKE || driver.gear == TrainGear.ACCELERATE) {
+                            if (driver.gear == TrainGear.ACCELERATE)
+                                driver.gearBeforeOverloadDrop = TrainGear.ACCELERATE;
+                            // Cruise holds whatever speed it was TOLD to hold, and that number is only
+                            // captured when the driver selects the position themselves. Forcing the position
+                            // without it left the target at its old value - zero, on a train that had never
+                            // cruised - so "hold this speed" meant "brake to a stand".
                             driver.captureCruiseSetpointFromWorld(train.speed * 20d);
                             driver.gear = TrainGear.CRUISE;
                         }
