@@ -540,7 +540,7 @@ public class TrainControlHud implements LayeredDraw.Layer {
      * width budget reserves exactly {@code CARRIAGE_NOSE_W} pixels per end, so an arc that outgrew it
      * would draw over the pantograph detail text.
      */
-    private static final int[] CARRIAGE_NOSE_ARC = {0, 1, 2, 3, 3};
+    private static final int[] CARRIAGE_NOSE_ARC = {2, 3, 5, 3, 4};
 
     /**
      * How far the nose reaches past the body at its widest row - the arc's maximum.
@@ -549,7 +549,7 @@ public class TrainControlHud implements LayeredDraw.Layer {
      * to agree: the strip reserves {@code 2 * CARRIAGE_NOSE_W} pixels for the two noses, and the body
      * starts that far inside the strip's left edge. An arc wider than this would overrun the reserve.
      */
-    private static final int CARRIAGE_NOSE_W = 3;
+    private static final int CARRIAGE_NOSE_W = 5;
 
     /**
      * Rows the strip may use inside the panel, counted down from the y the caller passes in.
@@ -887,11 +887,16 @@ public class TrainControlHud implements LayeredDraw.Layer {
         //     #########
         //     ..#......
         //     ....#....
-        graphics.fill(arrowX + 4, arrowY, arrowX + 5, arrowY + 1, TEXT_DIM);
+        //   ...#...
+        //   ..#....
+        //   #######
+        //   ..#....
+        //   ...#...
+        graphics.fill(arrowX + 3, arrowY, arrowX + 4, arrowY + 1, TEXT_DIM);
         graphics.fill(arrowX + 2, arrowY + 1, arrowX + 3, arrowY + 2, TEXT_DIM);
         graphics.fill(arrowX, arrowY + 2, arrowX + arrowLen, arrowY + 3, TEXT_DIM);
         graphics.fill(arrowX + 2, arrowY + 3, arrowX + 3, arrowY + 4, TEXT_DIM);
-        graphics.fill(arrowX + 4, arrowY + 4, arrowX + 5, arrowY + 5, TEXT_DIM);
+        graphics.fill(arrowX + 3, arrowY + 4, arrowX + 4, arrowY + 5, TEXT_DIM);
     }
 
     /**
