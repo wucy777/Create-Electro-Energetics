@@ -729,6 +729,20 @@ public class TrainDriverState {
     public boolean overloaded = false;
 
     /**
+     * Ticks the train has been seen with somebody standing while there are seats to give them.
+     *
+     * <p>Seating needs a round trip: the server asks each standing player which seat they are nearest, the
+     * client answers, and the answer is applied on a later tick. Judging overload on the very first tick that
+     * somebody is standing therefore reports "overloaded" and applies the ceiling brake for people who are
+     * about to be seated anyway - reported as "the train has plenty of empty seats but it complains about
+     * overloading and brakes to 28, then seats me".
+     *
+     * <p>So the verdict waits {@link RiderSeatGate#SEAT_INTENT_GRACE_TICKS} ticks. Seating is attempted on
+     * every one of those ticks; only a standing player who is still standing after the grace is overload.
+     */
+    public int unseatedTicks = 0;
+
+    /**
      * The position the lever was in when the capacity limit forced it down to CRUISE, or null if it did not.
      *
      * <p>At the ceiling the accelerate position is dropped to cruise - the train holds the limit instead of

@@ -344,8 +344,22 @@ public class GameEvents {
                     unseated = RiderSeatGate.anyUnseated(train);
                 }
 
-                driver.overloaded = unseated;
-                if (unseated) {
+                // Nobody is overload until they have been standing, unseated, for the length of a seating
+                // round trip. See TrainDriverState.unseatedTicks: the pass below has already tried to seat
+                // them this tick, so a seat that exists has been offered to them before this is read.
+                if (unseated)
+                    driver.unseatedTicks = Math.min(driver.unseatedTicks + 1,
+                            com.george_vi.electroenergetics.content.railway_electrification.RiderSeatGate
+                                    .SEAT_INTENT_GRACE_TICKS);
+                else
+                    driver.unseatedTicks = 0;
+
+                boolean trulyOverloaded = driver.unseatedTicks
+                        >= com.george_vi.electroenergetics.content.railway_electrification.RiderSeatGate
+                                .SEAT_INTENT_GRACE_TICKS;
+
+                driver.overloaded = trulyOverloaded;
+                if (trulyOverloaded) {
                     // Two different situations, and only one of them is a braking matter.
                     //
                     // Above the ceiling - somebody teleported aboard a train already running faster than
