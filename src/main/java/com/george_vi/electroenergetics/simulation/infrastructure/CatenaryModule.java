@@ -175,15 +175,21 @@ public class CatenaryModule {
                 Vec3 coupledVec = dce.rotationAnchors.getSecond();
                 //noinspection ConstantValue
                 if (positionVec == null || coupledVec == null) {
-                    // The anchors are not loaded, so no geometry can be evaluated for this carriage
-                    // and the loop below will not run. Its pantographs must still be brought to a
-                    // known state, or they keep whatever the last solvable tick left - and a stale
-                    // `reachable = true` is what authorises a driver's raise (SetPantographPacket)
-                    // and what the automatic lowering tests. Left alone, a pantograph whose carriage
-                    // had been unloaded would stay permanently "in reach of wire", so the driver
-                    // could raise it onto nothing and it would never come down again.
-                    for (TrainPantographEntry pe : pantographs)
-                        pe.reachable = false;
+                    // The anchors are not loaded, so this carriage's geometry cannot be evaluated and the
+                    // loop below will not run.
+                    //
+                    // Nothing is written here on purpose. The flags are left exactly as the last evaluable
+                    // tick left them, because "we do not know where this carriage is" is not the same fact
+                    // as "there is no wire above it" - and writing `reachable = false` on that basis is what
+                    // stranded an arm: reported as a pantograph refusing to rise on straight track with the
+                    // wire directly overhead, another arm on the same train working, and the arm coming up
+                    // only after cycling its switch by hand (which writes `active` directly and so bypassed
+                    // the stranded flag entirely).
+                    //
+                    // The old worry was a stale `reachable = true` authorising a raise onto nothing. The
+                    // answer to that is not to fake a false: it is that the next evaluable tick recomputes
+                    // both flags from the real geometry before anything acts on them, and automatic lowering
+                    // is driven from that same recomputation.
                     continue;
                 }
 
