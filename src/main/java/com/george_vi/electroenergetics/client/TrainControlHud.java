@@ -540,7 +540,7 @@ public class TrainControlHud implements LayeredDraw.Layer {
      * width budget reserves exactly {@code CARRIAGE_NOSE_W} pixels per end, so an arc that outgrew it
      * would draw over the pantograph detail text.
      */
-    private static final int[] CARRIAGE_NOSE_ARC = {1, 2, 3, 3, 3};
+    private static final int[] CARRIAGE_NOSE_ARC = {0, 1, 2, 3, 3};
 
     /**
      * How far the nose reaches past the body at its widest row - the arc's maximum.
@@ -879,10 +879,19 @@ public class TrainControlHud implements LayeredDraw.Layer {
         int arrowLen = Math.max(10, Math.min(avail - 2, topSpan + 2));
         int arrowX = x;
         int arrowY = singleRow && !hasMerged ? y + PANTO_BAND_ROWS - 5 : y - 4;
-        graphics.fill(arrowX + 2, arrowY, arrowX + 3, arrowY + 4, TEXT_DIM);              // head base
-        graphics.fill(arrowX + 1, arrowY + 1, arrowX + 2, arrowY + 3, TEXT_DIM);          // head step
-        graphics.fill(arrowX, arrowY + 1, arrowX + 1, arrowY + 3, TEXT_DIM);              // tip
-        graphics.fill(arrowX + 2, arrowY + 1, arrowX + arrowLen, arrowY + 3, TEXT_DIM);   // shaft
+        // The operator's own pixel art, drawn literally: a one-pixel shaft on the middle row with a
+        // two-step chevron head on the rows above and below it. Anything smoother reads as a blob at this
+        // size, and anything with a filled head reads as an arrowhead pointing the other way.
+        //     ....#....
+        //     ..#......
+        //     #########
+        //     ..#......
+        //     ....#....
+        graphics.fill(arrowX + 4, arrowY, arrowX + 5, arrowY + 1, TEXT_DIM);
+        graphics.fill(arrowX + 2, arrowY + 1, arrowX + 3, arrowY + 2, TEXT_DIM);
+        graphics.fill(arrowX, arrowY + 2, arrowX + arrowLen, arrowY + 3, TEXT_DIM);
+        graphics.fill(arrowX + 2, arrowY + 3, arrowX + 3, arrowY + 4, TEXT_DIM);
+        graphics.fill(arrowX + 4, arrowY + 4, arrowX + 5, arrowY + 5, TEXT_DIM);
     }
 
     /**

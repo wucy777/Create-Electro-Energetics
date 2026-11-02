@@ -298,7 +298,13 @@ public class CatenaryModule {
                         Vec3 distance = pantographPos.subtract(closest);
                         distance = VecHelper.rotate(distance, yaw + 180, Direction.Axis.Y);
                         distance = VecHelper.rotate(distance, -pitch, Direction.Axis.X);
-                        float xTol = (float) ((distance.y + pantograph.type.reach / 2) * 0.2f + 0.125f);
+                        // Along-track tolerance. On a curve the carriage is a straight chord under a curved wire, so the
+                    // arm's projection can fall past the end of the wire segment it is nearest to and be rejected
+                    // even though the wire is directly overhead. The lateral test is deliberately wide (3.5) for
+                    // that same reason; this one was left at upstream's 0.125 + 0.2*height and became the binding
+                    // constraint - reported as "the catenary is centred over the track and some carriages still
+                    // will not collect".
+                    float xTol = (float) ((distance.y + pantograph.type.reach / 2) * 0.25f + 0.5f);
                         if (Math.abs(distance.z()) < pantograph.type.sidewaysReach && Math.abs(distance.x()) < xTol && Math.abs(distance.y()) < pantograph.type.reach / 2) {
 
                             // Catenary is within reach of this pantograph. Recorded regardless of
