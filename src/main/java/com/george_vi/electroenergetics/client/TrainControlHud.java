@@ -1,5 +1,6 @@
 package com.george_vi.electroenergetics.client;
 
+import com.george_vi.electroenergetics.CreateElectroEnergetics;
 import com.george_vi.electroenergetics.content.railway_electrification.TrainControlMode;
 import com.george_vi.electroenergetics.content.railway_electrification.TrainGear;
 import com.george_vi.electroenergetics.content.railway_electrification.TrainHudData;
@@ -13,6 +14,7 @@ import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.LayeredDraw;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.GameType;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.api.distmarker.OnlyIn;
@@ -32,10 +34,11 @@ import net.neoforged.api.distmarker.OnlyIn;
  * value instead made the handle lag the key and then jump several positions at once
  * when a burst of presses all landed together.
  *
- * <p>Drawn with {@code fill} and {@code renderOutline} only - no textures, no
- * blitting, no per-frame allocation - so it costs a few dozen quads and does not
- * touch the frame budget. The rounded look comes from layering rectangles rather
- * than from a texture, which is what keeps it free.
+ * <p>Drawn with {@code fill} and {@code renderOutline}, with ONE exception: the consist strip's
+ * carriages are a blitted picture ({@link #CONSIST_SHEET}). No per-frame allocation either way - so
+ * it costs a few dozen quads and does not touch the frame budget. The rounded look of the lever
+ * comes from layering rectangles, which is what keeps it free; the carriages are drawn because a
+ * streamlined nose is a curve in the silhouette, and a rectangle can only ever be a wedge.
  *
  * <p>A view only. Every value comes from the server through {@link TrainHudData} and
  * the keys are read in {@link TrainControlInput}; nothing here decides anything.
@@ -326,11 +329,17 @@ public class TrainControlHud implements LayeredDraw.Layer {
         // exceeded yet. A three-carriage train with three pantographs is already 40.5 px wide at 75%
         // scale, so this was the ordinary case, not an extreme one.
         drawPantographConsist(graphics, train, pantographs, x, y);
-        // The detail shares its line with the glyph group, so it only has what is left of the panel:
-        // measured from its own left edge to the panel's right inset.
-        drawSmallFitted(graphics, font, key(TrainControlKeys.PANTOGRAPH_TOGGLE) + " "
-                        + pantographStateText(train, pantographs), x + PANTO_DETAIL_X, y,
-                FITTED_MAX_W - PANTO_DETAIL_X, pantographStateColour(train, pantographs));
+        // How many arms the driver has switched off, on the right of the strip.
+        //
+        // The line used to name the toggle key and describe the selected arm ("M 已升弓" / "M 可升弓").
+        // That vocabulary is gone with the manual raise/lower path: the switch is ON = follow the
+        // wire, OFF = park the arm and hold it down, and a parked arm refuses a manual raise on the
+        // server. Naming a key that no longer raises anything would be a hint that lies, so the line
+        // says the state instead, and it only appears when there is a state to report - with every
+        // arm on automatic it is blank, which is the original mod's appearance.
+        if (anyManualPantograph(pantographs)) {
+            drawParkedPantographs(graphics, font, train, x + PANTO_DETAIL_X, y, pantographs);
+        }
     }
 
     /**
@@ -394,15 +403,16 @@ public class TrainControlHud implements LayeredDraw.Layer {
             // the carriages mean the same thing whichever scheme is driving, and a driver handed to
             // Create should not lose the only place that says which arm is on which carriage.
             drawPantographConsist(graphics, train, pantographs, x + 5, y + 15);
-            drawSmallFitted(graphics, font, key(TrainControlKeys.PANTOGRAPH_TOGGLE) + " "
-                            + pantographStateText(train, pantographs), x + PANTO_DETAIL_X, y + 15,
-                    FITTED_MAX_W - PANTO_DETAIL_X, pantographStateColour(train, pantographs));
+            // Same rule as the lever panel: the parked-arm line is blank while every arm is on
+            // automatic, so a driver handed to Create sees the original mod's appearance by default.
+            if (anyManualPantograph(pantographs)) {
+                drawParkedPantographs(graphics, font, train, x + PANTO_DETAIL_X, y + 15, pantographs);
+            }
         } else {
             // Nothing to name, but the driver still needs the state: on an electric train there is
-            // no other place this appears. The same line the detail row uses, in the same colour
-            // language, saying why the key would do nothing.
-            drawSmall(graphics, font, key(TrainControlKeys.PANTOGRAPH_TOGGLE) + " "
-                    + tr("electroenergetics.train.panto.none"), x + 5, y + 15, WARN);
+            // no other place this appears. No key name on it any more - there is no raise key to
+            // press on a train without arms, so naming one would advertise nothing.
+            drawSmall(graphics, font, tr("electroenergetics.train.panto.none"), x + 5, y + 15, WARN);
         }
     }
 
@@ -496,13 +506,29 @@ public class TrainControlHud implements LayeredDraw.Layer {
     private static final int SINGLE_ROW_MAX = 12;
 
     /**
-     * Height of a carriage body, in pixels.
+     * Height of a carriage body in the single-row layout, in pixels.
      *
-     * <p>Three rows is what lets two rows of carriages, each with its own mark row, plus the one-row
-     * link between them fit in the strip's ten-row band; the arrow and the count then still have
-     * somewhere inside the panel to go.
+     * <p>Six rows, and the number is now arithmetic rather than taste: the body is a picture
+     * ({@link #CONSIST_SHEET}) whose cell is twelve source rows tall, and half of twelve is six, so
+     * every drawn row takes a whole source row. Five would resample 12:5 and blur the window band
+     * into the roof; six is also the tallest that still fits everything else the strip has to show.
+     *
+     * <p>The budget, in rows inside {@link #PANTO_BAND_ROWS} (12 with the panel as it stands now):
+     * one mark row above the body, six body rows, and four rows below for either the merged count or
+     * the direction arrow - 1 + 6 + 4 = 11, and the band's twelfth row is the panel's own outline.
+     * That is exactly the band, which is why {@code FOOTER_H} grew by two rows when the bodies did.
      */
-    private static final int CARRIAGE_H = 3;
+    private static final int CARRIAGE_H = 6;
+
+    /**
+     * Height of a carriage body in the two-row layout.
+     *
+     * <p>Four rows, up from three: the two bands, the one-row link between them and the four-row
+     * arrow that has to sit above them all share the same band, so 2 * (1 + body) + 1 <= 11 gives a
+     * body of four at most. It also divides the sprite's twelve source rows exactly, 12:4 = 3, so
+     * the compact layout samples whole source rows too and is not a resample of the tall one.
+     */
+    private static final int COMPACT_CARRIAGE_H = 4;
 
     /**
      * Rows the strip may use inside the panel, counted down from the y the caller passes in.
@@ -515,13 +541,52 @@ public class TrainControlHud implements LayeredDraw.Layer {
             - TrainControlLayout.footerRowY(0, TrainControlLayout.FOOTER_ROW_PANTO);
 
     /**
-     * A merged segment's block, deliberately darker than a carriage.
+     * The consist strip's sprite sheet: four equal cells in one row.
      *
-     * <p>It has to be unmistakable that this is not one carriage but a compressed stretch of them,
-     * and the count drawn with it is what says how many. Insetting the block's ends would not be
-     * enough on its own at this size.
+     * <p>Left head, body, right head, merged block - in that order, so a cell is a multiply away and
+     * there is no lookup table on the render path. The heads are what the fills could not do: a
+     * streamlined nose is a CURVE in the silhouette, which needs transparency, and a rectangle can
+     * only ever be a wedge with a step in it. Reported of that version: the cabs read as carriages
+     * flipped upside down.
+     *
+     * <p>Static and built once. A {@link ResourceLocation} is a pair of strings, so even one built
+     * per frame would not show up in a profile, but this class is on the render path for every frame
+     * of every drive and the rule there is no allocation at all.
+     *
+     * <p>The texture is 96x12 pixels, generated by {@code _cache/make_consist_texture.py}; the
+     * numbers below are that file's layout, and {@code check_auto_raise_and_reach.py} reads the PNG
+     * back and asserts them, so a regenerated sheet cannot silently disagree with this code.
      */
-    private static final int MERGED_BLOCK = 0xFF3A424C;
+    private static final ResourceLocation CONSIST_SHEET =
+            ResourceLocation.fromNamespaceAndPath(CreateElectroEnergetics.ID, "gui/consist_carriage");
+
+    /** One cell of {@link #CONSIST_SHEET}, in source pixels. */
+    private static final int CONSIST_CELL_W = 24;
+    private static final int CONSIST_CELL_H = 12;
+
+    /** The whole sheet: four cells side by side, one cell tall. */
+    private static final int CONSIST_SHEET_W = CONSIST_CELL_W * 4;
+    private static final int CONSIST_SHEET_H = CONSIST_CELL_H;
+
+    /** Left edge of each cell in the sheet, in source pixels - the {@code u} of a blit. */
+    private static final int CONSIST_U_HEAD = 0;
+    private static final int CONSIST_U_BODY = CONSIST_CELL_W;
+    private static final int CONSIST_U_HEAD_RIGHT = CONSIST_CELL_W * 2;
+    private static final int CONSIST_U_MERGED = CONSIST_CELL_W * 3;
+
+    /**
+     * Source columns at the pointed end of a head cell that are NOT solid in every row.
+     *
+     * <p>The arc, in other words, and the renderer needs the number for one reason: the selection
+     * highlight is drawn as two one-pixel lines across the body, and a line drawn over the arc's
+     * empty columns would hang outside the carriage's silhouette. Clipping the lines to the solid
+     * part keeps the picture clean instead of trading a highlight for a stray stick.
+     *
+     * <p>Must match {@code ARC}'s maximum in {@code _cache/make_consist_texture.py}, and the check
+     * that reads the PNG asserts exactly that: for every head cell there is a column from which
+     * every row is opaque, and it is this one.
+     */
+    private static final int CONSIST_NOSE_COLS = 9;
 
     /** Width of a count digit, and the gap between two of them. */
     private static final int COUNT_DIGIT_W = 3;
@@ -603,33 +668,47 @@ public class TrainControlHud implements LayeredDraw.Layer {
      *
      * <h2>Shape</h2>
      *
-     * <p>Carriages are plain rectangles. Only the two end cars carry a wedge, and the wedge is
-     * mirror-symmetric about the carriage's centre line: the middle body row reaches one pixel
-     * further out than the rows above and below it. The old nose stepped on one side only, which is
-     * what made the end carriages read as flipped over ("左右还有上下'翻车'的车厢"), and at this size a
-     * one-sided taper does not say "nose" anyway.
+     * <p>Carriages are a PICITURE, not rectangles: {@link #CONSIST_SHEET} holds a left head, a body,
+     * a right head and a merged block, and each slot blits the cell it needs stretched to its own
+     * width and to {@link #CARRIAGE_H} rows (four on the two-row layout). The heads carry the
+     * streamlined nose as an alpha arc plus a cab window and a headlight, which is what the fills
+     * could not say at any height: the old cabs were rectangles with a one-pixel step, reported as
+     * carriages flipped upside down ("左右还有上下'翻车'的车厢").
      *
-     * <p>The selected carriage is marked by its body colour alone - bright against the dim ones,
-     * the same cue the lever's handle row uses. Merged blocks never are: they carry no arm, so the
-     * selected one cannot be in them.
+     * <p>Mirroring is by CELL CHOICE, not by flipping texture coordinates: the whole strip is
+     * already mirrored by the display mapping (see {@code leadingEndIsFirst}), so display slot 0 is
+     * always the leading cab and gets the left-head cell, and the last slot always gets the mirrored
+     * one. The right-hand cell is generated as its own cell, so its shading and headlight are not a
+     * flipped copy of the left one's.
+     *
+     * <p>The selected carriage is marked by a one-pixel accent cap and sill over the body, clipped to
+     * the columns the head cell draws solid in every row (see {@link #CONSIST_NOSE_COLS}): a
+     * translucent wash would paint a rectangle straight through the transparent part of the arc.
+     * Merged blocks never are - they carry no arm, so the selected one cannot be in them.
+     *
+     * <p>The pantograph marks and the direction arrow are still {@code fill}s. The mark has to land
+     * on an exact pixel over a roof that is itself a texture, and the arrow is a glyph, not a picture.
      *
      * <h2>Where the arrow and the count go</h2>
      *
-     * <p>Inside the panel, and inside its ten-row band. The count needs four rows below the block, so
-     * a single row WITH merged segments puts the arrow in the four rows above the strip and the
-     * counts in the rows below it. A plain single row has no counts, so the arrow keeps the place the
-     * driver already knows it in: under the strip. The two-row layout has no row below either band,
-     * so a merged block carries its count inside itself and the arrow takes the four rows above.
-     * Every one of those placements is measured, not estimated: the status line's ink ends at y-4.25
-     * and the arrow above starts at y-4, while the arrow below ends on the band's second-to-last row
-     * because the band's last row is the panel's own one-pixel outline. None of it depends on the GUI
-     * scale: the panel is anchored to the bottom-right corner and none of these numbers is scaled.
+     * <p>Inside the panel, and inside its band. The count needs four rows below the block, so a
+     * single row WITH merged segments puts the arrow in the four rows above the strip and the counts
+     * in the rows below it. A plain single row has no counts, so the arrow keeps the place the driver
+     * already knows it in: under the strip, one row lower than before because the body is taller. The
+     * two-row layout has no row below either band, so a merged block carries its count inside itself
+     * and the arrow takes the four rows above. Every one of those placements is measured, not
+     * estimated: the status line's ink ends at y-4.25 and the arrow above starts at y-4, while the
+     * arrow below ends on the band's second-to-last row because the band's last row is the panel's
+     * own one-pixel outline. None of it depends on the GUI scale: the panel is anchored to the
+     * bottom-right corner and none of these numbers is scaled.
      *
      * <h2>Cost</h2>
      *
-     * <p>Fills only, and nothing is allocated: the pantograph list is walked by index, the arms are
-     * a bit mask in a {@code long}, and the count digits come from a static table. This runs every
-     * frame while the driver holds the cab.
+     * <p>A blit per slot and nothing allocated: the pantograph list is walked by index, the arms are
+     * a bit mask in a {@code long}, the count digits come from a static table and the sheet's
+     * location is a static constant - no {@code new}, no {@code String.format}, no
+     * {@code StringBuilder}, not even a boxed index. This runs every frame while the driver holds the
+     * cab.
      */
     private static void drawPantographConsist(GuiGraphics graphics, Train train,
                                               java.util.List<
@@ -661,15 +740,22 @@ public class TrainControlHud implements LayeredDraw.Layer {
         boolean singleRow = slots <= SINGLE_ROW_MAX;
         int topSlots = singleRow ? slots : (slots + 1) / 2;
         int bottomSlots = slots - topSlots;
+        // The two-row layout gives up a body row: two bands, their mark rows, the link and the arrow
+        // cannot all fit at four rows each (see COMPACT_CARRIAGE_H). Everything below measures from
+        // this, so the two layouts cannot drift out of their band.
+        int carH = singleRow ? CARRIAGE_H : COMPACT_CARRIAGE_H;
 
         // Width. The row shares its line with the pantograph detail text, which starts PANTO_DETAIL_X
-        // from the panel's inset, so the strip owns PANTO_DETAIL_X - 8 pixels; the leading nose and
-        // the trailing tail take two of those each. Every slot gets the same base width, except a
-        // merged slot, which is widened when it needs the room for its count. The base width is the
-        // largest one both rows can afford; if even one-pixel slots with a gap do not fit, the gap
-        // goes first - that is the "past forty it still compresses" rule.
+        // from the panel's inset, so the strip owns PANTO_DETAIL_X - 8 pixels and uses all of it: the
+        // nose is now INSIDE its slot rather than reaching past it, so nothing has to be reserved at
+        // either end (the fills used to keep 3 + 3 pixels clear for the wedges, which cost every
+        // carriage two pixels of body). Every slot gets the same base width, except a merged slot,
+        // which is widened when it needs the room for its count. The base width is the largest one
+        // both rows can afford; if even one-pixel slots with a gap do not fit, the gap goes first -
+        // that is the "past forty it still compresses" rule.
         int avail = PANTO_DETAIL_X - 8;
-        int budget = avail - 4;
+        int budget = avail;
+
         int topOneDigit = 0;
         int topTwoDigit = 0;
         int bottomOneDigit = 0;
@@ -711,11 +797,12 @@ public class TrainControlHud implements LayeredDraw.Layer {
             baseW = 1;
         boolean hasMerged = topOneDigit + topTwoDigit + bottomOneDigit + bottomTwoDigit > 0;
 
-        // The nose reaches two pixels left of the body, so the bodies start two pixels in. Both rows
-        // start at that same column, which is what makes the two halves read as one train.
-        int bodyX = x + 2;
-        int topBand = y;                       // the first row's pantograph-mark row
-        int bottomBand = y + CARRIAGE_H + 2;   // the second row's, one link row below the first band
+        // Both rows start at the same column, which is what makes the two halves read as one train.
+        // The nose no longer reaches left of its own slot: it is painted inside the slot's rectangle,
+        // by the head cell's transparent columns.
+        int bodyX = x;
+        int topBand = y;                     // the first row's pantograph-mark row
+        int bottomBand = y + carH + 2;       // the second row's, one link row below the first band
 
         int selected = Math.min(TrainControlInput.selectedPantograph(),
                 Math.max(0, pantographs.size() - 1));
@@ -735,12 +822,15 @@ public class TrainControlHud implements LayeredDraw.Layer {
                     : baseW;
 
             if (len >= 2) {
-                // A compressed stretch: a block darker than a carriage, inset at both ends, with the
-                // number of carriages it stands for. The count cannot be inferred from the block's
-                // width, and it is not meant to be - the number is the honest part.
+                // A compressed stretch: the sheet's merged cell, inset at both ends, with the number
+                // of carriages it stands for. The count cannot be inferred from the block's width,
+                // and it is not meant to be - the number is the honest part. The cell is stretched to
+                // the slot and is one row taller in the two-row layout, where the block also covers
+                // the mark row so the count has somewhere to sit without leaving the band.
                 int inset = width >= 4 ? 1 : 0;
                 int blockTop = singleRow ? bodyY : bodyY - 1;
-                graphics.fill(sx + inset, blockTop, sx + width - inset, bodyY + CARRIAGE_H, MERGED_BLOCK);
+                blitConsistSprite(graphics, CONSIST_U_MERGED, sx + inset, blockTop,
+                        width - 2 * inset, singleRow ? carH : carH + 1);
                 int countX = sx + (width - consistCountWidth(len)) / 2;
                 int countY = singleRow ? y + PANTO_BAND_ROWS - COUNT_ROWS - 1 : blockTop;
                 drawConsistCount(graphics, countX, countY, len, TEXT);
@@ -748,24 +838,37 @@ public class TrainControlHud implements LayeredDraw.Layer {
                 // One carriage. slot counts from the leading end; pos is its display position, and
                 // i = the carriage's index in the train, which is what the selection is keyed by.
                 int i = leadingEndIsFirst ? pos : n - 1 - pos;
-                int colour = i == selectedCarriage ? TEXT : TEXT_DIM;
 
-                graphics.fill(sx, bodyY, sx + width, bodyY + CARRIAGE_H, colour);
+                // The picture. One cell stretched to the slot: the two heads carry the streamlined
+                // nose and its cab window, everything between them is the plain body. Mirrored by
+                // choosing the other head cell rather than by flipping the UVs, which keeps the
+                // right-hand head's own shading and headlight rather than a mirrored copy of them.
+                //
+                // Which cell a slot gets is decided by POSITION, not by carriage index: display slot
+                // 0 is the leading cab whatever the train's direction is, because the whole strip is
+                // already mirrored by leadingEndIsFirst above.
+                int u = slot == 0 ? CONSIST_U_HEAD
+                        : (slot == slots - 1 ? CONSIST_U_HEAD_RIGHT : CONSIST_U_BODY);
+                blitConsistSprite(graphics, u, sx, bodyY, width, carH);
 
-                // Wedges on the two end cars only, symmetric about the centre line: the middle body
-                // row reaches one pixel further than the rows above and below it. A plain rectangle
-                // everywhere else, because a one-sided step is exactly what read as a flipped car.
-                if (slot == 0) {
-                    graphics.fill(sx - 1, bodyY, sx, bodyY + CARRIAGE_H, colour);
-                    graphics.fill(sx - 2, bodyY + 1, sx - 1, bodyY + 2, colour);
-                }
-                if (slot == slots - 1) {
-                    graphics.fill(sx + width, bodyY, sx + width + 1, bodyY + CARRIAGE_H, colour);
-                    graphics.fill(sx + width + 1, bodyY + 1, sx + width + 2, bodyY + 2, colour);
+                // The selection, in the panel's own language: a one-pixel accent cap and sill. The
+                // fills this replaced whitened the whole carriage, which a texture cannot do without
+                // a tint - and a translucent wash would paint a rectangle over the nose's transparent
+                // columns, straight through the arc that is the point of the picture. So the lines
+                // are clipped to the part of the cell that is solid in every row.
+                if (i == selectedCarriage) {
+                    int nose = consistNoseInset(width);
+                    int coreL = slot == 0 ? nose : 0;
+                    int coreR = slot == slots - 1 ? width - nose : width;
+                    if (coreR > coreL) {
+                        graphics.fill(sx + coreL, bodyY, sx + coreR, bodyY + 1, ACCENT);
+                        graphics.fill(sx + coreL, bodyY + carH - 1, sx + coreR, bodyY + carH, ACCENT);
+                    }
                 }
 
                 // The carriage's arms, above it and in its own column. Two arms on one carriage
-                // overdraw each other at the same spot, exactly as they always have.
+                // overdraw each other at the same spot, exactly as they always have. Still fills:
+                // the mark has to land on an exact pixel over the roof, and a sprite would sample.
                 if ((arms & (1L << pos)) != 0L) {
                     int mx = sx + (width - 1) / 2;
                     int barW = Math.min(5, width);
@@ -797,7 +900,7 @@ public class TrainControlHud implements LayeredDraw.Layer {
         // bands is one pixel. This is the only thing that says the two lines are one train.
         int topSpan = topX - bodyX - gap;
         if (!singleRow) {
-            int linkY = topBand + CARRIAGE_H + 1;
+            int linkY = topBand + carH + 1;
             int topEnd = bodyX + topSpan;
             graphics.fill(topEnd, linkY - 1, topEnd + 1, linkY + 1, TEXT_DIM);
             graphics.fill(bodyX - 1, linkY, topEnd + 1, linkY + 1, TEXT_DIM);
@@ -808,28 +911,21 @@ public class TrainControlHud implements LayeredDraw.Layer {
         // panel. It goes above the strip whenever the strip needs the rows below it: under a single
         // row with merged segments that is where the counts are, and below the two-row layout there
         // is no room at all. A plain single row has nothing to put down there, so the arrow keeps the
-        // place the driver already knows it in - under the strip.
+        // place the driver already knows it in - under the strip, pushed one row further down by the
+        // taller body.
         //
         // Both positions are measured, not estimated: the status line's ink ends a quarter pixel
         // above the upper one, and the lower one ends on the band's second-to-last row because the
         // band's last row is the panel's own one-pixel outline. Moving the strip up to keep a single
         // placement was rejected - it would put the strip's top row against the status line and pull
-        // the detail text out of line, for no gain.
+        // the detail text out of line, for no gain. One four-row shape serves both positions.
         int arrowLen = Math.max(10, Math.min(avail - 2, topSpan + 2));
         int arrowX = x;
-        if (singleRow && !hasMerged) {
-            int arrowY = y + PANTO_BAND_ROWS - 6;
-            graphics.fill(arrowX + 2, arrowY, arrowX + 3, arrowY + 5, TEXT_DIM);              // head base
-            graphics.fill(arrowX + 1, arrowY + 1, arrowX + 2, arrowY + 4, TEXT_DIM);          // head step
-            graphics.fill(arrowX, arrowY + 2, arrowX + 1, arrowY + 3, TEXT_DIM);              // tip
-            graphics.fill(arrowX + 2, arrowY + 2, arrowX + arrowLen, arrowY + 3, TEXT_DIM);   // shaft
-        } else {
-            int arrowY = y - 4;
-            graphics.fill(arrowX + 2, arrowY, arrowX + 3, arrowY + 4, TEXT_DIM);              // head base
-            graphics.fill(arrowX + 1, arrowY + 1, arrowX + 2, arrowY + 3, TEXT_DIM);          // head step
-            graphics.fill(arrowX, arrowY + 1, arrowX + 1, arrowY + 3, TEXT_DIM);              // tip
-            graphics.fill(arrowX + 2, arrowY + 1, arrowX + arrowLen, arrowY + 3, TEXT_DIM);   // shaft
-        }
+        int arrowY = singleRow && !hasMerged ? y + PANTO_BAND_ROWS - 5 : y - 4;
+        graphics.fill(arrowX + 2, arrowY, arrowX + 3, arrowY + 4, TEXT_DIM);              // head base
+        graphics.fill(arrowX + 1, arrowY + 1, arrowX + 2, arrowY + 3, TEXT_DIM);          // head step
+        graphics.fill(arrowX, arrowY + 1, arrowX + 1, arrowY + 3, TEXT_DIM);              // tip
+        graphics.fill(arrowX + 2, arrowY + 1, arrowX + arrowLen, arrowY + 3, TEXT_DIM);   // shaft
     }
 
     /**
@@ -851,6 +947,45 @@ public class TrainControlHud implements LayeredDraw.Layer {
             arms |= 1L << displayPos;
         }
         return arms;
+    }
+
+    /**
+     * Whether at least one arm is out of automatic mode.
+     *
+     * <p>The "M + state" line exists only for the manual switch, which the original mod did not
+     * have: there, every arm simply rose and fell with the wire. The operator asked for that
+     * behaviour back, so while every arm is automatic the line is not drawn at all - it otherwise
+     * advertises a key that does nothing (the server refuses a manual raise while auto is on), which
+     * reads as a broken control. The row itself stays part of the panel, so nothing jumps; only the
+     * text is skipped.
+     *
+     * <p>Allocation-free: an indexed walk over a list that is forty entries long at most.
+     */
+    private static boolean anyManualPantograph(java.util.List<
+            com.george_vi.electroenergetics.content.railway_electrification.pantograph
+                    .SyncTrainPantographsPacket.Entry> pantographs) {
+        for (int k = 0; k < pantographs.size(); k++)
+            if (!pantographs.get(k).autoRaise())
+                return true;
+        return false;
+    }
+
+    /**
+     * How many arms the driver has parked, i.e. switched out of automatic control.
+     *
+     * <p>Same walk as {@link #anyManualPantograph} and deliberately kept separate: one answers "is
+     * there anything to say", which is the gate, and this one answers "how much", which is what the
+     * line says. Both are indexed walks over a list that is forty entries long at most, so
+     * forty comparisons twice per frame is not worth merging into one method that returns both.
+     */
+    private static int parkedPantographs(java.util.List<
+            com.george_vi.electroenergetics.content.railway_electrification.pantograph
+                    .SyncTrainPantographsPacket.Entry> pantographs) {
+        int parked = 0;
+        for (int k = 0; k < pantographs.size(); k++)
+            if (!pantographs.get(k).autoRaise())
+                parked++;
+        return parked;
     }
 
     /**
@@ -893,6 +1028,40 @@ public class TrainControlHud implements LayeredDraw.Layer {
         return baseW * slotCount + gap * (slotCount - 1) + extra;
     }
 
+    /**
+     * One cell of {@link #CONSIST_SHEET}, stretched to the slot it stands for.
+     *
+     * <p>The eleven-argument blit is the only overload that separates the destination size from the
+     * source size: {@code (x, y, width, height)} is where it lands, {@code (u, 0, cellW, cellH)} is
+     * what it reads, and the last two are the sheet's dimensions so the UVs come out in 0..1. The
+     * shorter overloads either draw source pixels 1:1 or assume a 256x256 sheet, and a carriage has
+     * to be as wide as its slot.
+     *
+     * <p>Reads the sheet with nearest-neighbour filtering, which is why the sprite is designed on
+     * whole source rows (see the generator): at the strip's two heights, 12 source rows divide
+     * exactly by 6 and by 4, so no drawn row is a blend of two.
+     *
+     * <p>No allocation: the sheet location is a constant and the quad comes from the shared
+     * tessellator buffer.
+     */
+    private static void blitConsistSprite(GuiGraphics graphics, int u, int x, int y, int w, int h) {
+        if (w <= 0 || h <= 0)
+            return;   // a degenerate slot is nothing to draw, not a zero-width quad
+        graphics.blit(CONSIST_SHEET, x, y, w, h, u, 0.0f,
+                CONSIST_CELL_W, CONSIST_CELL_H, CONSIST_SHEET_W, CONSIST_SHEET_H);
+    }
+
+    /**
+     * How many drawn pixels of a head sprite are the nose's arc, i.e. not solid in every row.
+     *
+     * <p>Used to keep the selection highlight inside the carriage: the arc's columns are transparent,
+     * so a highlight drawn across them would be a stick hanging in the air beside the nose. Rounded
+     * up, because half a pixel of highlight over a transparent column is still a stray pixel.
+     */
+    private static int consistNoseInset(int width) {
+        return Math.min(width, (CONSIST_NOSE_COLS * width + CONSIST_CELL_W - 1) / CONSIST_CELL_W);
+    }
+
     /** A merged segment's count, one or two digits (a run is two to thirty-eight carriages). */
     private static void drawConsistCount(GuiGraphics graphics, int x, int y, int carriages, int colour) {
         if (carriages >= 10) {
@@ -927,46 +1096,35 @@ public class TrainControlHud implements LayeredDraw.Layer {
     }
 
     /**
-     * What the selected pantograph is doing, in words.
+     * "2 停用：降弓保持" - how many arms the driver has parked, and what that means.
      *
-     * <p>Words rather than colour alone, because the two refusals read very differently and a driver
-     * needs to know which one they have hit: "no catenary in reach" is a fact about where they are,
-     * while the emergency lock is a rule that will not lift until the next station.
+     * <p>This replaces the old "M 已升弓 / M 可升弓 / M 无接触网" line, and the replacement is not
+     * cosmetic. The switch is no longer a manual raise/lower: ON is the original mod's behaviour
+     * (the arm follows the wire, up when there is catenary and down when there is not) and OFF parks
+     * the arm and holds it down, with the server refusing a manual raise. So there is no longer a
+     * key that raises anything, and the old line named one - which is exactly the kind of hint that
+     * reads as a broken control when pressed. What is still worth saying is how many arms are in
+     * that state, because the strip's red marks say WHICH ones and a count says how bad it is.
+     *
+     * <p>The number is drawn with {@link #drawConsistCount}'s pixel digits rather than
+     * {@code Integer.toString}: this runs every frame and the render path does not allocate. The
+     * words come from a language key, so every language reads its own.
+     *
+     * <p>Colour is the warning colour while the panel is live and the danger colour while the
+     * emergency lock holds, because a parked arm is a decision the driver cannot undo until the
+     * lock lifts.
      */
-    private static String pantographStateText(Train train, java.util.List<
-            com.george_vi.electroenergetics.content.railway_electrification.pantograph
-                    .SyncTrainPantographsPacket.Entry> pantographs) {
-        if (TrainHudData.controlsLocked(train.id))
-            return tr("electroenergetics.train.panto.locked");
-        // The switch outranks the per-arm state on this line when it is ON, because it changes what
-        // the per-arm state MEANS: with it on, a lowered arm will be raised again by the next solve,
-        // so "this one is down" is not something the driver can act on. Saying AUTO makes that
-        // obvious instead of leaving them pressing raise and watching it revert.
-        var chosen = pantographs.get(Math.min(TrainControlInput.selectedPantograph(),
-                pantographs.size() - 1));
-        if (chosen.autoRaise())
-            return tr("electroenergetics.train.panto.autoOn");
-        var sel = pantographs.get(Math.min(TrainControlInput.selectedPantograph(),
-                pantographs.size() - 1));
-        if (sel.active())
-            return tr("electroenergetics.train.panto.up");
-        if (sel.reachable())
-            return tr("electroenergetics.train.panto.canRaise");
-        return tr("electroenergetics.train.panto.noWire");
-    }
-
-    private static int pantographStateColour(Train train, java.util.List<
-            com.george_vi.electroenergetics.content.railway_electrification.pantograph
-                    .SyncTrainPantographsPacket.Entry> pantographs) {
-        if (TrainHudData.controlsLocked(train.id))
-            return DANGER;
-        if (TrainHudData.autoRaise(train.id))
-            return ACCENT;
-        var sel = pantographs.get(Math.min(TrainControlInput.selectedPantograph(),
-                pantographs.size() - 1));
-        if (sel.active())
-            return REGEN;
-        return sel.reachable() ? TEXT_DIM : WARN;
+    private static void drawParkedPantographs(GuiGraphics graphics, Font font, Train train,
+                                              int x, int y, java.util.List<
+                                                      com.george_vi.electroenergetics.content
+                                                              .railway_electrification.pantograph
+                                                              .SyncTrainPantographsPacket.Entry> pantographs) {
+        int parked = parkedPantographs(pantographs);
+        int colour = TrainHudData.controlsLocked(train.id) ? DANGER : WARN;
+        drawConsistCount(graphics, x, y + 1, parked, colour);
+        int countW = parked >= 10 ? COUNT_DIGIT_W * 2 + COUNT_DIGIT_GAP : COUNT_DIGIT_W;
+        drawSmallFitted(graphics, font, tr("electroenergetics.train.panto.parked"),
+                x + countW + 2, y, Math.max(1, FITTED_MAX_W - PANTO_DETAIL_X - countW - 2), colour);
     }
 
     /** Draws at 75% scale, without touching the pose stack of the surrounding frame. */
@@ -1067,12 +1225,19 @@ public class TrainControlHud implements LayeredDraw.Layer {
             return lever + "   " + key(TrainControlKeys.ENGAGE)
                     + tr("electroenergetics.train.hint.engage");
         }
-        // Selection is available, so it takes the room. The toggle key is named because raising the
-        // wrong arm drops the supply, which is the one thing on this panel worth being explicit about.
+        // Selection is available, so it takes the room. The switch key is named because parking the
+        // wrong arm drops the supply, and the arm then refuses to raise again until it is switched
+        // back on - the one thing on this panel worth being explicit about.
+        //
+        // It reads "M auto/park" now, not "M raise/lower": the server has no manual raise path left,
+        // so the key IS the per-arm automatic switch, and a hint that still offered raise/lower
+        // would be describing a control that no longer exists. That is the same rule this file
+        // already applies to the pantograph row itself - advertising a key that cannot act reads as
+        // a broken cab.
         return lever
                 + "  \u2190\u2192 " + tr("electroenergetics.train.hint.selectPanto")
                 + "  " + key(TrainControlKeys.PANTOGRAPH_TOGGLE)
-                + tr("electroenergetics.train.hint.raiseLower");
+                + tr("electroenergetics.train.hint.autoPark");
     }
 
     /** A binding's key name, in the player's language. */

@@ -36,8 +36,6 @@ public final class TrainControlInput {
     private static boolean pantoPrevWasDown;
     private static boolean pantoNextWasDown;
     private static boolean pantoToggleWasDown;
-    /** Edge state of the automatic-raise switch, so holding the key toggles once. */
-    private static boolean pantoAutoWasDown;
 
     /**
      * Which pantograph the pantograph keys act on, as an index into the server's list.
@@ -238,7 +236,6 @@ public final class TrainControlInput {
             pantoPrevWasDown = TrainControlKeys.isDown(TrainControlKeys.PANTOGRAPH_PREV);
             pantoNextWasDown = TrainControlKeys.isDown(TrainControlKeys.PANTOGRAPH_NEXT);
             pantoToggleWasDown = TrainControlKeys.isDown(TrainControlKeys.PANTOGRAPH_TOGGLE);
-            pantoAutoWasDown = TrainControlKeys.isDown(TrainControlKeys.PANTOGRAPH_AUTO);
             return;
         }
 
@@ -293,19 +290,18 @@ public final class TrainControlInput {
         boolean pantoPrev = TrainControlKeys.isDown(TrainControlKeys.PANTOGRAPH_PREV);
         boolean pantoNext = TrainControlKeys.isDown(TrainControlKeys.PANTOGRAPH_NEXT);
         boolean pantoToggle = TrainControlKeys.isDown(TrainControlKeys.PANTOGRAPH_TOGGLE);
-        boolean pantoAuto = TrainControlKeys.isDown(TrainControlKeys.PANTOGRAPH_AUTO);
 
         // Not at the controls of an electric consist: drop the edge state, so a key held while
         // walking up to the train does not fire the moment the panel appears.
         if (!isAtElectricTrainControls()) {
-            pantoPrevWasDown = pantoNextWasDown = pantoToggleWasDown = pantoAutoWasDown = false;
+            pantoPrevWasDown = pantoNextWasDown = pantoToggleWasDown = false;
             selectedPantograph = 0;
             return;
         }
 
         Train train = drivenTrain();
         if (train == null) {
-            pantoPrevWasDown = pantoNextWasDown = pantoToggleWasDown = pantoAutoWasDown = false;
+            pantoPrevWasDown = pantoNextWasDown = pantoToggleWasDown = false;
             return;
         }
 
@@ -325,7 +321,6 @@ public final class TrainControlInput {
             pantoPrevWasDown = pantoPrev;
             pantoNextWasDown = pantoNext;
             pantoToggleWasDown = pantoToggle;
-            pantoAutoWasDown = pantoAuto;
             return;
         }
 
@@ -336,9 +331,10 @@ public final class TrainControlInput {
         java.util.List<com.george_vi.electroenergetics.content.railway_electrification.pantograph
                 .SyncTrainPantographsPacket.Entry> pantographs = TrainHudData.pantographs(train.id);
 
-        // The auto-raise switch is deliberately OUTSIDE the `!pantographs.isEmpty()` test below. It is
-        // a property of the train's operation rather than of any one arm, and a consist whose list is
-        // momentarily empty must still be able to turn it off - which is the safe direction.
+        // The switch acts on ONE arm, so it needs an arm to act on, and everything below therefore
+        // lives inside the empty test. The train-wide switch that used to sit outside it is gone:
+        // with the per-arm one there is nothing left for it to say that the arms do not already say
+        // about themselves.
         if (!locked && !pantographs.isEmpty()) {
             // Clamped rather than wrapped blindly: the server's list can shrink when a carriage is
             // removed, and a selection left pointing past the end would make the toggle key do
@@ -358,33 +354,31 @@ public final class TrainControlInput {
                     selectedPantograph = (selectedPantograph - 1 + count) % count;
             }
 
-            // Automatic raise/lower is per arm, so the key acts on the selection like the manual one.
-            // Pressing it while a given arm is selected flips that arm only; the others are untouched.
-            if (pantoAuto && !pantoAutoWasDown) {
+            // The switch, on the selected arm only. ON means "follow the wire": the server raises
+            // the arm when catenary is in reach and lowers it again when it is lost. OFF means
+            // "park it": the arm is lowered, held down, and a raise against the geometry is refused.
+            //
+            // This is the ONLY packet a pantograph key sends now. It used to be two - a raise/lower
+            // toggle on M and a separate train-wide auto switch on the comma key - and the final
+            // ruling collapsed them into the one per-arm switch. Sending the SWITCH rather than a
+            // raise command is what keeps the key honest: there is no longer a way to raise an arm
+            // against the geometry, so a raise command would just be refused, and the key would look
+            // broken for doing nothing.
+            //
+            // The server reports the outcome by syncing the arm state back, so no local state is
+            // invented here - a refused action simply does not happen on screen either.
+            if (pantoToggle && !pantoToggleWasDown) {
                 var target = pantographs.get(selectedPantograph);
                 CatnipServices.NETWORK.sendToServer(
                         new com.george_vi.electroenergetics.content.railway_electrification
                                 .pantograph.SetAutoRaisePacket(train.id, target.carriageIndex(),
                                 target.localPos(), !target.autoRaise()));
             }
-
-            if (pantoToggle && !pantoToggleWasDown) {
-                var target = pantographs.get(selectedPantograph);
-                // Toggle means "the other of how it currently stands", so one key both raises and
-                // lowers. The server refuses a raise it cannot justify and reports the outcome by
-                // syncing back, so no local state is invented here - a refused raise simply does
-                // not happen on screen either.
-                CatnipServices.NETWORK.sendToServer(
-                        new com.george_vi.electroenergetics.content.railway_electrification
-                                .pantograph.SetPantographPacket(train.id, target.carriageIndex(),
-                                target.localPos(), !target.active()));
-            }
         }
 
         pantoPrevWasDown = pantoPrev;
         pantoNextWasDown = pantoNext;
         pantoToggleWasDown = pantoToggle;
-        pantoAutoWasDown = pantoAuto;
     }
 
     /** Which pantograph the pantograph keys act on, for the panel to highlight. */

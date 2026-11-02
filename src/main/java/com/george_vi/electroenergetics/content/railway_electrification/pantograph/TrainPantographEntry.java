@@ -12,15 +12,20 @@ public final class TrainPantographEntry {
     public boolean active;
 
     /**
-     * Whether this arm looks after itself: raised whenever catenary is in reach, and lowered when it is
-     * not. Per arm, not per train - a consist can run one arm on auto through a bendy section while the
-     * other stays the driver's.
+     * THE PER-ARM AUTOMATIC-WORKING SWITCH. On (default) the arm follows the wire; off the arm is
+     * parked - forced down and kept down, and its manual raise is refused.
      *
-     * <p>DEFAULT IS TRUE, because that is the original mod's behaviour and the operator asked for it
-     * back: an arm goes up over the wire on its own and comes down when the wire ends. The switch is
-     * kept per arm because a driver may still want to park one arm and work the other by hand; the
-     * manual key is refused while this is set, because the two would fight and the next solve would
-     * simply put the arm back.
+     * <p>On: exactly the original mod's behaviour - raised while catenary is in reach, lowered when it
+     * is lost. The geometry decides, so there is no manual raise to compete with it.
+     *
+     * <p>Off: "I do not want this arm working." {@code CatenaryModule} forces the arm down on every
+     * solve, drops its wire cut, and leaves {@code reachable} false; {@code SetPantographPacket}
+     * refuses a manual raise for it as well. This is not a manual-control mode: it is a park switch.
+     *
+     * <p>The state is saved per arm on the train (see {@code IPantographAutoState}) and re-applied in
+     * {@code CatenaryModule.buildCircuit} before the first solve, so a parked arm stays parked across
+     * a reload, a dimension change or a world restart - including when nobody is driving and the
+     * driver-only sync never runs.
      */
     public boolean autoRaise = true;
     public boolean facingForward;

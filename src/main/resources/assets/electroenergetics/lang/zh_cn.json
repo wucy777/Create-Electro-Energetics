@@ -534,13 +534,13 @@
   "key.electroenergetics.pantograph_prev": "列车：选择上一把受电弓",
   "key.electroenergetics.pantograph_next": "列车：选择受电弓",
   "key.electroenergetics.pantograph_auto": "列车：自动升弓开关",
-  "electroenergetics.train.panto.autoOn": "自动升弓",
-  "electroenergetics.train.panto.autoLocked": "该受电弓为自动模式，先关闭自动才能手动升降",
+  "electroenergetics.train.panto.autoOn": "自动",
+  "electroenergetics.train.panto.autoLocked": "该受电弓已停用并保持降弓，改回自动才会升弓",
   "electroenergetics.train.riders.notSeatedBraking": "超载：座位不足，列车限速 100 km/h",
   "electroenergetics.train.riders.overloaded": "超载：座位不足，列车限速 100 km/h",
   "electroenergetics.train.riders.seatLocked": "车速超过 100 km/h，行驶中禁止下车",
   "electroenergetics.train.panto.autoOff": "手动",
-  "key.electroenergetics.pantograph_toggle": "列车：升/降受电弓",
+  "key.electroenergetics.pantograph_toggle": "列车：自动/停用受电弓",
   "electroenergetics.train.panto.up": "已升弓",
   "electroenergetics.train.panto.canRaise": "可升弓",
   "electroenergetics.train.status.locked": "紧急制动锁定：停车后自行解除，限速持续到下一站",
@@ -596,5 +596,7 @@
   "electroenergetics.train.status.warn": "即将超时，请确认",
   "electroenergetics.train.status.overdue": "已超时——即将制动",
   "electroenergetics.train.status.arriving": "自动进站中",
-  "electroenergetics.train.status.unmanned": "无人驾驶——请确认或接管"
+  "electroenergetics.train.status.unmanned": "无人驾驶——请确认或接管",
+  "electroenergetics.train.panto.parked": "停用：降弓保持",
+  "electroenergetics.train.hint.autoPark": "自动/停用"
 }

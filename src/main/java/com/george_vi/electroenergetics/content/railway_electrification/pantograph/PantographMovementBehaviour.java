@@ -81,18 +81,20 @@ public class PantographMovementBehaviour implements MovementBehaviour {
 
         // The ARM follows the per-arm handle (`active`). It does not set it.
         //
-        // Who writes that handle depends on the mode, and the DEFAULT is upstream's behaviour:
+        // The handle is maintained on the server only, from the per-arm automatic-working switch:
         //
-        //   automatic mode (autoRaise, default)   CatenaryModule raises the arm when catenary is in
-        //                                         reach and lowers it when the wire is lost - the same
-        //                                         up-over-the-wire / down-when-it-ends behaviour the
-        //                                         original mod produced, only decided on the server so
-        //                                         it cannot disagree with the current-collection test;
-        //   manual mode (driver turned auto off)  the driver's key is the only writer, validated
-        //                                         against the same geometry in SetPantographPacket.
+        //   switch ON (default)   CatenaryModule raises the arm when catenary is in reach and lowers
+        //                         it when the wire is lost - the same up-over-the-wire /
+        //                         down-when-it-ends behaviour the original mod produced, only decided
+        //                         on the server so it cannot disagree with the current-collection test;
+        //   switch OFF            CatenaryModule forces the arm down every solve and drops its wire
+        //                         cut: the switch means "I do not want this arm working". There is no
+        //                         manual raising anywhere - SetPantographPacket refuses it for both
+        //                         states (a raise would either duplicate the geometry or be undone
+        //                         by it on the next solve).
         //
-        // Restoring the upstream default is what this method must not break: nothing here writes
-        // `active` except the controls-block mirroring above, which is upstream's own override.
+        // Nothing here writes `active` except the controls-block mirroring above, which is upstream's
+        // own physical override.
         //
         // A NULL entry means one of two very different things, and they must not be confused.
         //

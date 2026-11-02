@@ -102,33 +102,29 @@ public final class TrainControlKeys {
             "key.electroenergetics.pantograph_next",
             InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_RIGHT, CATEGORY);
 
-    /** Raise or lower the selected pantograph, depending on how it currently stands. */
+    /**
+     * Switch the selected pantograph between automatic and parked.
+     *
+     * <p>It was raise/lower, and it is not any more: the operator's final ruling made the switch the
+     * only pantograph control there is. ON is the original mod's behaviour - the arm follows the
+     * wire, raised while catenary is in reach and lowered when it is lost. OFF parks the arm, holds
+     * it down, and the server refuses to raise it again until it is switched back on.
+     *
+     * <p>Per arm, not per train: it acts on the selection, which is what the left/right keys step
+     * through, so one parked arm cannot take the whole train's supply down by accident and the rest
+     * keep collecting.
+     *
+     * <p>The comma key that used to hold the train-wide switch is gone. Two switches that both say
+     * something about "automatic" - one per train and one per arm - was one switch too many, and the
+     * per-arm one is the one that can express the operator's actual case (a rigid carriage losing
+     * contact on a bend while another arm on the same train does not).
+     */
     public static final KeyMapping PANTOGRAPH_TOGGLE = new KeyMapping(
             "key.electroenergetics.pantograph_toggle",
             InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_M, CATEGORY);
 
-    /**
-     * Turn automatic raising on or off FOR THIS TRAIN.
-     *
-     * <p>Per train, not global: the switch lives on the train's own {@code ElectricTrainData}, so two
-     * consists in the same world keep their own settings and a driver who turns it on for the bendy
-     * loop does not silently change every other train on the map.
-     *
-     * <p>A switch, not an action, and that is why it is a third key rather than a mode of the
-     * existing two. On, it restores upstream's behaviour - wire in reach, therefore up - which is
-     * what a compact line with curves needs: a rigid carriage loses the contact laterally on every
-     * bend, and manual raising cannot be pressed often enough. Off is the default and the operator's
-     * original rule: how many pantographs are up is the driver's call.
-     *
-     * <p>Comma rather than a letter: the letters around the movement hand are taken by the cab and by
-     * the pack, and comma does not collide with either. It is rebindable like every other cab key.
-     */
-    public static final KeyMapping PANTOGRAPH_AUTO = new KeyMapping(
-            "key.electroenergetics.pantograph_auto",
-            InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_COMMA, CATEGORY);
-
     private static final KeyMapping[] ALL = {LEVER_UP, LEVER_DOWN, CONFIRM, ENGAGE, EMERGENCY,
-            PANTOGRAPH_PREV, PANTOGRAPH_NEXT, PANTOGRAPH_TOGGLE, PANTOGRAPH_AUTO};
+            PANTOGRAPH_PREV, PANTOGRAPH_NEXT, PANTOGRAPH_TOGGLE};
 
     private TrainControlKeys() {}
 

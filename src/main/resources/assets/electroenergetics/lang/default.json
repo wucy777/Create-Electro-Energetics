@@ -216,13 +216,13 @@
   "key.electroenergetics.pantograph_prev": "Train: Select previous pantograph",
   "key.electroenergetics.pantograph_next": "Train: select pantograph",
   "key.electroenergetics.pantograph_auto": "Train: Toggle auto-raise",
-  "electroenergetics.train.panto.autoOn": "AUTO RAISE",
-  "electroenergetics.train.panto.autoLocked": "This pantograph is automatic - turn auto off to control it by hand",
+  "electroenergetics.train.panto.autoOn": "AUTOMATIC",
+  "electroenergetics.train.panto.autoLocked": "This pantograph is parked and held down - switch it back to automatic to raise it",
   "electroenergetics.train.riders.notSeatedBraking": "Over capacity: not enough seats - speed limited to 100 km/h",
   "electroenergetics.train.riders.overloaded": "Over capacity: not enough seats - speed limited to 100 km/h",
   "electroenergetics.train.riders.seatLocked": "Above 100 km/h the doors are locked - you cannot get off",
   "electroenergetics.train.panto.autoOff": "MANUAL",
-  "key.electroenergetics.pantograph_toggle": "Train: raise/lower pantograph",
+  "key.electroenergetics.pantograph_toggle": "Train: auto/park pantograph",
   "electroenergetics.train.panto.up": "Raised",
   "electroenergetics.train.panto.canRaise": "Can raise",
   "electroenergetics.train.status.locked": "Emergency lock: releases once stopped; the speed cap lasts until the next station",
@@ -278,5 +278,7 @@
   "electroenergetics.train.status.warn": "ACKNOWLEDGE SOON",
   "electroenergetics.train.status.overdue": "ACKNOWLEDGE NOW - BRAKE APPLIES",
   "electroenergetics.train.status.arriving": "arriving at station",
-  "electroenergetics.train.status.unmanned": "NO DRIVER - confirm or take over"
+  "electroenergetics.train.status.unmanned": "NO DRIVER - confirm or take over",
+  "electroenergetics.train.panto.parked": "PARKED - held down",
+  "electroenergetics.train.hint.autoPark": "auto/park"
 }

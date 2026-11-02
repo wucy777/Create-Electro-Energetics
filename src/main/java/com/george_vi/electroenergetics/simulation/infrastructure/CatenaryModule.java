@@ -106,8 +106,35 @@ public class CatenaryModule {
             // level's to evaluate.
 
             boolean connected = false;
-            for (Carriage carriage : train.carriages) {
+            for (int carriageIndex = 0; carriageIndex < train.carriages.size(); carriageIndex++) {
+                Carriage carriage = train.carriages.get(carriageIndex);
                 List<TrainPantographEntry> pantographs = ((IPantographList)carriage).electroEnergetics$getPantographList();
+
+                // THE SAVED PER-ARM SWITCH, APPLIED HERE AND NOW - not only from syncPantographs.
+                //
+                // The switch is the arm's AUTOMATIC-WORKING master switch: on means "follow the wire",
+                // off means "this arm does not work at all" (it is forced down below). That decision
+                // must be in force before the first solve after a load, because the entries are rebuilt
+                // from the carriage with the field's default (on) and the saved values live on the Train.
+                //
+                // syncPantographs also restores them, but it only runs while somebody is at the
+                // controls - so a train reloaded with every arm parked, or with no driver anywhere,
+                // would never have its switches restored at all, and its first solve would raise the
+                // arms the driver had deliberately switched off. This is the fix for that: the state
+                // is on the train, so it is read from the train, once per arm per solve (a handful of
+                // HashMap reads - the map is empty for trains whose switches were never touched).
+                var autoState = ((com.george_vi.electroenergetics.mixin_interfaces.IPantographAutoState) train)
+                        .electroEnergetics$pantoAutoState();
+                if (!autoState.isEmpty()) {
+                    for (TrainPantographEntry pe : pantographs) {
+                        Boolean saved = autoState.get(
+                                com.george_vi.electroenergetics.mixin_interfaces.IPantographAutoState.key(
+                                        carriageIndex, pe.originalPos));
+                        if (saved != null)
+                            pe.autoRaise = saved;
+                    }
+                }
+
                 // A carriage is skipped when it is not in this dimension, or when it is neither a
                 // motor car nor carries a pantograph - in which case there is nothing here to do.
                 //
@@ -181,6 +208,36 @@ public class CatenaryModule {
 
                 PantographLoop:
                 for (TrainPantographEntry pantograph : pantographs) {
+                    // THE PER-ARM SWITCH IS AN AUTOMATIC-WORKING SWITCH, NOT A MANUAL ONE.
+                    //
+                    //   switch ON  (default)  follow the geometry below: raised when catenary is in
+                    //                         reach, lowered when it is not. This is upstream's
+                    //                         original behaviour.
+                    //   switch OFF            the driver has said "I do not want this arm working".
+                    //                         It is parked: forced DOWN here on every solve, and the
+                    //                         manual raise in SetPantographPacket is refused for it.
+                    //
+                    // Unconditional, deliberately: it is not enough to skip the automatic raise while
+                    // the geometry still says "no wire", because a parked arm standing under live wire
+                    // would then stay up and keep collecting. It is lowered whatever the geometry says,
+                    // including on the first solve after a reload (that is what makes the parked state
+                    // survive a world restart).
+                    //
+                    // Done before the geometry query: a parked arm has no reachability question worth
+                    // answering. The per-carriage clear above has already set its `reachable` false,
+                    // and the electrical cut it may still hold is dropped here for the same reason the
+                    // ordinary "lost the wire" path drops it - the node must not stay bridged into the
+                    // circuit while the arm is down.
+                    if (!pantograph.autoRaise) {
+                        if (pantograph.active)
+                            pantograph.active = false;
+                        pantograph.prevPos = pantograph.pos;
+                        pantograph.pos = null;
+                        if (trainData.wireCutHandle != null && pantograph.node != null)
+                            trainData.connectedWireState.removeCut(trainData.wireCutHandle, pantograph.node);
+                        continue PantographLoop;
+                    }
+
                     // NOTE: the geometry below is evaluated whether or not the driver has this
                     // pantograph raised, because the answer is needed either way. "Is this
                     // pantograph within reach of catenary" is what decides whether the driver is
@@ -249,13 +306,14 @@ public class CatenaryModule {
                             // the driver is ALLOWED to raise it.
                             pantograph.reachable = true;
 
-                            // AUTOMATIC RAISING - the DEFAULT, and upstream's behaviour restored. It is
+                            // AUTOMATIC RAISING - the default, and upstream's behaviour restored. It is
                             // the mirror image of the automatic lowering further down: wire in reach,
                             // therefore up, with no further test.
                             //
-                            // It is ON by default (see TrainPantographEntry.autoRaise). The per-arm
-                            // switch exists so a driver can put one arm back in manual control - then
-                            // this branch does not run for it and its key is the only writer of a raise.
+                            // Only automatic arms reach this point: an arm with the switch OFF was
+                            // forced down and skipped at the top of the loop. So this is simply "the
+                            // geometry decides", and there is no manual raise to compete with it -
+                            // SetPantographPacket refuses one for every arm (see that class).
                             //
                             // The reason the switch exists at all is a rigid carriage on a curve. The
                             // arm is fixed in the carriage's frame while the catenary follows the
@@ -265,15 +323,12 @@ public class CatenaryModule {
                             // by pressing raise at the right moment - it would need pressing on every
                             // bend - so it is a switch rather than a key.
                             //
-                            // Setting `active` here makes this the second writer of a raise in the
-                            // mod. The invariant is "no raise without either the driver's packet or
-                            // the driver's switch", and both are the driver.
                             // Per arm: this one's own switch, not the consist's.
                             if (!raised && pantograph.autoRaise)
                                 pantograph.active = true;
 
-                            // An arm raised this tick (by the driver earlier, or by the switch just
-                            // above) is what the electrical work below requires.
+                            // An arm raised this tick (by the switch just above) is what the electrical
+                            // work below requires.
                             raised = pantograph.active;
 
                             // The electrical work below only applies to a raised pantograph. A
@@ -329,14 +384,13 @@ public class CatenaryModule {
                     if (trainData.wireCutHandle != null && pantograph.node != null)
                         trainData.connectedWireState.removeCut(trainData.wireCutHandle, pantograph.node);
 
-                    // AUTOMATIC LOWERING. Nothing within reach and the driver still has this one
-                    // raised, so it comes down - the case of a driver approaching a neutral section
-                    // or the end of the electrified line who did not lower it in time. A real
-                    // pantograph cannot be left pressing against nothing, and the driver has
-                    // plainly lost the wire either way.
+                    // AUTOMATIC LOWERING. Nothing within reach and this arm is still raised, so it comes
+                    // down - the case of a train approaching a neutral section or the end of the
+                    // electrified line. A real pantograph cannot be left pressing against nothing.
                     //
-                    // Its counterpart, automatic RAISING, is not here: it lives where `reachable` is
-                    // set true, and only runs behind the driver's own switch. See that site.
+                    // Only automatic arms reach this point (the switch-off case was parked and skipped
+                    // at the top of the loop), so this and the raise above are the two halves of
+                    // upstream's original "ride the wire while there is one" behaviour.
                     // (reachable has just been left false for this pantograph: it is cleared per
                     // carriage before the loop and is set true only on a geometry match, which did
                     // not happen for this one.)

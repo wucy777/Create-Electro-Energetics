@@ -18,12 +18,15 @@ import net.minecraft.server.level.ServerPlayer;
 import java.util.UUID;
 
 /**
- * Turns one arm's automatic raise/lower on or off.
+ * Turns one arm's automatic-working switch on or off.
  *
- * <p>Per arm rather than per train. A consist on a winding line may want the leading arm to look after
- * itself and the trailing one left alone, and a train-wide switch cannot express that. It also makes the
- * rule "auto on disables that arm's manual key" expressible at all - with one switch for the whole train,
- * turning it off to regain manual control of one arm would have freed every arm.
+ * <p>Per arm rather than per train: a consist on a winding line may want the leading arm to look after
+ * itself while the other is parked, and a train-wide switch cannot express that.
+ *
+ * <p>The switch is a PARK switch now, not a manual-control switch. On (the default) the arm follows
+ * the geometry - raised while catenary is in reach, lowered when it is lost. Off means the arm is
+ * forced down and kept down by {@code CatenaryModule}; its manual raise is refused. The toggle itself
+ * only records the choice and, when turning it off, drops the arm it was looking after.
  */
 public record SetAutoRaisePacket(UUID trainId, int carriageIndex, BlockPos localPos, boolean autoRaise)
         implements ServerboundPacketPayload {
@@ -78,17 +81,16 @@ public record SetAutoRaisePacket(UUID trainId, int carriageIndex, BlockPos local
                 .put(com.george_vi.electroenergetics.mixin_interfaces.IPantographAutoState.key(
                         carriageIndex, localPos), autoRaise);
 
-        // Turning the switch OFF must lower the arms it raised, or the driver turns it off and nothing
-        // observable happens until the next bend - the arms would simply stay wherever the automatic
-        // raising last put them, still collecting current, with the panel claiming manual mode. That
-        // is the one state this whole feature exists to prevent: a pantograph up that the driver did
-        // not raise.
+        // Turning the switch OFF must lower the arm - and the server-side force-down in CatenaryModule
+        // would do it on the next solve anyway. Doing it here as well makes the change visible on the
+        // same tick (the panel's still-current state comes from the sync, which is sent on a change),
+        // and it drops the arm before anything else can read `active` in between.
         //
         // Turning it ON does not raise anything here. Raising is geometry's job (the site in
-        // CatenaryModule where `reachable` is set), and doing it from the packet would raise an arm
-        // with no check on whether there is wire - precisely the failure the manual path refuses.
-        // Turning it off lowers the arm it was looking after, and only that one: the others were never
-        // this switch's business.
+        // CatenaryModule where `reachable` is set); doing it from the packet would raise an arm with no
+        // check on whether there is wire.
+        // Turning it off parks only the arm it was looking after: the others were never this switch's
+        // business.
         if (!autoRaise) {
             entry.active = false;
             // Same rule as the manual lower: declutch only if no arm is left collecting. On a twin-arm

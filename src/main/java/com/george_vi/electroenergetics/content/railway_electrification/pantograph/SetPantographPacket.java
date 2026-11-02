@@ -19,23 +19,28 @@ import net.minecraft.server.level.ServerPlayer;
 import java.util.UUID;
 
 /**
- * Driver to server: raise or lower one pantograph.
+ * Driver to server: a manual raise/lower request for one pantograph.
  *
- * <h2>The rule, and why it is enforced here</h2>
+ * <h2>The per-arm switch is an AUTOMATIC-WORKING switch</h2>
  *
- * <p>Raising is only permitted when the chosen pantograph is within reach of catenary; lowering is
- * always permitted. That asymmetry is the operator's design and it is physically right: a
- * pantograph can be dropped at any moment, but pressing one up against nothing is not something a
- * real one can do, and in game it would silently do nothing while appearing to be raised.
+ * <p>The switch does not select "automatic versus manual" any more. It selects whether the arm works
+ * at all:
  *
- * <p>The check runs HERE, on the server, against the server's own geometry - not on the client
- * that asked. A client-side test would be both unenforceable and frequently wrong, since the
- * client's carriage data does not carry the pantograph list at all (client carriages are built
- * from {@code AddTrainPacket} and never go through {@code Carriage.read}). The server recomputes
- * {@code reachable} every solve in {@code CatenaryModule}, so it is the authority on it.
+ * <ul>
+ *   <li>ON (default) - the arm follows the geometry: CatenaryModule raises it when catenary is in
+ *       reach and lowers it when the wire is lost. This is the original mod's behaviour.</li>
+ *   <li>OFF - the arm is parked. CatenaryModule forces it down every solve and drops its wire cut,
+ *       because "auto off" means "I do not want this arm working".</li>
+ * </ul>
  *
- * <p>A refused raise is reported back to the driver rather than silently ignored, so the panel can
- * say why nothing happened.
+ * <p>Consequently a manual RAISE is refused for every arm: an automatic arm raises itself, and a
+ * switched-off arm is meant to stay down. A manual LOWER is still accepted for a parked arm because
+ * it is a harmless no-op (the arm is down already); for an automatic arm it is refused too, since the
+ * next solve would put the arm straight back up and the key would appear broken.
+ *
+ * <p>The refusals are reported back to the driver rather than silently ignored, so the panel can say
+ * why nothing happened. (The wording of that message, and which state the panel shows, belongs to the
+ * panel side; this class only decides what the server accepts.)
  *
  * @param trainId the train the driver is at the controls of
  * @param carriageIndex index into {@code train.carriages}
@@ -82,23 +87,28 @@ public record SetPantographPacket(UUID trainId, int carriageIndex, BlockPos loca
         if (entry == null)
             return;
 
-        // Automatic raise/lower owns this arm. Its manual key would be undone by the very next solve, so
-        // refusing is the honest answer - and the panel says AUTO, which is where the driver is told why.
+        // THE SWITCH IS NOW AN AUTOMATIC-WORKING SWITCH, NOT A MANUAL ONE.
+        //
+        // Switch ON means the arm follows the geometry (CatenaryModule raises it when the wire is in
+        // reach and lowers it when the wire is lost). Accepting a manual command here would be undone
+        // by the very next solve, so refusing is the honest answer: the key would appear to work for
+        // one tick and then snap back, which reads as a broken control.
         if (entry.autoRaise) {
             refusal(player, "electroenergetics.train.panto.autoLocked");
             return;
         }
 
         if (!raise) {
-            // Always allowed. A driver must be able to drop a pantograph at any moment, and
-            // refusing to would be the one failure with no workaround.
+            // Lowering a parked arm. The CatenaryModule forces these arms down every solve, so this is
+            // a no-op in practice - accepted anyway, because it has no side effect and a hard "no" to
+            // a key that already matches reality would be noise.
             //
-            // The lever is dropped to COAST first, and the order matters. Cutting the supply while the
-            // gear still commands traction leaves the motors connected to a dead line, and an unexcited
-            // motor being turned by a moving train is a generator with a short across it: it brakes, hard
-            // enough to be felt through the train. A road vehicle has the same problem and the same
-            // answer - declutch before killing the engine - so the lever goes to neutral and only then
-            // does the pantograph come down.
+            // The lever is dropped to COAST first (only if this was the last live arm), and the order
+            // matters. Cutting the supply while the gear still commands traction leaves the motors
+            // connected to a dead line, and an unexcited motor being turned by a moving train is a
+            // generator with a short across it: it brakes, hard enough to be felt through the train. A
+            // road vehicle has the same problem and the same answer - declutch before killing the
+            // engine - so the lever goes to neutral and only then does the pantograph come down.
             //
             // It is also the only order that is legal. COAST and BRAKE are the only positions selectable
             // without a supply (ElectricTrainData.gearAvailable), so lowering first would leave the lever
@@ -116,45 +126,19 @@ public record SetPantographPacket(UUID trainId, int carriageIndex, BlockPos loca
             return;
         }
 
-        // Barred until the next station if the emergency brake has been used. Checked before the
-        // reach test, because this is a rule about the driver rather than about the world: the wire
-        // may well be right there, and the answer is still no.
+        // RAISING IS REFUSED FOR EVERY ARM. That is the switch semantics, not an oversight:
         //
-        // This is what makes "the emergency brake must stop the train whether or not there is
-        // power" enforceable. Without it a driver whose supply failed mid-stop could simply raise a
-        // pantograph and finish the stop on the motors, which is exactly what the rule forbids.
+        //   automatic arm (switch on)   raises itself when the geometry says there is wire. A manual
+        //                               raise would at best duplicate what the next solve does, and at
+        //                               worst fight the geometry that already refused to raise it.
+        //   parked arm    (switch off)  the driver said "I do not want this arm working", and
+        //                               CatenaryModule forces it down on every solve. Accepting a raise
+        //                               here would be undone immediately, so refusing is the only
+        //                               answer that keeps the server state and the switch consistent.
         //
-        // BOTH flags, spelled exactly as the gear lock in SetTrainGearPacket spells them. Today the
-        // two conditions happen to agree, because the flags only ever hold (false,false),
-        // (false,true) or (true,true): arming sets both, and release clears emergencyArmed first. But
-        // that is a property of the current release order, not something this check states - so
-        // testing one flag here leaves a trap. Change the order and the two locks diverge silently,
-        // with the gear refusing a move that a pantograph command still allows. Spelling both makes
-        // the pair self-evidently identical rather than accidentally identical.
-        TrainDriverState driver = ((ICEETrainExtension) train).getElectricTrainData().driver;
-        // emergencyPenalty is the flag that actually lasts to the next station: controlsLocked is released by
-        // LOCKOUT_TAIL_TICKS (2 s) once the train stands, so testing the two lockout flags alone let the
-        // driver re-raise a pantograph two seconds after an emergency stop - the exact thing the rule
-        // forbids, and the opposite of what the comment above claims. The penalty is cleared only at a
-        // station (GameEvents) or by the 10,000-Block backstop, so this cannot strand a driver on a line
-        // with no stations.
-        if (driver.emergencyArmed || driver.controlsLocked || driver.emergencyPenalty) {
-            refusal(player, "electroenergetics.train.panto.locked");
-            return;
-        }
-
-        // Raising requires the wire to be in reach. `reachable` is recomputed from geometry every
-        // solve on this side, so it cannot be spoofed and cannot be stale by more than one tick.
-        //
-        // Refusing is deliberate rather than a no-op: the alternative - raising against nothing -
-        // would show the driver a raised pantograph collecting no current, which is exactly the
-        // confusing state this rule exists to prevent.
-        if (!entry.reachable) {
-            refusal(player, "electroenergetics.train.panto.noWire");
-            return;
-        }
-
-        entry.active = true;
+        // Reported rather than silently ignored, so the driver knows the key was understood and the
+        // answer is no. The wording of the prompt is the panel's business; this class owns the rule.
+        refusal(player, "electroenergetics.train.panto.autoLocked");
     }
 
     /**
