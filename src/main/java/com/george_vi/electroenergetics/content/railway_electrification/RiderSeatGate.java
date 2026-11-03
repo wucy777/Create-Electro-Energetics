@@ -168,6 +168,16 @@ public final class RiderSeatGate {
                 seated.addAll(contraption.getSeatMapping().keySet());
         }
 
+        // The driver standing at the controls is NOT an unseated passenger. They are doing their job at a
+        // desk that has no seat of its own, and counting them as standing made a one-man train report itself
+        // as over capacity: the gate would try to seat the driver, fail while they kept driving, and after the
+        // grace the train forced itself to cruise - reported as "above 50 m/s I hold J and every so often it
+        // drops back to cruise by itself".
+        var driverData = ((com.george_vi.electroenergetics.mixin_interfaces.ICEETrainExtension) train)
+                .getElectricTrainData();
+        java.util.UUID driving = driverData != null && driverData.driver != null
+                ? driverData.driver.claimOwner : null;
+
         List<Player> out = new ArrayList<>();
         for (Carriage carriage : train.carriages) {
             CarriageContraptionEntity entity = carriage.anyAvailableEntity();
@@ -187,6 +197,8 @@ public final class RiderSeatGate {
                 if (isOnContraption(nearby, entity))
                     collect(nearby, seated, out);
         }
+        if (driving != null)
+            out.removeIf(p -> driving.equals(p.getUUID()));
         out.sort(Comparator.comparing(Player::getUUID));
         return out;
     }

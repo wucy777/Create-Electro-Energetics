@@ -38,6 +38,9 @@ import net.minecraft.world.phys.Vec3;
 import java.util.*;
 
 public class CatenaryModule {
+
+    /** Solves an arm may spend with nothing in reach before it is lowered. See TrainPantographEntry.reachLostTicks. */
+    private static final int REACH_LOSS_TICKS_BEFORE_LOWERING = 3;
     private static final double GAUGE_SYNC_THRESHOLD = 0.05; // 5% change threshold for network sync
 
     /**
@@ -336,6 +339,7 @@ public class CatenaryModule {
                             // bend - so it is a switch rather than a key.
                             //
                             // Per arm: this one's own switch, not the consist's.
+                            pantograph.reachLostTicks = 0;
                             if (!raised && pantograph.autoRaise)
                                 pantograph.active = true;
 
@@ -406,8 +410,13 @@ public class CatenaryModule {
                     // (reachable has just been left false for this pantograph: it is cleared per
                     // carriage before the loop and is set true only on a geometry match, which did
                     // not happen for this one.)
-                    if (raised)
-                        pantograph.active = false;
+                    // Three solves of nothing in reach before the arm comes down. One is enough for a real
+                    // neutral section - the wire is gone for far longer than three ticks there - and too
+                    // eager for a segment seam on a tight curve, where the test flickers for a tick or two.
+                    if (raised) {
+                        if (++pantograph.reachLostTicks >= REACH_LOSS_TICKS_BEFORE_LOWERING)
+                            pantograph.active = false;
+                    }
 
                 }
             }

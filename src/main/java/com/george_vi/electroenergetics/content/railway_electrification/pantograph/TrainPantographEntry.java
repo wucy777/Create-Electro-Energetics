@@ -48,6 +48,15 @@ public final class TrainPantographEntry {
      * would be meaningless on load.
      */
     public boolean reachable;
+
+    /**
+     * Consecutive solves this arm has been raised with no wire in reach.
+     *
+     * <p>An arm used to drop the instant one solve found nothing, and on a tight curve the contact test
+     * flickers at the seams between wire segments: reported as the arm lowering and raising again, audibly,
+     * at the same four points round a ring of eighth-radius curves at low speed.
+     */
+    public int reachLostTicks;
     public AttachedNode node;
     public Vec3 pos = null;
     public Vec3 prevPos = null;
