@@ -38,15 +38,10 @@ import java.util.UUID;
  *
  * <h2>Who counts as aboard</h2>
  *
- * <p>Two collections Create already maintains, per carriage:
- *
- * <ul>
- *   <li>{@code collidingEntities} - entities resting on the contraption. A player standing in the carriage,
- *       or on its roof, is in it. A player on the platform is not.</li>
- *   <li>{@code getIndirectPassengers()} - riders, including seated passengers.</li>
- * </ul>
- *
- * <p>Spectators are excluded: not counted, not carried, not followed.
+ * <p>Already-seated riders come from Create's passenger chain and seat mapping. A standing player must have
+ * a supporting block in the carriage's own local block map below their feet (a short jump above that surface
+ * is tolerated). Create's collision set alone is not evidence of boarding: it also records side impacts when
+ * a moving train hits somebody on the platform.
  *
  * <h2>Free seats come from the carriage, not the world</h2>
  *
@@ -59,14 +54,7 @@ public final class RiderSeatGate {
 
     private static final org.slf4j.Logger LOG =
             org.slf4j.LoggerFactory.getLogger("electroenergetics/seatrestore");
-
-    // Temporary: one line per seating event, so a wrong seat can be diagnosed from the log instead of
-    // guessed at. Costs nothing when nobody is being seated.
-    private static final org.slf4j.Logger LOGGER =
-            org.slf4j.LoggerFactory.getLogger("electroenergetics/seatdiag");
-
     private RiderSeatGate() {}
-
 
     /**
      * Create's own top speed for a player-driven train, in Blocks per second.
@@ -178,6 +166,9 @@ public final class RiderSeatGate {
         java.util.UUID driving = driverData != null && driverData.driver != null
                 ? driverData.driver.claimOwner : null;
 
+        // Use the level's player list and the exact contraption block map as the authority. Create's
+        // collidingEntities also contains side impacts; treating that set as boarding evidence was what
+        // seated a platform player when a fast train merely hit them.
         List<Player> out = new ArrayList<>();
         for (Carriage carriage : train.carriages) {
             CarriageContraptionEntity entity = carriage.anyAvailableEntity();
@@ -187,13 +178,7 @@ public final class RiderSeatGate {
             if (contraption == null)
                 continue;
 
-            for (Entity colliding : entity.collidingEntities.keySet())
-                collect(colliding, seated, out);
-            for (Entity passenger : entity.getIndirectPassengers())
-                collect(passenger, seated, out);
-            // collidingEntities is filled by the collision pass, so a player who walked in and stopped may
-            // never appear in it. Their own box against the carriage's is the cheap exact test.
-            for (var nearby : entity.level().players())
+            for (Player nearby : entity.level().players())
                 if (isOnContraption(nearby, entity))
                     collect(nearby, seated, out);
         }
@@ -426,36 +411,53 @@ public final class RiderSeatGate {
     }
 
     /** The index of the carriage this entity is riding, or -1 if it is not riding any of them. */
+    /** Whether the player's feet are supported by a block in this carriage. */
+    public static boolean isStandingOnCarriageFloor(Entity entity,
+                                                     com.simibubi.create.content.contraptions.AbstractContraptionEntity carriage) {
+        return hasCarriageSupport(entity, carriage, 0.18d);
+    }
+
     /**
-     * Whether this entity is standing on that carriage's own blocks.
+     * Whether the player is on a support surface belonging to this carriage.
      *
-     * <p>Deliberately not the carriage's bounding box. That box is axis-aligned and does not turn with the
-     * contraption, so for a diagonal or angled car it covers a great deal of empty space - and a player
-     * standing on the platform beside the train would be inside it. This asks the question that actually
-     * matters: are the blocks under the entity's feet part of this contraption. Create's block map is in
-     * contraption-local coordinates, so it is exact for any shape and any rotation, and a world block is
-     * simply not in it.
-     *
-     * <p>Three samples up the body, each also checking the block below: standing on the floor, standing on
-     * a seat, and standing inside a wall all resolve, and the whole thing is a handful of map lookups.
+     * <p>The check follows collision shapes in carriage-local coordinates. A nearby world AABB or Create's
+     * side-collision bookkeeping cannot by itself make a platform player count as aboard. A short jump above
+     * an actual support surface remains aboard for the seating gate.
      */
     public static boolean isOnContraption(net.minecraft.world.entity.Entity entity,
-                                         com.simibubi.create.content.contraptions.AbstractContraptionEntity carriage) {
+                                          com.simibubi.create.content.contraptions.AbstractContraptionEntity carriage) {
+        return hasCarriageSupport(entity, carriage, 3.0d);
+    }
+
+    private static boolean hasCarriageSupport(Entity entity,
+            com.simibubi.create.content.contraptions.AbstractContraptionEntity carriage, double maxGap) {
         if (entity == null || carriage == null)
             return false;
         Contraption contraption = carriage.getContraption();
-        if (contraption == null)
-            return false;
-        var blocks = contraption.getBlocks();
-        if (blocks == null || blocks.isEmpty())
+        if (contraption == null || contraption.getBlocks() == null || contraption.getBlocks().isEmpty())
             return false;
 
-        double feetY = entity.getBoundingBox().minY;
-        for (double dy : new double[] {0.05d, 0.55d, 1.05d}) {
-            Vec3 world = new Vec3(entity.getX(), feetY + dy, entity.getZ());
-            Vec3 local = carriage.toLocalVector(world, 1.0f);
-            BlockPos pos = BlockPos.containing(local.x, local.y, local.z);
-            if (blocks.containsKey(pos) || blocks.containsKey(pos.below()))
+        Vec3 localFeet = carriage.toLocalVector(
+                new Vec3(entity.getX(), entity.getBoundingBox().minY, entity.getZ()), 1.0f);
+        BlockPos feetCell = BlockPos.containing(localFeet);
+        for (int depth = 1; depth <= 4; depth++) {
+            BlockPos supportPos = feetCell.below(depth);
+            var support = contraption.getBlocks().get(supportPos);
+            if (support == null)
+                continue;
+            var shape = support.state().getCollisionShape(
+                    contraption.getContraptionWorld(), supportPos,
+                    net.minecraft.world.phys.shapes.CollisionContext.of(entity));
+            if (shape.isEmpty())
+                continue;
+            var bounds = shape.bounds();
+            double x = localFeet.x - supportPos.getX();
+            double z = localFeet.z - supportPos.getZ();
+            if (x < bounds.minX || x > bounds.maxX || z < bounds.minZ || z > bounds.maxZ)
+                continue;
+            double top = supportPos.getY() + shape.max(net.minecraft.core.Direction.Axis.Y);
+            double gap = localFeet.y - top;
+            if (gap >= -0.12d && gap <= maxGap)
                 return true;
         }
         return false;
@@ -473,9 +475,8 @@ public final class RiderSeatGate {
                 return i;
         }
 
-        // Standing players have no vehicle: their root vehicle is themselves. Testing only riders meant every
-        // client seat report was rejected here and fell back to the server's own position - the lagging one.
-        // Standing on a carriage is still being on that carriage, so intersection decides which one.
+        // Standing players have no vehicle: their root vehicle is themselves. A local support-surface
+        // check identifies the carriage without treating a side impact as boarding.
         for (int i = 0; i < train.carriages.size(); i++) {
             CarriageContraptionEntity carriage = train.carriages.get(i).anyAvailableEntity();
             if (carriage == null)
@@ -584,6 +585,25 @@ public final class RiderSeatGate {
         return held;
     }
 
+    /** Whether the claimed driver is not yet occupying the seat reserved for their control desk. */
+    public static boolean claimedDriverNeedsSeat(Train train) {
+        if (train == null || !DriverAuthority.appliesTo(train))
+            return false;
+        TrainDriverState driver = ((com.george_vi.electroenergetics.mixin_interfaces.ICEETrainExtension) train)
+                .getElectricTrainData().driver;
+        if (driver.claimOwner == null || driver.driverDesk == null)
+            return false;
+        CarriageContraptionEntity entity = carriageEntity(train, driver.driverCarriage);
+        if (entity == null || entity.getContraption() == null)
+            return false;
+        List<BlockPos> seats = entity.getContraption().getSeats();
+        int wanted = nearestSeat(seats, driver.driverDesk);
+        if (wanted < 0)
+            return false;
+        return !Integer.valueOf(wanted).equals(entity.getContraption().getSeatMapping()
+                .get(driver.claimOwner));
+    }
+
     /** Every controls block in this contraption, in its own local coordinates. */
     private static List<BlockPos> controlDesks(Contraption contraption) {
         List<BlockPos> desks = new ArrayList<>();
@@ -610,7 +630,9 @@ public final class RiderSeatGate {
         double bestDistance = Double.MAX_VALUE;
         for (int i = 0; i < seats.size(); i++) {
             double d = Vec3.atCenterOf(seats.get(i)).distanceToSqr(centre);
-            if (d < bestDistance) {
+            if (best < 0 || d < bestDistance - 1.0e-9d
+                    || (Math.abs(d - bestDistance) <= 1.0e-9d
+                        && seats.get(i).compareTo(seats.get(best)) < 0)) {
                 bestDistance = d;
                 best = i;
             }
@@ -619,43 +641,70 @@ public final class RiderSeatGate {
     }
 
     /**
-     * Seats the claimed driver in their held seat, moving a non-driver occupant out first.
+     * Seats the live claimed driver in the reserved seat nearest to their control desk.
      *
-     * <p>Runs before the general pass, and only for a driver who is ABOARD and standing. A driver who
-     * already has a seat is left where they are - the operator's rule gives them priority "如果没座",
-     * not a compulsory seat - and a claimed driver who is not on the train is never moved onto it,
-     * because a claim can legitimately be held from the platform within reach of the desk.
-     *
-     * <p>The eviction is Create's own operation: {@code stopRiding()} on the occupant, whose
-     * {@code removePassenger} override drops the seat-mapping entry, syncs it to clients and puts the
-     * player where the seat is. Writing the seat map directly here would move the mapping without the
-     * passenger list, and the two would then disagree on both sides.
-     *
-     * <p>The evicted player is not lost: they are a standing player from that moment, so the caller
-     * re-reads {@code unseatedPlayers} and they compete for the remaining seats in this same pass -
-     * the rule is "按无座位参与本轮分配", and if nothing is left they count as over capacity.
+     * <p>This is independent of the overload passenger list: that list deliberately excludes the driver, but
+     * the driver still must not be left at a passenger seat or standing at the desk when the train reaches
+     * the ceiling. If another player occupies the reserved seat, Create's passenger removal path is used and
+     * the evicted player participates in the ordinary allocation pass below.
      *
      * @return how many players this seated (0 or 1)
      */
-    private static int seatClaimedDriver(Train train, Set<SeatRef> held, List<Player> unseated) {
-        if (held.isEmpty() || unseated.isEmpty())
+    private static int seatClaimedDriver(Train train, Set<SeatRef> held) {
+        if (held.isEmpty())
             return 0;
-        com.george_vi.electroenergetics.content.railway_electrification.TrainDriverState driverState =
-                ((com.george_vi.electroenergetics.mixin_interfaces.ICEETrainExtension) train)
-                        .getElectricTrainData().driver;
+        TrainDriverState driverState = ((com.george_vi.electroenergetics.mixin_interfaces.ICEETrainExtension) train)
+                .getElectricTrainData().driver;
         UUID claimed = driverState.claimOwner;
         if (claimed == null)
-            return 0;   // nobody drives: the seats stay held empty for whoever takes the controls next
+            return 0;
 
+        CarriageContraptionEntity deskCarriage = carriageEntity(train, driverState.driverCarriage);
+        if (deskCarriage == null || deskCarriage.level().isClientSide())
+            return 0;
         Player driver = null;
-        for (Player candidate : unseated) {
+        for (Player candidate : deskCarriage.level().players()) {
             if (candidate.getUUID().equals(claimed)) {
                 driver = candidate;
                 break;
             }
         }
         if (driver == null)
-            return 0;   // the driver is not standing aboard - nothing to seat
+            return 0;
+
+        boolean aboard = carriageIndexOf(train, driver) >= 0;
+        if (!aboard) {
+            for (Carriage carriage : train.carriages) {
+                CarriageContraptionEntity entity = carriage.anyAvailableEntity();
+                if (entity != null && !entity.level().isClientSide() && isOnContraption(driver, entity)) {
+                    aboard = true;
+                    break;
+                }
+            }
+        }
+        // A live cab claim is not permission to pull somebody aboard from the platform.
+        if (!aboard)
+            return 0;
+
+        SeatRef current = null;
+        for (int i = 0; i < train.carriages.size(); i++) {
+            CarriageContraptionEntity entity = carriageEntity(train, i);
+            if (entity == null || entity.getContraption() == null)
+                continue;
+            Integer seat = entity.getContraption().getSeatMapping().get(claimed);
+            if (seat != null) {
+                current = new SeatRef(i, seat);
+                break;
+            }
+        }
+        if (current != null && held.contains(current))
+            return 0;
+        if (current != null) {
+            CarriageContraptionEntity entity = carriageEntity(train, current.carriageIndex());
+            if (entity == null || entity.getContraption() == null
+                    || !evict(entity, entity.getContraption(), claimed))
+                return 0;
+        }
 
         for (SeatRef seat : held) {
             CarriageContraptionEntity entity = carriageEntity(train, seat.carriageIndex());
@@ -670,11 +719,11 @@ public final class RiderSeatGate {
 
             UUID occupant = occupantOf(contraption, seat.seatIndex());
             if (occupant != null && !occupant.equals(claimed) && !evict(entity, contraption, occupant))
-                continue;   // could not clear it: better to leave the driver standing than to claim a seat we do not hold
+                continue;
 
             entity.addSittingPassenger(driver, seat.seatIndex());
             if (!contraption.getSeatMapping().containsKey(claimed))
-                continue;   // Create refused (should not happen once the seat is clear); leave the driver standing
+                continue;
 
             if (driver instanceof net.minecraft.server.level.ServerPlayer serverPlayer)
                 net.createmod.catnip.platform.CatnipServices.NETWORK.sendToClient(
@@ -810,6 +859,21 @@ public final class RiderSeatGate {
         }
     }
 
+    /**
+     * The reported standing point, expressed in world coordinates through the carriage that named it.
+     *
+     * <p>Null when that carriage is not loaded: the client's point is only meaningful in a frame the server
+     * can currently place, and guessing one would be worse than falling back to the server's own copy.
+     */
+    private static Vec3 intentWorld(Train train, SeatIntentStore.Intent intent) {
+        if (intent == null)
+            return null;
+        CarriageContraptionEntity source = carriageEntity(train, intent.carriageIndex());
+        if (source == null || source.getContraption() == null)
+            return null;
+        return source.toGlobalVector(new Vec3(intent.localX(), intent.localY(), intent.localZ()), 1.0f);
+    }
+
     /** World position of a seat, for the client's own distance comparison. */
     public static Vec3 seatWorld(CarriageContraptionEntity entity, int index) {
         Contraption contraption = entity == null ? null : entity.getContraption();
@@ -889,27 +953,18 @@ public final class RiderSeatGate {
     }
 
     public static int trySeatAll(Train train, long serverTick) {
-        // The driver has first call on their own seat, before anybody else is considered, and a
-        // player sitting in it is moved out. That has to happen BEFORE the unseated list is read
-        // again: from that moment the evicted player is a standing player, and the rule is that they
-        // take part in this same pass as an unseated one ("按无座位参与本轮分配").
         Set<SeatRef> held = reservedDriverSeats(train);
+        int seatedDriver = held.isEmpty() ? 0 : seatClaimedDriver(train, held);
+        if (seatedDriver > 0)
+            CACHE.remove(train.id);       // the seat mapping changed inside this tick
+
         List<Player> unseated = unseatedPlayers(train);
-        int seatedDriver = 0;
-        if (!held.isEmpty() && !unseated.isEmpty()) {
-            seatedDriver = seatClaimedDriver(train, held, unseated);
-            if (seatedDriver > 0) {
-                CACHE.remove(train.id);       // the seat mapping changed inside this tick
-                unseated = unseatedPlayers(train);   // the evicted player is standing now
-            }
-        }
         if (unseated.isEmpty())
             return seatedDriver;
 
         record Candidate(int carriage, CarriageContraptionEntity entity, int index, BlockPos local) {}
 
         List<Candidate> free = new ArrayList<>();
-        int totalSeats = 0;   // SEATDIAG
         for (int carriageIndex = 0; carriageIndex < train.carriages.size(); carriageIndex++) {
             Carriage carriage = train.carriages.get(carriageIndex);
             CarriageContraptionEntity entity = carriage.anyAvailableEntity();
@@ -920,7 +975,6 @@ public final class RiderSeatGate {
                 continue;
 
             List<BlockPos> seats = contraption.getSeats();
-            totalSeats += seats.size();   // SEATDIAG
             Set<Integer> taken = new HashSet<>(contraption.getSeatMapping().values());
             for (int i = 0; i < seats.size(); i++) {
                 if (taken.contains(i))
@@ -939,8 +993,6 @@ public final class RiderSeatGate {
         // put the lever into BRAKE on a train that had just been fixed.
         CACHE.remove(train.id);
 
-        String seatedMapHint = "";   // SEATDIAG
-        String aboardHint = "";      // SEATDIAG
         int seatedHere = 0;
         for (Player player : unseated) {
             Candidate best = null;
@@ -950,7 +1002,8 @@ public final class RiderSeatGate {
             // the carriage it named. This is the whole point of the report: the client knows where it drew the
             // player, the server only knows where the movement packets last put them.
             SeatIntentStore.Intent intent = SeatIntentStore.get(player.getUUID());
-            if (intent != null && intent.trainId().equals(train.id)) {
+            boolean hasIntent = intent != null && intent.trainId().equals(train.id);
+            if (hasIntent) {
                 for (Candidate candidate : free) {
                     if (candidate.carriage() == intent.carriageIndex()
                             && candidate.index() == intent.seatIndex()) {
@@ -959,13 +1012,39 @@ public final class RiderSeatGate {
                     }
                 }
             }
-            // No usable intent: ask the client which seat it sees, and WAIT for the answer
-            // before falling back to the server's own frame. The server's copy of a standing
-            // player's position lags at speed, so seating from it right away is exactly what
-            // produced the "not the seat I saw" reports. The wait is one to two ticks - the
-            // client answers on its next tick - with a grace cap so a silent client still gets
-            // seated. The capacity rules keep running; only the CHOICE waits.
-            if (best == null) {
+
+            // The requested seat has just gone: resolve the substitute HERE, from the point the client
+            // reported. Asking that client for a second report would put an extra round trip inside the one
+            // path the owner asked to keep local - every contested seating, not just the uncontested ones.
+            if (best == null && hasIntent) {
+                Vec3 clientPoint = intentWorld(train, intent);
+                if (clientPoint != null) {
+                    int standingCarriage = intent.standingCarriageIndex() >= 0
+                            ? intent.standingCarriageIndex() : intent.carriageIndex();
+                    for (int pass = 0; pass < 2 && best == null; pass++) {
+                        for (Candidate candidate : free) {
+                            // Same carriage first; other carriages only when it has nothing left.
+                            if (pass == 0 && candidate.carriage() != standingCarriage)
+                                continue;
+                            if (pass == 1 && candidate.carriage() == standingCarriage)
+                                continue;
+                            double d = candidate.entity().toLocalVector(clientPoint, 1.0f)
+                                    .distanceToSqr(Vec3.atCenterOf(candidate.local()));
+                            if (best == null
+                                    || d < bestDistance - 1.0e-9d
+                                    || (Math.abs(d - bestDistance) <= 1.0e-9d
+                                        && candidate.local().compareTo(best.local()) < 0)) {
+                                best = candidate;
+                                bestDistance = d;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // No report at all yet (a player who has only just boarded): ask once and give a silent client
+            // the grace window. This is the only case that costs a round trip.
+            if (best == null && !hasIntent) {
                 Long requested = SeatIntentStore.requestedTick(player.getUUID());
                 if (requested == null) {
                     SeatIntentStore.markRequested(player.getUUID(), serverTick);
@@ -978,7 +1057,6 @@ public final class RiderSeatGate {
                     continue;
             }
 
-            StringBuilder diag = null;   // SEATDIAG
             int ownCarriage = RiderSeatGate.carriageIndexOf(train, player);
             for (Candidate candidate : best == null ? free : java.util.List.<Candidate>of()) {
                 // Same carriage first (the operator's refinement): the nearest free seat on the
@@ -991,54 +1069,8 @@ public final class RiderSeatGate {
                 // anchored on the contraption, so mixing the two put the seats in the wrong places and the
                 // "nearest" seat was whichever arithmetic error won. In local space both sides share one
                 // origin and the answer is the seat that is actually closest to the player.
-                // Compared in the carriage's own frame, with no correction applied. An earlier version
-                // multiplied the carriage's per-tick movement by a measured lag and added it to the player's
-                // position; without a way to prove that factor it was a guess dressed as a measurement, and
-                // a guess inside the selection is worse than a known-wrong frame. The authoritative position
-                // now comes from the client, which is the side that draws the player.
                 Vec3 localPlayer = candidate.entity().toLocalVector(player.position(), 1.0f);
                 double d = Vec3.atCenterOf(candidate.local()).distanceToSqr(localPlayer);
-                // A seat has to be somewhere the player could have walked to. Handing them one at the far
-                // end of the train is not seating them, it is teleporting them: they lose their bearings and
-                // whatever they were doing. If nothing is close, this is a capacity problem and is treated
-                // as one rather than solved by moving a player five Blocks.
-                if (diag == null) {
-                    StringBuilder mh = new StringBuilder();
-                    StringBuilder ah = new StringBuilder();
-                    for (Carriage cc : train.carriages) {
-                        CarriageContraptionEntity ce = cc.anyAvailableEntity();
-                        if (ce == null || ce.getContraption() == null) continue;
-                        mh.append("{");
-                        ce.getContraption().getSeatMapping().forEach(
-                                (u, i) -> mh.append(u.toString(), 0, 8).append("=").append(i).append(","));
-                        mh.append("}");
-                        ah.append("[");
-                        for (Entity p : ce.getIndirectPassengers())
-                            ah.append(p.getUUID().toString(), 0, 8).append(",");
-                        ah.append("]");
-                    }
-                    seatedMapHint = mh.toString();
-                    aboardHint = ah.toString();
-                    var v = player.position();
-                    diag = new StringBuilder("SEATDIAG playerWorld=")
-                            .append(String.format("%.2f,%.2f,%.2f", v.x, v.y, v.z))
-                            .append(" local=")
-                            .append(String.format("%.2f,%.2f,%.2f", localPlayer.x, localPlayer.y, localPlayer.z))
-                            .append(" seats=").append(totalSeats)
-                            .append(" free=").append(free.size())
-                            .append(" mapping=").append(seatedMapHint)
-                            .append(" aboard=").append(aboardHint);
-                }
-                var seatWorld = candidate.entity().toGlobalVector(Vec3.atCenterOf(candidate.local()), 1.0f);
-                diag.append(" #").append(candidate.index()).append(candidate.local())
-                        .append(String.format("@%.2f", Math.sqrt(d)))
-                        .append("[w").append(String.format("%.1f,%.1f,%.1f",
-                                seatWorld.x, seatWorld.y, seatWorld.z)).append("]");
-                // No distance cap. The owner's ruling: seat the nearest free seat on THIS train,
-                // however far down the carriage it is. Being picked out of another train or off the
-                // platform is prevented upstream by isOnContraption - only players actually standing
-                // on this carriage's own blocks are ever considered - so a cap on top of that only
-                // produced false "over capacity" reports with empty seats in sight.
                 if (best == null
                         || d < bestDistance - 1.0e-9d
                         || (Math.abs(d - bestDistance) <= 1.0e-9d
@@ -1052,14 +1084,13 @@ public final class RiderSeatGate {
                 for (Candidate candidate : free) {
                     double d = candidate.entity().toLocalVector(player.position(), 1.0f)
                             .distanceToSqr(Vec3.atCenterOf(candidate.local()));
-                    if (best == null || d < bestDistance) {
+                    if (best == null || d < bestDistance - 1.0e-9d) {
                         best = candidate;
                         bestDistance = d;
                     }
                 }
             }
-            if (diag != null)
-                LOGGER.info(diag.append(best == null ? " -> none" : " -> chosen #" + best.index()).toString());
+
             // continue, not break. One player with no seat within reach must not stop the others from being
             // seated - that made the outcome depend on the order players happened to be listed in.
             if (best == null)

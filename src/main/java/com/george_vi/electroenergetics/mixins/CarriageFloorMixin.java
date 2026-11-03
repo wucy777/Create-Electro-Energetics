@@ -1,12 +1,12 @@
 package com.george_vi.electroenergetics.mixins;
 
 import com.george_vi.electroenergetics.content.railway_electrification.ElectricTrainData;
+import com.george_vi.electroenergetics.content.railway_electrification.RiderSeatGate;
 import com.george_vi.electroenergetics.mixin_interfaces.ICEETrainExtension;
-import com.simibubi.create.content.contraptions.AbstractContraptionEntity;
 import com.simibubi.create.content.trains.entity.CarriageContraptionEntity;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.phys.AABB;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
@@ -54,36 +54,26 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * gives them:
  *
  * <ul>
- *   <li>{@code onGround = true}, so gravity stops accumulating and jumping is permitted;</li>
- *   <li>vertical velocity is dropped when they are not actively jumping, so they do not inherit the sink
- *       that built up while the floor was ignored.</li>
+ *   <li>{@code onGround = true}, so the normal movement code can stop accumulating a fall and allow jumps;</li>
+ *   <li>{@code fallDistance = 0}, so a missed collision frame does not cause false fall damage.</li>
  * </ul>
  *
  * <p>The horizontal position is NOT touched. It is already correct, and the carry continues to own it.
  *
- * <h2>How "standing on the floor" is decided</h2>
+ * <h2>How standing on the floor is decided</h2>
  *
- * <p>By geometry, not by state: the player's feet are within a small band above the carriage's floor
- * level, and horizontally within the carriage's footprint. A player mid-jump is above that band and is
- * left alone, which is what allows jumping to work at all. It costs two comparisons in the common case.
+ * <p>The player's feet are transformed into carriage-local coordinates and checked against the top face of
+ * a real collision shape in the contraption block map. Nearby entity bounds are only a spatial-index query;
+ * they never decide whether the player is on the train. Seated riders are left to Create's passenger path.
  *
  * <h2>Cost</h2>
  *
- * <p>Runs per tick for players inside a carriage. Two Vec3 reads and a comparison, with the train lookup
- * skipped entirely when the vehicle is not a carriage. No allocation, no lookup table, no logging outside
- * the diagnostic build.
+ * <p>Only unseated players query nearby entities, in a 1-block horizontal radius. Most ticks find no
+ * carriage candidate; if one is nearby, the exact local support check inspects at most four blocks below.
+ * No position correction, per-tick logging, network packet, or state cache is added.
  */
 @Mixin(value = Entity.class, remap = false)
 public class CarriageFloorMixin {
-
-    /**
-     * Minimum height above the carriage floor at which the player stops counting as grounded.
-     *
-     * <p>Vanilla's step height is 0.6 and its jump leaves the floor immediately, so a band slightly above
-     * that separates "standing" from "jumping" without catching either wrongly.
-     */
-    @Unique
-    private static final double electroEnergetics$FLOOR_BAND = 0.75d;
 
     @Inject(method = "tick", at = @At("HEAD"), remap = false)
     private void electroEnergetics$restoreFooting(CallbackInfo ci) {
@@ -97,9 +87,8 @@ public class CarriageFloorMixin {
                 return;
             }
 
-            // Not riding: the player may be walking inside the carriage they just left the seat of.
-            // The carriage is found only when they are actually inside one, which the distance test
-            // rejects for anyone on open ground.
+            // Not riding: restore footing only when a real local collision surface supports the player's feet.
+            // The nearby entity query below is broad phase only; a train beside the platform cannot qualify.
             if (player.isPassenger())
                 return;
             electroEnergetics$standOnNearestFloor(player);
@@ -109,47 +98,24 @@ public class CarriageFloorMixin {
     }
 
     @Unique
-    private void electroEnergetics$standOnCarriageFloor(Player player, CarriageContraptionEntity carriage) {
-        if (!electroEnergetics$isElectric(carriage))
-            return;
-
-        Vec3 seat = carriage.getPassengerPosition(player, 1.0f);
-        if (seat == null)
-            return;
-
-        double aboveFloor = player.getY() - (seat.y - electroEnergetics$seatToFloor());
-        if (aboveFloor < -0.5 || aboveFloor > electroEnergetics$FLOOR_BAND)
-            return;
-
+    private boolean electroEnergetics$standOnCarriageFloor(Player player, CarriageContraptionEntity carriage) {
+        if (!electroEnergetics$isElectric(carriage)
+                || !RiderSeatGate.isStandingOnCarriageFloor(player, carriage))
+            return false;
         electroEnergetics$ground(player);
+        return true;
     }
 
     @Unique
     private void electroEnergetics$standOnNearestFloor(Player player) {
-        double best = Double.MAX_VALUE;
-        CarriageContraptionEntity found = null;
-        for (Entity e : player.level().getEntities(player, player.getBoundingBox().inflate(6))) {
-            if (!(e instanceof CarriageContraptionEntity carriage))
-                continue;
-            if (!electroEnergetics$isElectric(carriage))
-                continue;
-            double d = carriage.position().distanceTo(player.position());
-            if (d < best) {
-                best = d;
-                found = carriage;
-            }
+        // This is only a broad-phase lookup; the decision below checks the exact local support block and
+        // its top face. A nearby axis-aligned carriage bound can never by itself mark a player grounded.
+        AABB search = player.getBoundingBox().inflate(1.0d, 1.5d, 1.0d);
+        for (Entity e : player.level().getEntities(player, search)) {
+            if (e instanceof CarriageContraptionEntity carriage
+                    && electroEnergetics$standOnCarriageFloor(player, carriage))
+                return;
         }
-        if (found != null)
-            electroEnergetics$standOnCarriageFloor(player, found);
-    }
-
-    /**
-     * The seat sits {@code 0.125} above the carriage floor plus the rider's own height offset, so the
-     * floor is that much below the seat. Kept as a named constant rather than a literal at the use site.
-     */
-    @Unique
-    private static double electroEnergetics$seatToFloor() {
-        return 0.125d;
     }
 
     @Unique

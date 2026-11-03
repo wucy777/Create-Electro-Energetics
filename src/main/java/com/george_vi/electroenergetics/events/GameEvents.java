@@ -95,6 +95,7 @@ public class GameEvents {
     @OnlyIn(Dist.CLIENT)
     @SubscribeEvent
     public static void tickClient(ClientTickEvent.Pre event) {
+        com.george_vi.electroenergetics.client.SeatIntentTracker.tick();
         if (Minecraft.getInstance().level == null || Minecraft.getInstance().player == null)
             return;
         WireApplyingBehaviour.tick();
@@ -104,7 +105,6 @@ public class GameEvents {
         CEEHoldInteractionHandler.tick();
         ElectricTrainSounds.tick();
         com.george_vi.electroenergetics.client.RiderViewFollow.tick();
-        com.george_vi.electroenergetics.client.SeatIntentTracker.tick();
         ClientTrainGaugeData.tick();
         // Drop HUD samples for trains that no longer exist on the client, so the
         // cache cannot grow without bound over a long session.
@@ -204,12 +204,16 @@ public class GameEvents {
     /**
      * Sends an overlay message to everybody aboard a train, standing passengers included.
      *
-     * <p>Both populations, because they are disjoint. A seated player is in the carriage's passenger chain;
-     * a player on their feet - which is exactly who a capacity message is aimed at - is only in Create's
-     * collidingEntities map. Walking just the passenger chain reached the driver and the seated passengers
-     * and missed the one person the message exists for.
+     * <p>Both populations, because they are disjoint. A seated player is in the carriage's passenger chain; a
+     * player on their feet - which is exactly who a capacity message is aimed at - has no vehicle at all.
      *
-     * <p>De-duplicated by UUID, since a player riding the carriage can appear in both collections.
+     * <p>Standing players are found by the same local support-surface test the seating gate uses, and NOT by
+     * Create's {@code collidingEntities}. That map also contains side impacts, so a player brushing past the
+     * carriage from a platform was being told the train was full when they were never aboard it. The local
+     * check looks at the collision shapes under their own feet in the carriage's frame, which a platform
+     * cannot satisfy.
+     *
+     * <p>De-duplicated by UUID, since a player riding the carriage can also be standing on its floor.
      */
     private static void notifyRiders(Train train, String langKey) {
         java.util.Set<java.util.UUID> sent = new java.util.HashSet<>();
@@ -219,11 +223,6 @@ public class GameEvents {
                 continue;
             for (var passenger : entity.getIndirectPassengers())
                 notifyOne(passenger, langKey, sent);
-            for (var colliding : entity.collidingEntities.keySet())
-                notifyOne(colliding, langKey, sent);
-            // Same fallback as the seating gate: collidingEntities only holds entities the collision pass
-            // has seen, so a player who walked in and stopped can be missing from it - and they are the one
-            // the message is for.
             for (var nearby : entity.level().players())
                 if (RiderSeatGate.isOnContraption(nearby, entity))
                     notifyOne(nearby, langKey, sent);
@@ -329,13 +328,19 @@ public class GameEvents {
                 if (atCeiling) {
 
                 boolean unseated = RiderSeatGate.anyUnseated(train);
-                if (unseated) {
-                    // Ask anyone who has never reported which seat they are standing nearest to. The client
-                    // answers on its next tick and the seating pass uses that answer; without it the server
-                    // can only use a position it knows lags the carriage.
+                boolean driverNeedsSeat = RiderSeatGate.claimedDriverNeedsSeat(train);
+                if (unseated || driverNeedsSeat) {
+                    // Standing passenger selection waits for the client's rendered frame. The driver seat is
+                    // handled independently because the current driver is excluded from overload counting.
+                    //
+                    // One request per player, not one per tick: a silent client would otherwise be sent a
+                    // packet every tick for as long as the train sat at the ceiling. `markRequested` is what
+                    // makes the second and later ticks no-ops, and the answer clears it.
                     for (var standing : RiderSeatGate.unseatedPlayers(train)) {
                         if (standing instanceof net.minecraft.server.level.ServerPlayer serverPlayer
-                                && SeatIntentStore.get(standing.getUUID()) == null) {
+                                && SeatIntentStore.get(standing.getUUID()) == null
+                                && SeatIntentStore.requestedTick(standing.getUUID()) == null) {
+                            SeatIntentStore.markRequested(standing.getUUID(), server.getTickCount());
                             net.createmod.catnip.platform.CatnipServices.NETWORK.sendToClient(
                                     serverPlayer, new RequestSeatIntentPacket());
                         }
@@ -890,6 +895,8 @@ public class GameEvents {
     public static void enterDimension(PlayerEvent.PlayerChangedDimensionEvent event) {
         if (!(event.getEntity() instanceof ServerPlayer player))
             return;
+        com.george_vi.electroenergetics.content.railway_electrification.SeatIntentStore.clear(
+                player.getUUID());
         InfrastructureSavedData sd = InfrastructureSavedData.load((ServerLevel) player.level());
         WireSync wireSync = sd.wireSync;
         wireSync.unloadForPlayer(player);
@@ -900,10 +907,18 @@ public class GameEvents {
     public static void login(PlayerEvent.PlayerLoggedInEvent event) {
         if (!(event.getEntity() instanceof ServerPlayer player))
             return;
+        com.george_vi.electroenergetics.content.railway_electrification.SeatIntentStore.clear(
+                player.getUUID());
         InfrastructureSavedData sd = InfrastructureSavedData.load((ServerLevel) player.level());
         WireSync wireSync = sd.wireSync;
         wireSync.unloadForPlayer(player);
         wireSync.handlePlayerEnterNewSection(player, ChunkPos.asLong(player.blockPosition()));
+    }
+
+    @SubscribeEvent
+    public static void logout(PlayerEvent.PlayerLoggedOutEvent event) {
+        com.george_vi.electroenergetics.content.railway_electrification.SeatIntentStore.clear(
+                event.getEntity().getUUID());
     }
 
     @SubscribeEvent
