@@ -19,7 +19,7 @@ public final class SeatIntentStore {
     private SeatIntentStore() {}
 
     /** What the client reported: which seat it is nearest to, and where it is in the carriage. */
-    public record Intent(UUID trainId, int carriageIndex, int seatIndex,
+    public record Intent(UUID trainId, int carriageIndex, int seatIndex, int standingCarriageIndex,
                          double localX, double localY, double localZ) {}
 
     private static final Map<UUID, Intent> INTENTS = new HashMap<>();

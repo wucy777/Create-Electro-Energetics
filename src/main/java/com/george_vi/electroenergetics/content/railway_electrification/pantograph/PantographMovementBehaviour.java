@@ -36,19 +36,9 @@ import static net.minecraft.world.level.block.HorizontalDirectionalBlock.FACING;
 public class PantographMovementBehaviour implements MovementBehaviour {
 
     /**
-     * Sideways tolerance for finding catenary, in Blocks - client side.
-     *
-     * <p>Must equal {@code CEEPantographTypes.CONTACT_HALF_WIDTH} and therefore the server's
-     * {@code sidewaysReach}. Written as its own constant rather than imported because the type
-     * registry is loaded from a datapack registry on the client too, but reading it here would mean
-     * a lookup on a hot path (every catenary segment, every tick, for every arm) to fetch a number
-     * that is fixed by the model.
-     *
-     * <p>3.5 rather than upstream's 2.0, for the same measured reason as the server constant: the
-     * operator's loop has turns of about 14.5 Blocks radius, a carriage is 25 Blocks long, and a rigid
-     * carriage on such a turn carries its pantograph up to 3.11 Blocks off the wire's chord. The two
-     * guards are asserted by {@code _cache/check_auto_raise_and_reach.py}; if they drift, the visible
-     * symptom is an arm dropping into a bend while the train is still drawing current.
+     * Client-side horizontal contact tolerance. Keep equal to
+     * {@code CEEPantographTypes.CONTACT_HALF_WIDTH}; the final operator-tested value is 2.5 Blocks
+     * around the block-centre sample.
      */
     private static final float CONTACT_HALF_WIDTH = 2.5f;
 

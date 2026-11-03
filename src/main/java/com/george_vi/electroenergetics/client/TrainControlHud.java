@@ -523,22 +523,14 @@ public class TrainControlHud implements LayeredDraw.Layer {
     private static final int CARRIAGE_H = 5;
 
     /**
-     * The cab's pixel arc: how far each body row reaches past the body's edge, top row first.
+     * The five-row cab silhouette, expressed as the number of pixels extending past the body on each row.
      *
-     * <p>This is the streamlined head, and it is data rather than a shape baked into two fills. The
-     * old nose was a step - the top and bottom rows reached one pixel past the body and the middle
-     * rows three - which read as a wedge ("左右还有上下'翻车'的车厢") rather than as a cab. Here every
-     * row has its own reach, so the front narrows one pixel at a time: the roof row starts two columns
-     * behind the tip, the row under it one, and the three lower rows reach the tip. Read from the tip
-     * upwards the column count is 0, 0, 0, 1, 2 - a gradient, not a step.
+     * <p>The operator's final pattern is 00011 / 00111 / 11111 / 00111 / 01111, so the row widths are
+     * {@code [2, 3, 5, 3, 4]}. It is intentionally not a monotone taper: the bottom row is one pixel wider
+     * than the row above, matching the supplied front profile rather than a generic arrowhead.
      *
-     * <p>The trailing cab is drawn from the same array, so the two ends are the same shape facing
-     * opposite ways and the strip stays symmetric when the train reverses.
-     *
-     * <p>Length must equal {@link #CARRIAGE_H} and the maximum must equal {@link #CARRIAGE_NOSE_W}.
-     * Both are asserted by {@code _cache/check_auto_raise_and_reach.py}, not left to reading: the
-     * width budget reserves exactly {@code CARRIAGE_NOSE_W} pixels per end, so an arc that outgrew it
-     * would draw over the pantograph detail text.
+     * <p>The trailing cab mirrors the same data, so both ends remain symmetric when the train reverses.
+     * The array length must equal {@link #CARRIAGE_H}; its maximum must fit {@link #CARRIAGE_NOSE_W}.
      */
     private static final int[] CARRIAGE_NOSE_ARC = {2, 3, 5, 3, 4};
 
@@ -652,12 +644,9 @@ public class TrainControlHud implements LayeredDraw.Layer {
      *
      * <p>Carriages are plain rectangles five rows tall in BOTH layouts (see {@link #CARRIAGE_H}: the
      * owner asked for five rows once three and four both read as bars). Only the two end cars carry a
-     * nose, and the nose is the pixel arc in {@link #CARRIAGE_NOSE_ARC}: every body row reaches its
-     * own number of pixels past the body, so the front narrows one pixel per row from the tip to the
-     * roof instead of stepping once. The old noses were single steps - one pixel on a three-row body,
-     * two on a four-row one - and a step is what made the end carriages read as wedges and, before
-     * that, as flipped carriages ("左右还有上下'翻车'的车厢"). The trailing cab is drawn from the same
-     * array with the reach on its right edge, so both ends are the same shape facing opposite ways.
+     * nose drawn with the five-row pixel profile [2, 3, 5, 3, 4].
+     * The trailing cab mirrors this profile to the right.
+     *
      * Interior carriages stay flush rectangles: they are the coupled cars, not more noses.
      *
      * <p>The selected carriage is marked by its body colour alone - bright against the dim ones,

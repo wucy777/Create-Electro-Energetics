@@ -173,6 +173,11 @@ public final class DriverAuthority {
         if (carriageIndex < 0)
             return false;
         driver.claim(player.getUUID(), carriageIndex, localPos);
+        // The desk's own seat is the driver's, and it cannot be taken by clicking the seat: the way to sit
+        // in it is to take the controls. So the seating happens here, on the claim, rather than waiting for
+        // the speed-gated pass to notice at 28 m/s - a driver alone on a stationary train would otherwise
+        // stand at the desk indefinitely.
+        RiderSeatGate.seatClaimedDriver(train, RiderSeatGate.reservedDriverSeats(train));
         // Broadcast BEFORE Create records its own mirror, deliberately: a viewer's client
         // may be looking at the panel already, and telling it the answer first means its
         // read-only state is right from the first frame.

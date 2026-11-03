@@ -28,10 +28,8 @@ import java.util.UUID;
  *
  * <h2>What is trusted</h2>
  *
- * <p>The train id and nothing else. The carriage is derived from the player's own vehicle, the seat index is
- * validated against that carriage's seat list and mapping, and the seating call only happens if the player is
- * genuinely unseated and aboard. A hand-made packet cannot seat a player on a train they are not riding, into
- * a seat that does not exist, or into an occupied one.
+ * <p>The train id and carriage indices are validated; the local position is only a selection hint.
+ * The server remains authoritative for availability and final assignment; the report never teleports the player.
  *
  * <h2>Traffic</h2>
  *
@@ -39,11 +37,12 @@ import java.util.UUID;
  * none at all while the player is seated or the train is below the ceiling.
  */
 public record ReportSeatIntentPacket(UUID trainId, int carriageIndex, int seatIndex,
+                                     int standingCarriageIndex,
                                      double localX, double localY, double localZ, boolean standing)
         implements ServerboundPacketPayload {
 
     /**
-     * Hand-written rather than {@code StreamCodec.composite}: seven components is past the largest overload
+     * Hand-written rather than {@code StreamCodec.composite}: eight fields is past the largest overload
      * that exists, so the builder form does not compile. The field order here is the wire format, and it must
      * stay in step with the record.
      */
@@ -52,6 +51,7 @@ public record ReportSeatIntentPacket(UUID trainId, int carriageIndex, int seatIn
                 UUIDUtil.STREAM_CODEC.encode(buf, p.trainId());
                 ByteBufCodecs.VAR_INT.encode(buf, p.carriageIndex());
                 ByteBufCodecs.VAR_INT.encode(buf, p.seatIndex());
+                ByteBufCodecs.VAR_INT.encode(buf, p.standingCarriageIndex());
                 ByteBufCodecs.DOUBLE.encode(buf, p.localX());
                 ByteBufCodecs.DOUBLE.encode(buf, p.localY());
                 ByteBufCodecs.DOUBLE.encode(buf, p.localZ());
@@ -59,6 +59,7 @@ public record ReportSeatIntentPacket(UUID trainId, int carriageIndex, int seatIn
             },
             buf -> new ReportSeatIntentPacket(
                     UUIDUtil.STREAM_CODEC.decode(buf),
+                    ByteBufCodecs.VAR_INT.decode(buf),
                     ByteBufCodecs.VAR_INT.decode(buf),
                     ByteBufCodecs.VAR_INT.decode(buf),
                     ByteBufCodecs.DOUBLE.decode(buf),
@@ -74,28 +75,24 @@ public record ReportSeatIntentPacket(UUID trainId, int carriageIndex, int seatIn
             return;
         }
 
-        // The carriage comes from the world, never from the packet. A player standing on the platform is not
-        // riding anything and gets nothing.
         int actual = RiderSeatGate.carriageIndexOf(train, player);
-        if (actual < 0) {
-            // The server's copy of a standing player's position lags at speed, so the exact block test can
-            // miss the carriage they are visibly on. The client said which one, and it is the authority on
-            // where it is standing - accepted here only if that carriage really is within reach, so a
-            // packet cannot place a player on a train across the world.
-            if (carriageIndex >= 0 && carriageIndex < train.carriages.size()) {
-                var claimed = train.carriages.get(carriageIndex).anyAvailableEntity();
-                if (claimed != null && claimed.distanceToSqr(player) < 16d * 16d)
-                    actual = carriageIndex;
-            }
-            if (actual < 0) {
-                SeatIntentStore.clear(player.getUUID());
-                return;
-            }
+        int reportedStanding = -1;
+        if (standingCarriageIndex >= 0 && standingCarriageIndex < train.carriages.size()) {
+            var standingEntity = train.carriages.get(standingCarriageIndex).anyAvailableEntity();
+            if (standingEntity != null && standingEntity.distanceToSqr(player) < 16d * 16d)
+                reportedStanding = standingCarriageIndex;
         }
         if (!standing) {
             SeatIntentStore.clear(player.getUUID());
             return;
         }
+        if (actual < 0 && reportedStanding < 0) {
+            // The server's copy of a standing player's position lags the carriage at speed. Accept the
+            // client's carriage hint only after bounding it to this train and interaction reach.
+            SeatIntentStore.clear(player.getUUID());
+            return;
+        }
+        int validatedStanding = reportedStanding >= 0 ? reportedStanding : actual;
 
         // The SEAT's carriage is the client's call, and it travels in the packet: the client is the side
         // that sees which seat is nearest, and that seat may be on a neighbouring carriage. Overwriting it
@@ -112,20 +109,16 @@ public record ReportSeatIntentPacket(UUID trainId, int carriageIndex, int seatIn
             return;
         }
         Contraption seatContraption = seatEntity.getContraption();
-        if (seatContraption == null || seatIndex < 0 || seatIndex >= seatContraption.getSeats().size()) {
+        if (seatContraption == null || seatIndex < 0 || seatIndex >= seatContraption.getSeats().size()
+                || !Double.isFinite(localX) || !Double.isFinite(localY) || !Double.isFinite(localZ)) {
             SeatIntentStore.clear(player.getUUID());
             return;
         }
 
-        // Store ONLY. Seating happens in RiderSeatGate.trySeatAll, the single decision point - a second
-        // seat-er here raced the gate and assigned seats the gate's own rules never chose.
+        // Store only. Seating and conflict resolution happen in RiderSeatGate; the reported local point is
+        // transformed through the train's current carriage poses instead of using a lagging player position.
         SeatIntentStore.put(player.getUUID(), new SeatIntentStore.Intent(
-                train.id, carriageIndex, seatIndex, localX, localY, localZ));
-
-        org.slf4j.LoggerFactory.getLogger("electroenergetics/seatintent").info(
-                "SEATINTENT recv seatCarriage={} seat={} standingCarriage={} local={},{},{}",
-                carriageIndex, seatIndex, actual,
-                String.format("%.2f", localX), String.format("%.2f", localY), String.format("%.2f", localZ));
+                train.id, carriageIndex, seatIndex, validatedStanding, localX, localY, localZ));
 
     }
 

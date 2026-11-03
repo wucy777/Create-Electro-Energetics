@@ -29,21 +29,6 @@ import net.minecraft.world.phys.Vec3;
  */
 public final class SeatIntentTracker {
 
-    private static int diagTicks;
-
-    private static void diag(String why, LocalPlayer player) {
-        if (++diagTicks % 40 != 0)
-            return;
-        var root = player == null ? null : player.getRootVehicle();
-        org.slf4j.LoggerFactory.getLogger("electroenergetics/seatintent").info(
-                "SEATINTENT idle reason={} root={} vehicle={}",
-                why,
-                root == null ? "none" : root.getClass().getSimpleName(),
-                player == null || player.getVehicle() == null ? "none"
-                        : player.getVehicle().getClass().getSimpleName());
-    }
-
-
     private SeatIntentTracker() {}
 
     private static boolean sent;
@@ -72,11 +57,20 @@ public final class SeatIntentTracker {
         return assignedCarriage;
     }
 
+    /** Reset edge state when the local player or world is replaced. */
+    public static void reset() {
+        sent = false;
+        lastSeat = Integer.MIN_VALUE;
+        lastCarriage = Integer.MIN_VALUE;
+        assignedCarriage = Integer.MIN_VALUE;
+        assignedSeat = Integer.MIN_VALUE;
+    }
+
     public static void tick() {
         Minecraft mc = Minecraft.getInstance();
         LocalPlayer player = mc.player;
         if (player == null || player.level() == null) {
-            sent = false;
+            reset();
             return;
         }
 
@@ -93,7 +87,6 @@ public final class SeatIntentTracker {
         }
         if (carriage == null) {
             sent = false;
-            diag("no-carriage", player);
             return;
         }
         var cc = carriage.getCarriage();
@@ -109,7 +102,6 @@ public final class SeatIntentTracker {
         }
         if (contraption.getSeatMapping().containsKey(player.getUUID())) {
             sent = false;                                  // seated: nothing to report
-            diag("seated-per-mapping", player);
             return;
         }
         // Report from well below the ceiling, not only at it. The server needs the answer BEFORE the train
@@ -117,14 +109,15 @@ public final class SeatIntentTracker {
         // to its own lagging position. Edge-triggered, so a steady speed costs no packets.
         if (Math.abs(train.speed) < 1.0d) {
             sent = false;                                  // standing on a stopped train is not a case
-            diag("train-stopped", player);
             return;
         }
 
-        // The pick spans ALL carriages of the train, in the client's own rendered frame -
-        // exactly what the player sees. Restricting it to the carriage the player stands on
-        // hid every nearer seat that happened to be across a coupling.
-        int ownCarriage = RiderSeatGate.carriageIndexOf(train, player);
+        // The carriage the client actually found, by index in the train. Using this rather than asking the
+        // gate again keeps the report and the pick in one frame: a seat may be on a neighbouring carriage, but
+        // the "own carriage first" pass and the server's conflict fallback must agree with what is on screen.
+        int ownCarriage = train.carriages.indexOf(cc);
+        if (ownCarriage < 0)
+            ownCarriage = RiderSeatGate.carriageIndexOf(train, player);
         int best = -1;
         int bestCarriage = -1;
         double bestDistance = Double.MAX_VALUE;
@@ -169,15 +162,14 @@ public final class SeatIntentTracker {
         if (sent && best == lastSeat && carriageIndex == lastCarriage)
             return;                                        // nothing changed: no traffic
 
-        Vec3 local = carriage.toLocalVector(player.position(), 1.0f);
+        CarriageContraptionEntity targetCarriage = train.carriages.get(carriageIndex).anyAvailableEntity();
+        if (targetCarriage == null) {
+            sent = false;
+            return;
+        }
+        Vec3 local = targetCarriage.toLocalVector(player.position(), 1.0f);
         CatnipServices.NETWORK.sendToServer(new ReportSeatIntentPacket(train.id, carriageIndex, best,
-                local.x, local.y, local.z, true));
-        org.slf4j.LoggerFactory.getLogger("electroenergetics/seatintent").info(
-                "SEATINTENT send seatCarriage={} seat={} local={},{},{} world={},{},{}",
-                carriageIndex, best,
-                String.format("%.2f", local.x), String.format("%.2f", local.y), String.format("%.2f", local.z),
-                String.format("%.2f", player.getX()), String.format("%.2f", player.getY()),
-                String.format("%.2f", player.getZ()));
+                ownCarriage, local.x, local.y, local.z, true));
         sent = true;
         lastSeat = best;
         lastCarriage = carriageIndex;
@@ -190,23 +182,17 @@ public final class SeatIntentTracker {
      * point of reporting from here rather than letting the server guess.
      */
     private static CarriageContraptionEntity standingCarriage(LocalPlayer player) {
-        var railways = com.simibubi.create.CreateClient.RAILWAYS;
-        if (railways == null)
-            return null;
         CarriageContraptionEntity found = null;
         double best = Double.MAX_VALUE;
-        for (Train t : railways.trains.values()) {
-            for (var car : t.carriages) {
-                var e = car.anyAvailableEntity();
-                if (e == null)
-                    continue;
-                if (!RiderSeatGate.isOnContraption(player, e))
-                    continue;
-                double d = e.distanceToSqr(player);
-                if (d < best) {
-                    best = d;
-                    found = e;
-                }
+        var nearby = player.level().getEntitiesOfClass(
+                CarriageContraptionEntity.class, player.getBoundingBox().inflate(2.0d));
+        for (CarriageContraptionEntity entity : nearby) {
+            if (!RiderSeatGate.isOnContraption(player, entity))
+                continue;
+            double d = entity.distanceToSqr(player);
+            if (d < best) {
+                best = d;
+                found = entity;
             }
         }
         return found;
