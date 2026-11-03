@@ -560,6 +560,19 @@ public final class RiderSeatGate {
         int claimedCarriage = driverState.driverCarriage;
         BlockPos claimedDesk = driverState.driverDesk;
 
+        // With a driver, the ONLY held seat is the one at the desk they claimed; the other cab's seat goes
+        // back to being an ordinary seat.
+        //
+        // Which carriage that desk is in is REMEMBERED on the claim, and memory can be wrong: a double-ended
+        // unit has a controls block at each end, and if the recorded index names the wrong end the reservation
+        // lands in the cab nobody is sitting in - the driver's own seat is then free for a passenger while the
+        // seat they are actually in counts as ordinary. That is one of the ways one end of a twin-cab train
+        // behaved differently from the other.
+        //
+        // So the recorded carriage is preferred, and the rest of the consist is searched when it does not
+        // contain that desk. The search is a handful of BlockPos comparisons per carriage and only runs while
+        // somebody holds a claim.
+        boolean foundClaimedDesk = false;
         for (int carriageIndex = 0; carriageIndex < train.carriages.size(); carriageIndex++) {
             Carriage carriage = train.carriages.get(carriageIndex);
             CarriageContraptionEntity entity = carriage.anyAvailableEntity();
@@ -572,15 +585,21 @@ public final class RiderSeatGate {
             if (seats.isEmpty())
                 continue;
             for (BlockPos desk : controlDesks(contraption)) {
-                // With a driver, the ONLY held seat is the one at the desk they claimed. The other
-                // cab's seat goes back to being an ordinary seat.
-                if (claimed != null
-                        && !(carriageIndex == claimedCarriage && desk.equals(claimedDesk)))
+                if (claimed != null && !desk.equals(claimedDesk))
                     continue;
                 int seat = nearestSeat(seats, desk);
-                if (seat >= 0)
-                    held.add(new SeatRef(carriageIndex, seat));
+                if (seat < 0)
+                    continue;
+                if (claimed != null && carriageIndex == claimedCarriage)
+                    foundClaimedDesk = true;
+                held.add(new SeatRef(carriageIndex, seat));
             }
+        }
+        if (claimed != null && !foundClaimedDesk) {
+            // The remembered carriage did not hold the claimed desk. Keep whatever the search found rather
+            // than reserving nothing: no reservation would let a passenger take the driver's seat while the
+            // driver is in it.
+            return held;
         }
         return held;
     }
