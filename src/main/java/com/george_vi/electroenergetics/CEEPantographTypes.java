@@ -46,7 +46,7 @@ public class CEEPantographTypes {
     // Upstream used 2.0, then this fork used 2.5 after the first round of lost contact on bends. The
     // operator's own track then showed the remaining failure, and a carriage-against-catenary sweep
     // measured 3.11 Blocks of worst-case sideways offset, so 3.5 is the first value with margin.
-    public static final float CONTACT_HALF_WIDTH = 2.5f;
+    public static final float CONTACT_HALF_WIDTH = 3.0f;
 
     // The width the collector bar is DRAWN at. Deliberately narrower than the tolerance above.
     //

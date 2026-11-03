@@ -263,7 +263,13 @@ public class CatenaryModule {
                     //
                     // Symmetry matters more here than the half block of end-of-span precision the offset bought:
                     // the same machine installed the same way must behave the same, whichever way it was rotated.
-                    Vec3 pantographPos = Vec3.atLowerCornerOf(pantograph.rotatedPos).add(0, pantograph.type.reach / 2 + pantograph.type.topOffset, 0);
+                    // Block CENTRE, not the lower corner. The model's collector bar is centred on the block, so the
+                    // corner put the test point half a Block away from the bar - a fixed error that helped when the
+                    // wire was offset one way and hurt when it was offset the other, which is exactly the reported
+                    // symptom: a wire visibly inside the strip failing to collect, while the same wire a little
+                    // further out on the other side worked.
+                    Vec3 pantographPos = Vec3.atLowerCornerOf(pantograph.rotatedPos)
+                            .add(0.5, pantograph.type.reach / 2 + pantograph.type.topOffset, 0.5);
 
                     pantographPos = VecHelper.rotate(pantographPos, -pitch, Direction.Axis.Z);
                     pantographPos = VecHelper.rotate(pantographPos, -yaw + 180, Direction.Axis.Y);

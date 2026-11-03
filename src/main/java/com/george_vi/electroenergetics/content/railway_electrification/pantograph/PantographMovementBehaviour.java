@@ -50,7 +50,7 @@ public class PantographMovementBehaviour implements MovementBehaviour {
      * guards are asserted by {@code _cache/check_auto_raise_and_reach.py}; if they drift, the visible
      * symptom is an arm dropping into a bend while the train is still drawing current.
      */
-    private static final float CONTACT_HALF_WIDTH = 2.5f;
+    private static final float CONTACT_HALF_WIDTH = 3.0f;
 
     @Override
     public void tick(MovementContext context) {
