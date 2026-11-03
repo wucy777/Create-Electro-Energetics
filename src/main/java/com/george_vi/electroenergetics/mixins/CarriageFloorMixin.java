@@ -91,8 +91,9 @@ public class CarriageFloorMixin {
             if (!((Object) this instanceof Player player))
                 return;
             Entity vehicle = player.getVehicle();
-            if (vehicle instanceof CarriageContraptionEntity carriage) {
-                electroEnergetics$standOnCarriageFloor(player, carriage);
+            if (vehicle instanceof CarriageContraptionEntity) {
+                // Riding a carriage: the seat holds the player, and Create positions them every tick. Forcing
+                // a footing underneath that is exactly the fight described above, so nothing is done here.
                 return;
             }
 
@@ -153,12 +154,18 @@ public class CarriageFloorMixin {
 
     @Unique
     private static void electroEnergetics$ground(Player player) {
+        // Grounded, and nothing else.
+        //
+        // This used to zero any downward velocity as well, and that is what made the player jitter
+        // vertically: Create's own collision pass runs in the same tick and writes its own motion, so the
+        // two fought over the same field - the player was pinned to the floor, then moved, then pinned
+        // again. Reported as "the body twitches up and down at about 15 m/s, and at 23 it sometimes goes
+        // through the floor".
+        //
+        // Clearing `fallDistance` and setting the flag is all the floor needs: it is what stops the fall
+        // damage and what lets a step or a jump work. Whatever vertical motion the game has decided on is
+        // left to the game.
         player.setOnGround(true);
-        // Only cancel downward motion that came from the floor being ignored. An upward velocity means a
-        // jump is in progress and must be left alone.
-        Vec3 motion = player.getDeltaMovement();
-        if (motion.y < 0)
-            player.setDeltaMovement(motion.x, 0, motion.z);
         player.fallDistance = 0;
     }
 
