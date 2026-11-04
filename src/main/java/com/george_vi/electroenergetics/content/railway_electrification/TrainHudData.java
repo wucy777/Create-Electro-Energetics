@@ -91,11 +91,23 @@ public final class TrainHudData {
     private static final Map<UUID, java.util.Optional<UUID>> DRIVER_CLAIMS =
             new ConcurrentHashMap<>();
 
+    /**
+     * The carriage holding the claimed controls desk, or absent.
+     *
+     * <p>Kept beside the claim because the driver's own HUD needs it: the consist strip's leading end is the
+     * cab the driver took, and on a stationary train the speed cannot say which end that is.
+     */
+    private static final Map<UUID, Integer> CLAIM_CARRIAGE = new java.util.concurrent.ConcurrentHashMap<>();
+
     private TrainHudData() {}
 
     /** Record the server's answer to "who drives this train". */
-    public static void updateDriverClaim(UUID trainId, UUID driverId) {
+    public static void updateDriverClaim(UUID trainId, UUID driverId, int carriageIndex, boolean ignored) {
         DRIVER_CLAIMS.put(trainId, java.util.Optional.ofNullable(driverId));
+        if (carriageIndex >= 0)
+            CLAIM_CARRIAGE.put(trainId, carriageIndex);
+        else
+            CLAIM_CARRIAGE.remove(trainId);
     }
 
     /** Whether the server has stated who (if anybody) owns this train's controls. */
@@ -110,6 +122,15 @@ public final class TrainHudData {
      * difference ask {@link #hasDriverClaim}; the ones that just want to know whether this
      * client may drive can use {@link #isDriver} instead.
      */
+    public static void updateDriverClaim(UUID trainId, UUID driverId, int carriageIndex) {
+        updateDriverClaim(trainId, driverId, carriageIndex, true);
+    }
+
+    /** Which carriage of {@code trainId} holds the claimed desk, or -1 when nobody drives. */
+    public static int driverClaimCarriage(UUID trainId) {
+        return CLAIM_CARRIAGE.getOrDefault(trainId, -1);
+    }
+
     public static UUID driverClaim(UUID trainId) {
         return DRIVER_CLAIMS.getOrDefault(trainId, java.util.Optional.empty()).orElse(null);
     }

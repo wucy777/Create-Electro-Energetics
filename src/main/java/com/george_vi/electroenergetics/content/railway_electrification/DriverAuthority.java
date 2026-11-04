@@ -283,7 +283,8 @@ public final class DriverAuthority {
     public static void sendClaimTo(ServerPlayer player, Train train) {
         TrainDriverState driver = dataOf(train).driver;
         CatnipServices.NETWORK.sendToClient(player,
-                new DriverClaimPacket(train.id, driver.claimOwner));
+                new DriverClaimPacket(train.id, driver.claimOwner,
+                            driver.claimOwner == null ? -1 : driver.driverCarriage));
     }
 
     /**
@@ -305,7 +306,8 @@ public final class DriverAuthority {
                 return;
             Vec3 pos = cce.position();
             CatnipServices.NETWORK.sendToClientsAround(level, pos, SYNC_RANGE,
-                    new DriverClaimPacket(train.id, owner));
+                    new DriverClaimPacket(train.id, owner,
+                        owner == null ? -1 : driver.driverCarriage));
             return;
         }
     }

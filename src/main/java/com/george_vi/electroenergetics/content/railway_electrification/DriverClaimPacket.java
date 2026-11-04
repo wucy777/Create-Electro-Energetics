@@ -36,7 +36,13 @@ import java.util.UUID;
  * @param trainId  the train the claim belongs to
  * @param driverId the player who owns the controls, or {@code null} when the train is free
  */
-public record DriverClaimPacket(UUID trainId, UUID driverId) implements ClientboundPacketPayload {
+public record DriverClaimPacket(UUID trainId, UUID driverId, int carriageIndex)
+        implements ClientboundPacketPayload {
+
+    /** Claim with no carriage, for callers that only know the owner. */
+    public DriverClaimPacket(UUID trainId, UUID driverId) {
+        this(trainId, driverId, -1);
+    }
 
     public static final StreamCodec<ByteBuf, DriverClaimPacket> STREAM_CODEC = StreamCodec.of(
             (buf, p) -> {
@@ -45,17 +51,25 @@ public record DriverClaimPacket(UUID trainId, UUID driverId) implements Clientbo
                 // ordinary state of the claim, not an error, and a sentinel would be one
                 // more thing every reader has to remember to test.
                 ByteBufCodecs.BOOL.encode(buf, p.driverId() != null);
-                if (p.driverId() != null)
+                if (p.driverId() != null) {
                     UUIDUtil.STREAM_CODEC.encode(buf, p.driverId());
+                    // Which carriage the claimed desk is in. The HUD needs it on the DRIVER's own client:
+                    // the strip's leading end is the driver's cab, and deriving that from the speed kept the
+                    // old direction on a stationary train after switching ends.
+                    ByteBufCodecs.VAR_INT.encode(buf, p.carriageIndex());
+                }
             },
-            buf -> new DriverClaimPacket(
-                    UUIDUtil.STREAM_CODEC.decode(buf),
-                    ByteBufCodecs.BOOL.decode(buf) ? UUIDUtil.STREAM_CODEC.decode(buf) : null));
+            buf -> {
+                UUID trainId = UUIDUtil.STREAM_CODEC.decode(buf);
+                UUID driverId = ByteBufCodecs.BOOL.decode(buf) ? UUIDUtil.STREAM_CODEC.decode(buf) : null;
+                int carriageIndex = driverId != null ? ByteBufCodecs.VAR_INT.decode(buf) : -1;
+                return new DriverClaimPacket(trainId, driverId, carriageIndex);
+            });
 
     @Override
     @OnlyIn(Dist.CLIENT)
     public void handle(LocalPlayer player) {
-        TrainHudData.updateDriverClaim(trainId, driverId);
+        TrainHudData.updateDriverClaim(trainId, driverId, carriageIndex);
     }
 
     @Override

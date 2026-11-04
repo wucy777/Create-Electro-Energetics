@@ -504,7 +504,11 @@ public class TrainControlHud implements LayeredDraw.Layer {
      * the row. Merging a long run of pantograph-less carriages into one slot can bring a forty-car
      * train back onto a single row, and that is the point of the merge.
      */
-    private static final int SINGLE_ROW_MAX = 12;
+    // Eight slots per row, not twelve. Every slot is a carriage and the strip only has a fixed budget of
+    // pixels, so twelve made each carriage about two pixels wide - wide enough to show that a carriage exists
+    // and nothing else. The operator asked for longer carriages, and the cost of it is an earlier wrap onto
+    // the second row.
+    private static final int SINGLE_ROW_MAX = 8;
 
     /**
      * Height of a carriage body, in pixels - five rows, in BOTH layouts.
@@ -686,7 +690,15 @@ public class TrainControlHud implements LayeredDraw.Layer {
         // multiple unit has a cab at both ends, so which end leads changes with the direction of
         // travel and cannot be inferred from the model; it has to be drawn. When the train is running
         // the other way the whole strip is mirrored, carriages, marks and both arcs together.
-        boolean leadingEndIsFirst = train.speed >= 0;
+        // Which end of the strip is the leading one. With a driver aboard it is the cab they took, and that
+        // has to come from the claim rather than from the speed: on a stationary train the speed still holds
+        // whatever the last movement was, so switching ends left the strip - and every pantograph on it -
+        // describing the previous direction until the train rolled forward a little.
+        int claimCarriage = com.george_vi.electroenergetics.content.railway_electrification.TrainHudData
+                .driverClaimCarriage(train.id);
+        boolean leadingEndIsFirst = claimCarriage >= 0
+                ? claimCarriage * 2 < n
+                : train.speed >= 0;
 
         // Where the arms are, one bit per carriage in DISPLAY order (bit 0 = leading end). A long
         // rather than an array or a list of per-carriage flags: the merge rule and the icon placement
@@ -824,10 +836,22 @@ public class TrainControlHud implements LayeredDraw.Layer {
                         int displayPos = leadingEndIsFirst ? carriageIndex : n - 1 - carriageIndex;
                         if (displayPos != pos)
                             continue;
-                        int iconColour = entry.autoRaise() ? DANGER
-                                : (entry.active() ? TEXT : TEXT_DIM);
-                        graphics.fill(barX, band, barX + barW, band + 1, iconColour);
-                        graphics.fill(mx, band + 1, mx + 1, band + 2, iconColour);
+                        // Blue while the arm is working (the switch is on), red once it is parked.
+                        int iconColour = entry.autoRaise() ? 0x5AB0FF : DANGER;
+                        // Two rows of eight columns, the operator's own art:
+                        //   lowered   00011110        raised   0000000>
+                        //             00010010                 00000010
+                        // Centred in the carriage when it is wide enough, left-aligned when it is not, so a
+                        // one-pixel carriage cannot push the glyph into its neighbour.
+                        int gx = sx + Math.max(0, (width - 8) / 2);
+                        if (entry.active()) {
+                            graphics.fill(gx + 7, band, gx + 8, band + 1, iconColour);
+                            graphics.fill(gx + 6, band + 1, gx + 7, band + 2, iconColour);
+                        } else {
+                            graphics.fill(gx + 3, band, gx + 7, band + 1, iconColour);
+                            graphics.fill(gx + 3, band + 1, gx + 4, band + 2, iconColour);
+                            graphics.fill(gx + 6, band + 1, gx + 7, band + 2, iconColour);
+                        }
                     }
                 }
             }
