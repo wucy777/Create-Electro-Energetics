@@ -777,7 +777,7 @@ public class TrainControlHud implements LayeredDraw.Layer {
         // train.
         int bodyX = x + CARRIAGE_NOSE_W;
         int topBand = y;                     // the first row's pantograph-mark row
-        int bottomBand = y + carH + 3;       // the second row's, one link row below the first band
+        int bottomBand = y + carH + 2;       // the second row's, one link row below the first band
 
         int selected = Math.min(TrainControlInput.selectedPantograph(),
                 Math.max(0, pantographs.size() - 1));
@@ -849,11 +849,20 @@ public class TrainControlHud implements LayeredDraw.Layer {
                         //
                         // Two rows CLEAR of the carriage body: band is the mark row and the body starts at
                         // band + 1, so drawing at band - 2 leaves one empty row between the arm and its roof.
+                        // The operator's art, flush on the carriage roof - the last row of the mark is the
+                        // row immediately above the body, with no blank line between them.
+                        //
+                        //   lowered   11111      raised   00010
+                        //             10101               00100
+                        //
+                        // Raised is the first two rows of the five-row chevron the operator drew, because the
+                        // strip only has two rows of headroom above the body: five would need the count and
+                        // the direction arrow to give up their rows.
                         int gy = band;
                         int gx = sx + Math.max(0, Math.min((width - 5) / 2, width - 5));
                         if (entry.active()) {
-                            graphics.fill(gx + 4, gy, gx + 5, gy + 1, iconColour);
-                            graphics.fill(gx + 3, gy + 1, gx + 4, gy + 2, iconColour);
+                            graphics.fill(gx + 3, gy, gx + 4, gy + 1, iconColour);
+                            graphics.fill(gx + 2, gy + 1, gx + 3, gy + 2, iconColour);
                         } else {
                             graphics.fill(gx, gy, gx + 5, gy + 1, iconColour);
                             graphics.fill(gx, gy + 1, gx + 1, gy + 2, iconColour);
