@@ -777,7 +777,7 @@ public class TrainControlHud implements LayeredDraw.Layer {
         // train.
         int bodyX = x + CARRIAGE_NOSE_W;
         int topBand = y;                     // the first row's pantograph-mark row
-        int bottomBand = y + carH + 2;       // the second row's, one link row below the first band
+        int bottomBand = y + carH + 3;       // the second row's, one link row below the first band
 
         int selected = Math.min(TrainControlInput.selectedPantograph(),
                 Math.max(0, pantographs.size() - 1));
@@ -790,7 +790,7 @@ public class TrainControlHud implements LayeredDraw.Layer {
             int len = consistUnitLength(pos, n, arms);
             int row = slot < topSlots ? 0 : 1;
             int band = row == 0 ? topBand : bottomBand;
-            int bodyY = band + 1;
+            int bodyY = band + 2;
             int sx = row == 0 ? topX : bottomX;
             int width = len >= 2
                     ? Math.max(baseW, consistCountWidth(len) + (singleRow ? 0 : COUNT_PAD))
@@ -838,18 +838,22 @@ public class TrainControlHud implements LayeredDraw.Layer {
                             continue;
                         // Blue while the arm is working (the switch is on), red once it is parked.
                         int iconColour = entry.autoRaise() ? 0x5AB0FF : DANGER;
-                        // Two rows of five columns, the operator's own art:
-                        //   lowered   11111        raised   0000>
-                        //             10101                 00100
-                        // Five wide, not eight: at eight the glyph was wider than a narrow carriage and its
-                        // last column landed in the one-pixel gap between carriages - a stray vertical mark
-                        // on the black divider. The box is clamped inside the carriage so it cannot happen
-                        // even at the narrowest width.
-                        int gy = band - 1;      // one row up, clear of the carriage body
+                        // Five columns, two rows, the operator's own art:
+                        //   lowered   11111        raised   00001
+                        //             10101                 00010
+                        // Lowered is the collector bar seen from the side, lying flat on three feet; raised is
+                        // the arm raked up, the same stroke the side view shows. Five wide rather than eight:
+                        // at eight the last column fell into the one-pixel gap between carriages and left a
+                        // stray mark on the black divider, and the origin is clamped inside the carriage so it
+                        // cannot happen again at any width.
+                        //
+                        // Two rows CLEAR of the carriage body: band is the mark row and the body starts at
+                        // band + 1, so drawing at band - 2 leaves one empty row between the arm and its roof.
+                        int gy = band;
                         int gx = sx + Math.max(0, Math.min((width - 5) / 2, width - 5));
                         if (entry.active()) {
                             graphics.fill(gx + 4, gy, gx + 5, gy + 1, iconColour);
-                            graphics.fill(gx + 2, gy + 1, gx + 3, gy + 2, iconColour);
+                            graphics.fill(gx + 3, gy + 1, gx + 4, gy + 2, iconColour);
                         } else {
                             graphics.fill(gx, gy, gx + 5, gy + 1, iconColour);
                             graphics.fill(gx, gy + 1, gx + 1, gy + 2, iconColour);

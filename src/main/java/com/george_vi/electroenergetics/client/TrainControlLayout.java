@@ -71,7 +71,10 @@ final class TrainControlLayout {
      * two rows the arc needs. 38 leaves 7.25 px below the last glyph row
      * (2 + 22 + 6.75 = 30.75), two of them the band's new rows and 5.25 the slack the 36 version had.
      */
-    static final int FOOTER_H = 38;
+    // 39, not 38: one more row so a pantograph mark can sit on its own line with a blank row between it and
+    // the carriage roof. The band grows with it (it is measured to the panel's bottom edge), and nothing else
+    // in the footer moves - its rows are addressed from the panel's bottom.
+    static final int FOOTER_H = 39;
 
     /**
      * Where the footer's three rows sit, relative to the footer's top.
