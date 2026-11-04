@@ -2,14 +2,11 @@ package com.george_vi.electroenergetics.mixins;
 
 import com.george_vi.electroenergetics.content.railway_electrification.TrainHudData;
 import com.simibubi.create.content.contraptions.AbstractContraptionEntity;
-import com.simibubi.create.content.contraptions.actors.trainControls.ControlsHandler;
 import com.simibubi.create.content.contraptions.actors.trainControls.ControlsInteractionBehaviour;
 import com.simibubi.create.content.trains.entity.Carriage;
 import com.simibubi.create.content.trains.entity.CarriageContraptionEntity;
 import com.simibubi.create.content.trains.entity.Train;
-import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
-import net.minecraft.network.chat.Component;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.player.Player;
 import org.spongepowered.asm.mixin.Mixin;
@@ -70,17 +67,13 @@ public class DriverClaimClientMixin {
         if (owner.equals(player.getUUID()))
             return;   // the driver: Create's own handling is what releases the controls
 
-        // Somebody else drives. Open (or keep) the view-only cab without letting Create's
-        // prediction claim the controls; return true so the interaction is consumed and the
-        // server is still told about the click, which is what produces its refusal message.
-        if (ControlsHandler.getContraption() != cce || !localPos.equals(ControlsHandler.getControlsPos()))
-            ControlsHandler.startControlling(cce, localPos);
-        // Create's startControlling message says "you have taken the controls", which is a
-        // lie in this case. Overwrite the action bar with the truth.
-        Minecraft mc = Minecraft.getInstance();
-        if (mc.player != null)
-            mc.player.displayClientMessage(
-                    Component.translatable("electroenergetics.train.driver.readOnlyHint"), true);
+        // Somebody else drives. The operator's rule is that the click does NOTHING AT ALL - not even a
+        // read-only view of the panel. Every panel and every seat of a driven train is closed to everybody
+        // else, which is what keeps the seating unambiguous.
+        //
+        // The click is still consumed: letting Create's local prediction run would write this player's uuid
+        // into the synced "controlling player" field, which is the one thing the mirror repair cannot undo
+        // cleanly. Consuming it without opening the cab is the whole behaviour.
         cir.setReturnValue(true);
     }
 }
