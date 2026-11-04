@@ -217,7 +217,12 @@ public final class DriverAuthority {
                 && driver.driverDesk != null
                 && cce.level() == player.level()
                 && cce.canInteractWithBlock(player, driver.driverDesk, DESK_REACH)
-                && mirrorHolds(cce, owner);
+                && mirrorHolds(cce, owner)
+                // Standing up ends the claim. The operator's rule is that the controls and the driver's
+                // seat are one thing: a player who leaves the seat is no longer at the controls, and a
+                // claim that outlived its seat would hold the cab against everybody else while nobody was
+                // driving. Grace of INVALID_GRACE_TICKS covers the tick a seat change is still settling.
+                && RiderSeatGate.isRidingTrain(train, player);
         if (!corroborated) {
             if (++driver.claimInvalidTicks > INVALID_GRACE_TICKS) {
                 // Reached before the release, so the message can tell the driver why.
@@ -256,6 +261,19 @@ public final class DriverAuthority {
                 if (cce.getControllingPlayer().filter(owner::equals).isPresent())
                     cce.stopControlling(desk);
             });
+        }
+        // The claim and the seat go together: releasing the controls stands the driver up, so the reserved
+        // seat is empty for the next driver instead of being occupied by somebody who no longer has the desk.
+        if (owner != null) {
+            for (Carriage carriage : train.carriages) {
+                carriage.forEachPresentEntity(cce -> {
+                    for (net.minecraft.world.entity.Entity passenger : cce.getIndirectPassengers()) {
+                        if (passenger instanceof net.minecraft.world.entity.player.Player p
+                                && owner.equals(p.getUUID()))
+                            RiderSeatGate.forceDismount(p);
+                    }
+                });
+            }
         }
         driver.releaseClaim();
         broadcastClaim(train, driver);

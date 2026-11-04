@@ -332,6 +332,40 @@ public final class RiderSeatGate {
      *
      * <p>Shared by the two mixins that guard the dismount, so the rule cannot differ between them.
      */
+    /**
+     * Stands a player up, bypassing the speed dismount lock for exactly this call.
+     *
+     * <p>The lock exists to stop a rider CHOOSING to step off a fast train. It must not stop the mod from
+     * taking the driver's seat away when their claim ends - that is not a choice, and leaving them seated in a
+     * seat that is reserved for the next driver is the inconsistent state this is here to prevent.
+     */
+    public static void forceDismount(net.minecraft.world.entity.player.Player player) {
+        if (player == null || !player.isPassenger())
+            return;
+        FORCED_DISMOUNTS.add(player.getUUID());
+        try {
+            player.stopRiding();
+        } catch (Throwable ignored) {
+            // A failed stand-up must not break the tick; the claim is released either way.
+        } finally {
+            FORCED_DISMOUNTS.remove(player.getUUID());
+        }
+    }
+
+    /** Whether this player is riding a carriage of this train. */
+    public static boolean isRidingTrain(Train train, net.minecraft.world.entity.Entity player) {
+        if (train == null || player == null)
+            return false;
+        // getRootVehicle, not getVehicle: a player sitting on a seat rides a SeatEntity whose own vehicle is
+        // the carriage. Testing the direct vehicle would report a seated driver as NOT riding and the claim
+        // would be released the tick it was taken.
+        net.minecraft.world.entity.Entity root = player.getRootVehicle();
+        if (!(root instanceof CarriageContraptionEntity cce))
+            return false;
+        Carriage carriage = cce.getCarriage();
+        return carriage != null && carriage.train == train;
+    }
+
     public static boolean shouldLockDismount(net.minecraft.world.entity.player.Player player) {
         if (!(player instanceof net.minecraft.server.level.ServerPlayer))
             return false;
