@@ -52,7 +52,7 @@ public class ContraptionSeatHitboxMixin {
         // pushes entities out of it - reported as "standing anywhere on the train other than the roof, and
         // even just touching the side, the player drifts slowly" while the train stood still. The click target
         // and the collision shape are separate questions and this must answer only the first.
-        if (level instanceof ContraptionWorld && context.isEmpty())
+        if (level instanceof ContraptionWorld && context == CollisionContext.empty())
             cir.setReturnValue(Shapes.block());
     }
 }
