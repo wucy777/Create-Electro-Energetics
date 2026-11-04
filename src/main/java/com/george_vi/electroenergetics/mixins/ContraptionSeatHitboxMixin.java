@@ -47,7 +47,12 @@ public class ContraptionSeatHitboxMixin {
     private void electroEnergetics$fullBlockClickTarget(BlockState state, BlockGetter level, BlockPos pos,
                                                         CollisionContext context,
                                                         CallbackInfoReturnable<VoxelShape> cir) {
-        if (level instanceof ContraptionWorld)
+        // ONLY the empty context, which is the one a ray trace and an outline use. An entity's collision
+        // query carries its own context, and answering a full block there makes every seat a solid cube that
+        // pushes entities out of it - reported as "standing anywhere on the train other than the roof, and
+        // even just touching the side, the player drifts slowly" while the train stood still. The click target
+        // and the collision shape are separate questions and this must answer only the first.
+        if (level instanceof ContraptionWorld && context.isEmpty())
             cir.setReturnValue(Shapes.block());
     }
 }

@@ -838,19 +838,23 @@ public class TrainControlHud implements LayeredDraw.Layer {
                             continue;
                         // Blue while the arm is working (the switch is on), red once it is parked.
                         int iconColour = entry.autoRaise() ? 0x5AB0FF : DANGER;
-                        // Two rows of eight columns, the operator's own art:
-                        //   lowered   00011110        raised   0000000>
-                        //             00010010                 00000010
-                        // Centred in the carriage when it is wide enough, left-aligned when it is not, so a
-                        // one-pixel carriage cannot push the glyph into its neighbour.
-                        int gx = sx + Math.max(0, (width - 8) / 2);
+                        // Two rows of five columns, the operator's own art:
+                        //   lowered   11111        raised   0000>
+                        //             10101                 00100
+                        // Five wide, not eight: at eight the glyph was wider than a narrow carriage and its
+                        // last column landed in the one-pixel gap between carriages - a stray vertical mark
+                        // on the black divider. The box is clamped inside the carriage so it cannot happen
+                        // even at the narrowest width.
+                        int gy = band - 1;      // one row up, clear of the carriage body
+                        int gx = sx + Math.max(0, Math.min((width - 5) / 2, width - 5));
                         if (entry.active()) {
-                            graphics.fill(gx + 7, band, gx + 8, band + 1, iconColour);
-                            graphics.fill(gx + 6, band + 1, gx + 7, band + 2, iconColour);
+                            graphics.fill(gx + 4, gy, gx + 5, gy + 1, iconColour);
+                            graphics.fill(gx + 2, gy + 1, gx + 3, gy + 2, iconColour);
                         } else {
-                            graphics.fill(gx + 3, band, gx + 7, band + 1, iconColour);
-                            graphics.fill(gx + 3, band + 1, gx + 4, band + 2, iconColour);
-                            graphics.fill(gx + 6, band + 1, gx + 7, band + 2, iconColour);
+                            graphics.fill(gx, gy, gx + 5, gy + 1, iconColour);
+                            graphics.fill(gx, gy + 1, gx + 1, gy + 2, iconColour);
+                            graphics.fill(gx + 2, gy + 1, gx + 3, gy + 2, iconColour);
+                            graphics.fill(gx + 4, gy + 1, gx + 5, gy + 2, iconColour);
                         }
                     }
                 }
