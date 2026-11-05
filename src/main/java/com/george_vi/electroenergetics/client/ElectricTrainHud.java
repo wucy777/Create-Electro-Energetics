@@ -45,31 +45,6 @@ public class ElectricTrainHud
 
  implements LayeredDraw.Layer {
 
-    /**
-     * The displayed speed in tenths of a m/s, per train, eased toward the server's figure.
-     *
-     * <p>train.speed only changes when the server syncs it, so the readout stepped and the operator asked
-     * for it to flow. Easing here rather than in the world model keeps the cost where it belongs: one float
-     * per train, advanced once per frame, no packet and no allocation.
-     */
-    private static final java.util.Map<java.util.UUID, Float> SHOWN_SPEED = new java.util.HashMap<>();
-
-    /** How much of the remaining gap is closed per frame. Smooth, still responsive at a glance. */
-    private static final float SPEED_EASE = 0.18f;
-
-    private static float easeShownSpeed(java.util.UUID trainId, float target) {
-        Float previous = SHOWN_SPEED.get(trainId);
-        if (previous == null) {
-            SHOWN_SPEED.put(trainId, target);   // first sighting: no ease-in from zero
-            return target;
-        }
-        float next = previous + (target - previous) * SPEED_EASE;
-        // Snap when close enough that another frame would not move the printed tenth.
-        if (Math.abs(target - next) < 0.05f)
-            next = target;
-        SHOWN_SPEED.put(trainId, next);
-        return next;
-    }
 
 
     /** How much of the remaining gap is closed per frame. Smooth, still responsive at a glance. */
@@ -125,6 +100,10 @@ public class ElectricTrainHud
 
     // Row text plus the quantised values it was built from. Rebuilt only when a
     // displayed digit actually changes, since this renders every frame.
+    /** The tenths the two speed strings were built from, so they are rebuilt only on a real change. */
+    private int cacheSpeedTenth = Integer.MIN_VALUE;
+    private int cacheCapTenth = Integer.MIN_VALUE;
+
     private String textSpeed = "";
     private String textSpeedKmh = "";
     private String textGear = "";
@@ -494,9 +473,19 @@ public class ElectricTrainHud
             speed = cap;
         // Ease the DISPLAYED figure toward the server's. The cap is applied before easing so the readout still
         // parks exactly on the ceiling instead of creeping up to it.
-        speed = easeShownSpeed(train.id, speed);
-        textSpeed = String.format("%.1f / %.1f m/s", speed / 10d, cap / 10d);
-        textSpeedKmh = String.format("%.0f km/h", speed / 10d * 3.6d);
+        speed = electroEnergetics$smooth(speed);
+        // Rebuild the two speed strings only when a digit actually changed. This method runs every frame, and
+        // String.format allocates a formatter and a builder each call - four allocations per frame for a number
+        // that at rest does not change at all. The eased value moves in sub-tenth steps, so the guard is on the
+        // rounded tenth and the kilometre figure that goes with it, which is exactly what is printed.
+        int shownTenth = Math.round(speed);
+        int shownCapTenth = Math.round(cap);
+        if (shownTenth != cacheSpeedTenth || shownCapTenth != cacheCapTenth) {
+            cacheSpeedTenth = shownTenth;
+            cacheCapTenth = shownCapTenth;
+            textSpeed = String.format("%.1f / %.1f m/s", shownTenth / 10d, shownCapTenth / 10d);
+            textSpeedKmh = String.format("%.0f km/h", shownTenth / 10d * 3.6d);
+        }
         textGear = gear < 0 || gear >= TrainGear.values().length
                 ? "--"
                 : TrainControlHud.label(TrainGear.values()[gear]);
