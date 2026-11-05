@@ -212,6 +212,21 @@ public final class DriverAuthority {
             return;
         }
 
+        // The driver must be IN the seat while the train is above the ceiling, and the check is made here
+        // because refusing the dismount does not work: the refusal fires, the operator sees the message, and the
+        // player leaves the seat anyway - Create removes the passenger on a path that does not pass through
+        // Entity.stopRiding at all, so cancelling that method cancels nothing.
+        //
+        // What is checked instead is the OUTCOME, one tick later: is the driver still sitting. If not, the seat
+        // is given back. This is one comparison on a vehicle reference for the single train that has a driver,
+        // and it only runs while that train is above the ceiling - a stopped train does not reach it.
+        //
+        // A driver who has genuinely left the train is not touched: the corroboration test below releases the
+        // claim for them, and there is nobody to seat.
+        if (RiderSeatGate.atOrAboveCeiling(train) && !RiderSeatGate.isSeatedInTrain(train, player)
+                && RiderSeatGate.isOnTrainNear(train, player, DESK_REACH))
+            RiderSeatGate.seatClaimedDriver(train, RiderSeatGate.reservedDriverSeats(train));
+
         CarriageContraptionEntity cce = carriageEntity(train, driver.driverCarriage);
         boolean corroborated = cce != null
                 && driver.driverDesk != null

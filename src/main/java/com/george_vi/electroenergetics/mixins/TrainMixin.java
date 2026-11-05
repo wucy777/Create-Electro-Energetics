@@ -510,6 +510,18 @@ public class TrainMixin implements ICEETrainExtension {
         // m/s² -> Blocks/Tick². 1 block = 1 m, so only the tick conversion is needed.
         double next = self.speed + a / 400d;
 
+        // Diagnostic for the emergency brake. The operator reports a 150 t train stopping instantly under the
+        // emergency application, and the model as written cannot produce that: friction is about 1 m/s2 and the
+        // motor share is the tractive effort curve divided by the effective mass, which is the same 2 m/s2 the
+        // train accelerates with. So the figure actually produced is printed, and the terms that built it, on
+        // the ticks where an emergency application is in force.
+        if (st.emergencyArmed && Boolean.getBoolean("cee.debugBrake")) {
+            System.out.println(String.format(
+                    "[brake] v=%.3f bpt a=%.3f m/s2 next=%.3f dt=%.5f mass=%.0f cars=%d",
+                    self.speed, a, next, a / 400d, TrainTractionModel.totalMass(train.carriages.size()),
+                    train.carriages.size()));
+        }
+
         // THE LEVER HAS JUST ARRIVED AT CRUISE: capture the speed it is to hold, SIGNED.
         //
         // The capture must keep the direction, because cruise holds speed in the direction its
