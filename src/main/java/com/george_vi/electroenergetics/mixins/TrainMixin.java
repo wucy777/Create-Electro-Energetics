@@ -611,7 +611,19 @@ public class TrainMixin implements ICEETrainExtension {
         // lives only there is display-only while this mode is driving - reported as the
         // 40 km/h limit being "just a hint". After the stop the train starts at zero and
         // the gear law's own effort curve presses against the cap, so the clamp is smooth.
-        if (data.driver.emergencyPenalty) {
+        if (data.driver.emergencyPenalty && !data.driver.emergencyArmed) {
+            // The cap applies AFTER the stop, not during it.
+            //
+            // It was unconditional, and emergencyPenalty is set the instant the handle is pulled - so on the very
+            // first tick of the application the train's speed was ASSIGNED the penalty cap. At 80 m/s that is a
+            // jump to 11 m/s in one tick: about 1400 m/s2, a brake distance of roughly ten blocks, and the
+            // operator measured exactly that. It was never a brake, it was an assignment, and no amount of work
+            // on the deceleration model could have fixed it because the deceleration model was not what stopped
+            // the train.
+            //
+            // Gated on the application being over. The stop itself runs on the emergency rate and takes the
+            // thirty-odd seconds a 150 t train needs; the cap then holds it for the rest of the leg, which is
+            // what the penalty is for.
             double cap = com.george_vi.electroenergetics.content.railway_electrification.TrainDriverState.PENALTY_SPEED / 20.0;
             if (Math.abs(self.speed) > cap)
                 self.speed = Math.signum(self.speed) * cap;
