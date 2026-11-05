@@ -281,4 +281,6 @@
   "electroenergetics.train.status.unmanned": "NO DRIVER - confirm or take over",
   "electroenergetics.train.panto.parked": "PARKED - held down",
   "electroenergetics.train.hint.autoPark": "auto/park"
+  ,
+  "electroenergetics.flytunnel.rejected": "不能穿进列车"
 }

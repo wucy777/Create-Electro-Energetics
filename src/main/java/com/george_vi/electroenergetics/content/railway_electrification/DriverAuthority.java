@@ -223,7 +223,10 @@ public final class DriverAuthority {
         //
         // A driver who has genuinely left the train is not touched: the corroboration test below releases the
         // claim for them, and there is nobody to seat.
-        if (RiderSeatGate.atOrAboveCeiling(train) && !RiderSeatGate.isSeatedInTrain(train, player))
+        // THE seat, not any seat. A driver who slipped past the dismount lock and ended up in a
+        // passenger seat was previously read as "seated" by this check and left there; the lock's
+        // outcome rule only means something if the seat it lands in is the one the claim owns.
+        if (RiderSeatGate.atOrAboveCeiling(train) && !RiderSeatGate.isInClaimedDriverSeat(train, player))
             RiderSeatGate.seatClaimedDriver(train, RiderSeatGate.reservedDriverSeats(train));
 
         CarriageContraptionEntity cce = carriageEntity(train, driver.driverCarriage);

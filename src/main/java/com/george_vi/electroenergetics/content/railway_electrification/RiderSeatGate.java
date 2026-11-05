@@ -720,6 +720,37 @@ public final class RiderSeatGate {
     public record SeatRef(int carriageIndex, int seatIndex) {}
 
     /**
+     * Whether this player is seated in THE driver's seat that belongs to their claim - not merely
+     * anywhere on the train. The outcome check that keeps a driver aboard above the ceiling must not
+     * be satisfied by some other seat: between a dismount and the re-seat one tick later, a loose
+     * driver who ended up in a passenger seat would otherwise read as "seated" and stay there.
+     *
+     * <p>Read from the seat mapping, like {@link #isSeatedInTrain}: the mapping is what Create's own
+     * dismount clears, so "mapping says the reserved seat" is exactly "riding in the reserved seat".
+     */
+    public static boolean isInClaimedDriverSeat(Train train, net.minecraft.server.level.ServerPlayer player) {
+        if (player == null)
+            return false;
+        Set<SeatRef> reserved = reservedDriverSeats(train);
+        if (reserved.isEmpty())
+            return false;
+        for (Carriage carriage : train.carriages) {
+            CarriageContraptionEntity entity = carriage.anyAvailableEntity();
+            if (entity == null || entity.level().isClientSide())
+                continue;
+            Contraption contraption = entity.getContraption();
+            if (contraption == null)
+                continue;
+            Integer seat = contraption.getSeatMapping().get(player.getUUID());
+            if (seat == null)
+                continue;
+            int carriageIndex = train.carriages.indexOf(carriage);
+            return reserved.contains(new SeatRef(carriageIndex, seat));
+        }
+        return false;
+    }
+
+    /**
      * The seats held for a driver right now, as (carriage, seat) pairs.
      *
      * <h2>The rule</h2>
@@ -942,6 +973,12 @@ public final class RiderSeatGate {
             System.out.println("[seatlock] seating driver into carriage " + seat.carriageIndex()
                     + " seat " + seat.seatIndex());
         entity.addSittingPassenger(driver, seat.seatIndex());
+        // The re-seat lands one tick after a successful dismount attempt; at ceiling speed that tick
+        // has carried the driver up to a block and a half forward, which is what reads as "thrown
+        // out of the cab". Landing in the seat with the drift still applied would seat a driver
+        // floating ahead of their own carriage - so the leftover motion dies here, with the seat.
+        driver.setDeltaMovement(net.minecraft.world.phys.Vec3.ZERO);
+        driver.fallDistance = 0f;
             if (!contraption.getSeatMapping().containsKey(claimed))
                 continue;
 

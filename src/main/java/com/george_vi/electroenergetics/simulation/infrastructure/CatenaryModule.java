@@ -346,7 +346,21 @@ public class CatenaryModule {
                             //
                             // Per arm: this one's own switch, not the consist's.
                             pantograph.reachLostTicks = 0;
-                            if (!raised && pantograph.autoRaise)
+                            // The penalty bars collecting current until the next station, and this is the only
+                            // path that raises an arm on its own. Without the test a driver could stop under the
+                            // wire, roll the dead train forward, and have the arm come back up and the traction
+                            // re-engage - the station inspection skipped by parking in the right place.
+                            boolean penaltyLocked = trainData.driver != null
+                                    && (trainData.driver.emergencyPenalty
+                                        || trainData.driver.controlsLocked);
+                            // NOT while the emergency penalty is in force. The penalty's own javadoc says the train may not
+                // collect current again until the next station, and the M key enforces it - but this, the one path
+                // that actually raises an arm on its own, did not. A driver could stop under the wire, drive the
+                // dead train forward, and have the arm come back up and the traction re-engage, which is the
+                // station inspection being skipped by parking in the right place.
+                //
+                // The penalty lifts on arrival, so no separate unlock is needed here.
+                if (!raised && pantograph.autoRaise && !penaltyLocked)
                                 pantograph.active = true;
 
                             // An arm raised this tick (by the switch just above) is what the electrical

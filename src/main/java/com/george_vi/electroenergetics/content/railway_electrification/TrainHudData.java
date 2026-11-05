@@ -324,6 +324,10 @@ public final class TrainHudData {
         PANTOGRAPH_LOCKED.removeIf(id -> !keep.test(id));
         AUTO_RAISE.removeIf(id -> !keep.test(id));
         OVERLOADED.removeIf(id -> !keep.test(id));
+        // These two were missed, so they accumulated for every train the client had ever seen. Small, but it is
+        // the same leak the other seven lines exist to stop.
+        CLAIM_CARRIAGE.keySet().removeIf(id -> !keep.test(id));
+        CARRIAGE_COUNT.keySet().removeIf(id -> !keep.test(id));
     }
 
     // ------------------------------------------------------------------

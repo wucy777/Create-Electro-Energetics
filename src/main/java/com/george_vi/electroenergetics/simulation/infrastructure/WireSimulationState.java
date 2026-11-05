@@ -244,7 +244,7 @@ public class WireSimulationState {
                 break;
             }
 
-            if (i > point) {
+            if (connectionEntry.cuts.get(i).point > point) {
                 connectionEntry.cuts.add(i, entry);
                 break;
             }

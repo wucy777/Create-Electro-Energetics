@@ -42,6 +42,23 @@ public class PantographMovementBehaviour implements MovementBehaviour {
      */
     private static final float CONTACT_HALF_WIDTH = 2.5f;
 
+    /**
+     * Whether this carriage's train is barred from collecting current.
+     *
+     * <p>True during an emergency application and for the rest of the leg afterwards. Client-side carriages have no
+     * driver state; the client only animates from {@code context.disabled}, so answering false there is correct.
+     */
+    private static boolean electroEnergetics$penaltyBlocksRaising(CarriageContraptionEntity carriage) {
+        var c = carriage.getCarriage();
+        if (c == null || c.train == null || carriage.level().isClientSide())
+            return false;
+        var data = ((com.george_vi.electroenergetics.mixin_interfaces.ICEETrainExtension) c.train)
+                .getElectricTrainData();
+        if (data == null || data.driver == null)
+            return false;
+        return data.driver.emergencyPenalty || data.driver.controlsLocked;
+    }
+
     @Override
     public void tick(MovementContext context) {
         float targetExtensionState = context.blockEntityData.getFloat("ExtensionState");
@@ -65,7 +82,16 @@ public class PantographMovementBehaviour implements MovementBehaviour {
                 ((IPantographList) e.getCarriage()).changePantographState(context.localPos, false);
             targetExtensionState = 0f;
         } else if (prevDisabled) {
-            ((IPantographList) e.getCarriage()).changePantographState(context.localPos, true);
+            // RAISE only when the train is allowed to collect current.
+            //
+            // This is upstream's physical switch, and upstream has no penalty to respect - but this fork does,
+            // and it was the second door left open: the M key refuses to raise while the emergency penalty is in
+            // force, and clicking this block raised the arm anyway and re-engaged the traction. A rule with two
+            // unlocked doors is not a rule.
+            //
+            // Lowering is always allowed: taking an arm down is never what the penalty is trying to prevent.
+            if (!electroEnergetics$penaltyBlocksRaising(e))
+                ((IPantographList) e.getCarriage()).changePantographState(context.localPos, true);
             targetExtensionState = 0.75f;
         }
 
