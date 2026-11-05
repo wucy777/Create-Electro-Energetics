@@ -423,6 +423,19 @@ public final class RiderSeatGate {
         if (FORCED_DISMOUNTS.contains(player.getUUID()))
             return false;
 
+        // Diagnostic: the operator reports the lock works on an ordinary seat and not on the driver's. The two
+        // differ in what the player is riding, so the vehicle is named in the log before anything else is
+        // decided. Temporary, and removed once the answer is known.
+        if (Boolean.getBoolean("cee.debugSeatLock")) {
+            net.minecraft.world.entity.Entity v = player.getVehicle();
+            System.out.println(String.format(
+                    "[seatlock] %s vehicle=%s root=%s",
+                    player.getName().getString(),
+                    v == null ? "null" : v.getClass().getSimpleName(),
+                    player.getRootVehicle() == null ? "null"
+                            : player.getRootVehicle().getClass().getSimpleName()));
+        }
+
         com.simibubi.create.content.trains.entity.CarriageContraptionEntity carriage = null;
         if (player.getVehicle()
                 instanceof com.simibubi.create.content.trains.entity.CarriageContraptionEntity direct)

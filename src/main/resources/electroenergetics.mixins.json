@@ -38,6 +38,8 @@
     "LevelChunkMixin",
     "LivingEntityMixin",
     "MinecraftServerMixin",
+    "RiderDismountLockMixin",
+    "RiderStopRidingLockMixin",
     "SchematicLevelMixin",
     "SchematicPrinterMixin",
     "StructureTemplateMixin",
