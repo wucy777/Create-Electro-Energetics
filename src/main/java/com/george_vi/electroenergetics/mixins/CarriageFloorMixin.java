@@ -91,6 +91,15 @@ public class CarriageFloorMixin {
             // The nearby entity query below is broad phase only; a train beside the platform cannot qualify.
             if (player.isPassenger())
                 return;
+
+            // Nothing to clear means nothing to do, and this is the branch that runs on almost every tick of
+            // almost every player on the server. The only thing this mixin still does is clear fallDistance, so
+            // a player who is grounded and has not been falling needs no query at all - which turns the cost for
+            // the ordinary case into one float compare instead of a spatial index lookup. The entity query below
+            // is the expensive half (an AABB, a list, and a walk over the sections around the player) and it is
+            // now reached only by a player who is actually falling.
+            if (player.onGround() && player.fallDistance <= 0.0f)
+                return;
             electroEnergetics$standOnNearestFloor(player);
         } catch (Throwable ignored) {
             // A footing fix must never be the thing that breaks movement.

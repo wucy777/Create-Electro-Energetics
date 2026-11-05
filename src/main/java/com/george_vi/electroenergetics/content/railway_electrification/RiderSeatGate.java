@@ -452,8 +452,9 @@ public final class RiderSeatGate {
      * <p>Nobody else is touched. A passenger who stands up at speed is the gate's business, not this method's,
      * and re-seating them here would fight {@code trySeatAll} for no reason.
      */
-    public static void keepDriverSeated(Train train) {
-        if (train == null)
+
+    public static void keepDriverSeated(Train train, net.minecraft.server.MinecraftServer server) {
+        if (train == null || server == null)
             return;
         var data = ((com.george_vi.electroenergetics.mixin_interfaces.ICEETrainExtension) train)
                 .getElectricTrainData();
@@ -462,16 +463,32 @@ public final class RiderSeatGate {
         if (!atOrAboveCeiling(train))
             return;
         UUID owner = data.driver.claimOwner;
+
+        // Cheapest possible test first. A seated driver is a passenger, and the entity API answers what it is
+        // riding without touching a carriage, a contraption or its seat map. This is the ordinary case on every
+        // tick of every driven train, so it has to cost a field read and nothing else.
+        net.minecraft.server.level.ServerPlayer driver = server.getPlayerList().getPlayer(owner);
+        if (driver == null)
+            return;
+        if (driver.isPassenger() && driver.getRootVehicle() instanceof CarriageContraptionEntity cce
+                && cce.getCarriage() != null && cce.getCarriage().train == train)
+            return;                              // aboard and seated: nothing to repair
+
+        // Only now, for a driver who is loose, walk the carriages. That is one player at most and only in the
+        // tick after something went wrong, not a per-tick cost.
         for (Carriage carriage : train.carriages) {
+            final boolean[] aboard = {false};
             carriage.forEachPresentEntity(cce -> {
-                if (cce.level().isClientSide())
+                if (aboard[0] || cce.level().isClientSide())
                     return;
                 for (Entity passenger : cce.getIndirectPassengers()) {
                     if (passenger instanceof net.minecraft.server.level.ServerPlayer sp
                             && owner.equals(sp.getUUID()))
-                        return;                  // still aboard: nothing to repair
+                        aboard[0] = true;        // still aboard, just not seated
                 }
             });
+            if (aboard[0])
+                return;
         }
         // Not riding any carriage of this train. Seat them again, without the eviction the claim path uses - a
         // driver who is not in a seat is a driver who is not in anybody's way.
