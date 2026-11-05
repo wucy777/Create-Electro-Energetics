@@ -518,8 +518,8 @@ public class TrainMixin implements ICEETrainExtension {
         if (st.emergencyArmed && Boolean.getBoolean("cee.debugBrake")) {
             System.out.println(String.format(
                     "[brake] v=%.3f bpt a=%.3f m/s2 next=%.3f dt=%.5f mass=%.0f cars=%d",
-                    self.speed, a, next, a / 400d, TrainTractionModel.totalMass(train.carriages.size()),
-                    train.carriages.size()));
+                    self.speed, a, next, a / 400d, TrainTractionModel.totalMass(self.carriages.size()),
+                    self.carriages.size()));
         }
 
         // THE LEVER HAS JUST ARRIVED AT CRUISE: capture the speed it is to hold, SIGNED.
