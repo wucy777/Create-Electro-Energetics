@@ -57,7 +57,7 @@ public class ElectricTrainHud
     /** How much of the remaining gap is closed per frame. Smooth, still responsive at a glance. */
     private static final float SPEED_EASE = 0.18f;
 
-    private static float easeShownSpeed(UUID trainId, float target) {
+    private static float easeShownSpeed(java.util.UUID trainId, float target) {
         Float previous = SHOWN_SPEED.get(trainId);
         if (previous == null) {
             SHOWN_SPEED.put(trainId, target);   // first sighting: no ease-in from zero
@@ -71,20 +71,8 @@ public class ElectricTrainHud
         return next;
     }
 
-    /**
-     * The displayed speed in tenths of a m/s, per train, eased toward the server's figure.
-     *
-     * <p>train.speed only changes when the server syncs it, so the readout stepped and the operator asked for it
-     * to flow. Easing here rather than in the world model keeps the cost where it belongs: one float per train,
-     * advanced once per frame, no packet, no allocation.
-     *
-     * <p>It is a display value and nothing else. Nothing is read back from it, so a slow frame can only make the
-     * number arrive late, never make the train behave differently.
-     */
-    private static final java.util.Map<UUID, Float> SHOWN_SPEED = new java.util.HashMap<>();
 
     /** How much of the remaining gap is closed per frame. Smooth, still responsive at a glance. */
-    private static final float SPEED_EASE = 0.18f;
 
     /**
      * Displayed speed, eased towards the last value the server sent.
