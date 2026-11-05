@@ -424,17 +424,17 @@ public final class RiderSeatGate {
         if (c == null || c.train == null || !atOrAboveCeiling(c.train))
             return false;
 
-        // Above the ceiling the seat cannot be left at all, and that includes the driver stepping away from
-        // the desk: the desk and the seat are one thing, so leaving either is leaving the train. The operator
-        // put it plainly - a driver who leaves the desk at speed is a driver being thrown off.
+        // Above the ceiling nobody leaves a seat on an electric train. The operator's rule, and the reason it
+        // is not conditioned on the seat mapping:
         //
-        // Checked against the claim as well as the seat mapping, because the driver is seated BY the claim and
-        // the two can be a tick apart.
-        if (contraption.getSeatMapping().containsKey(player.getUUID()))
-            return true;
+        // The mapping was the test and it was wrong in the case that matters. A driver seated by the claim can
+        // be a tick away from having their entry written, and the operator reported pressing shift at speed and
+        // stepping off - the mapping simply did not contain them yet. Asking "is this player riding a carriage
+        // of a fast electric train" needs no mapping, cannot be a tick stale, and is exactly the condition the
+        // lock is for. A passenger is in the same position: if they are on the carriage, they can be held on it.
         var data = ((com.george_vi.electroenergetics.mixin_interfaces.ICEETrainExtension) c.train)
                 .getElectricTrainData();
-        return data != null && data.driver != null && player.getUUID().equals(data.driver.claimOwner);
+        return data != null && data.hasTractionMotors;
     }
 
     /** Tells the player their dismount was refused. */
