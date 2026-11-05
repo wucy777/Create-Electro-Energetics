@@ -99,6 +99,8 @@ public class CarriageFloorMixin {
 
     @Unique
     private boolean electroEnergetics$standOnCarriageFloor(Player player, CarriageContraptionEntity carriage) {
+        if (electroEnergetics$isJumpingOrClimbing(player))
+            return false;
         if (!electroEnergetics$isElectric(carriage)
                 || !RiderSeatGate.isStandingOnCarriageFloor(player, carriage))
             return false;
@@ -116,6 +118,17 @@ public class CarriageFloorMixin {
                     && electroEnergetics$standOnCarriageFloor(player, carriage))
                 return;
         }
+    }
+
+    @Unique
+    private boolean electroEnergetics$isJumpingOrClimbing(Player player) {
+        // A player who is moving UP is not standing on the carriage floor, and telling the game they are is how a
+        // jump through a carriage wall happens: the ground flag suppresses the collision response, the player
+        // rises through the roof or the side, and the next tick finds them outside the carriage. Reported as
+        // "jumping while pressing against the side of the carriage, sometimes you go straight through".
+        //
+        // Only a descending-or-still player can be given a footing.
+        return player.getDeltaMovement().y > 0.01d || player.isSwimming() || player.isFallFlying();
     }
 
     @Unique

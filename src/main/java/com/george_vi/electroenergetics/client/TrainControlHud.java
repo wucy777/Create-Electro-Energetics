@@ -539,10 +539,10 @@ public class TrainControlHud implements LayeredDraw.Layer {
      * <p>The trailing cab mirrors the same data, so both ends remain symmetric when the train reverses.
      * The array length must equal {@link #CARRIAGE_H}; its maximum must fit {@link #CARRIAGE_NOSE_W}.
      */
-    // Every entry must be <= CARRIAGE_NOSE_W. The array is the nose's silhouette row by row, and the strip
-    // reserves exactly CARRIAGE_NOSE_W pixels at each end for it - a longer reach does not make a longer cab, it
-    // makes the cab overlap the carriage beside it and steals that carriage's width.
-    private static final int[] CARRIAGE_NOSE_ARC = {1, 2, 3, 2, 1};
+    // The operator's own silhouette. Every entry must be <= CARRIAGE_NOSE_W, and CARRIAGE_NOSE_W is 5 because
+    // this arc reaches 5: when the reservation was smaller the nose drew over the carriage beside it and took
+    // that carriage's columns, which is what made the ends look stretched and the middle look short.
+    private static final int[] CARRIAGE_NOSE_ARC = {2, 3, 5, 3, 4};
 
     /**
      * How far the nose reaches past the body at its widest row - the arc's maximum.
@@ -551,9 +551,9 @@ public class TrainControlHud implements LayeredDraw.Layer {
      * to agree: the strip reserves {@code 2 * CARRIAGE_NOSE_W} pixels for the two noses, and the body
      * starts that far inside the strip's left edge. An arc wider than this would overrun the reserve.
      */
-    // Three, not five: the nose is drawn INSIDE the slot budget, and at five the cab was longer than the
-    // carriage behind it. Three keeps the rake visible without making the ends outgrow the body.
-    private static final int CARRIAGE_NOSE_W = 3;
+    // Five: the nose's longest row. The strip reserves 2 * this at the ends, so the nose can never draw over a
+    // neighbouring carriage - the reservation has to be at least as wide as the art it holds.
+    private static final int CARRIAGE_NOSE_W = 5;
 
     /**
      * Rows the strip may use inside the panel, counted down from the y the caller passes in.
@@ -738,7 +738,10 @@ public class TrainControlHud implements LayeredDraw.Layer {
         // can afford; if even one-pixel slots with a gap do not fit, the gap goes first - that is the
         // "past forty it still compresses" rule.
         int avail = PANTO_DETAIL_X - 8;
-        int budget = avail - 2 * CARRIAGE_NOSE_W;
+        // The nose is drawn INSIDE the end carriage's own columns rather than beside it, so it does not need a
+        // reservation. Subtracting 2 * CARRIAGE_NOSE_W here is what shrank every carriage when the nose art grew:
+        // widening the art ate the budget of the carriages in the middle.
+        int budget = avail;
         int topOneDigit = 0;
         int topTwoDigit = 0;
         int bottomOneDigit = 0;
@@ -780,10 +783,9 @@ public class TrainControlHud implements LayeredDraw.Layer {
             baseW = 1;
         boolean hasMerged = topOneDigit + topTwoDigit + bottomOneDigit + bottomTwoDigit > 0;
 
-        // The nose reaches CARRIAGE_NOSE_W pixels left of the body, so the bodies start that far
-        // in. Both rows start at that same column, which is what makes the two halves read as one
-        // train.
-        int bodyX = x + CARRIAGE_NOSE_W;
+        // Bodies start at the strip's own left edge: the nose is drawn over the end carriage's first columns,
+        // so nothing has to be set aside for it.
+        int bodyX = x;
         int topBand = y;                     // the first row's pantograph-mark row
         int bottomBand = y + carH + 2;       // the second row's, one link row below the first band
 
@@ -827,10 +829,12 @@ public class TrainControlHud implements LayeredDraw.Layer {
                 // reading as a consist: a row of noses would be a row of arrows. The arc is drawn one
                 // body row at a time from CARRIAGE_NOSE_ARC, so the reach changes with the row rather
                 // than stepping once at a fixed height.
+                // The nose is drawn INTO the end carriage, not beside it. Outward it needed a reservation at
+                // each end, and that reservation came out of every carriage's width.
                 if (slot == 0)
-                    drawCarriageNose(graphics, sx, bodyY, colour, false);
+                    drawCarriageNose(graphics, sx + 1, bodyY, colour, false);
                 if (slot == slots - 1)
-                    drawCarriageNose(graphics, sx + width, bodyY, colour, true);
+                    drawCarriageNose(graphics, sx + width - 1, bodyY, colour, true);
 
                 // The carriage's arms, above it and in its own column. Two arms on one carriage
                 // overdraw each other at the same spot, exactly as they always have.
@@ -850,15 +854,13 @@ public class TrainControlHud implements LayeredDraw.Layer {
                         // Bar on the mark row and a one-pixel stem under it, so the glyph reads as a T
                         // sitting on the roof. The stem ends on the row above the body, which is why the
                         // body starts at band + 2: the two never overlap.
-                        // Drawn ON the body's top two rows rather than above it. Above it, the mark sat on a
-                        // row that the panel's own layout can put under the footer outline or under the previous
-                        // row's link, and the operator reported it as completely invisible. Inside the body it
-                        // is always visible, and a bright pixel on a dim carriage reads as a mark, not as a gap.
+                        // On its own two rows ABOVE the body, never over it: bar on the mark row, stem on
+                        // the row below, and the body starts two rows down. The mark is a roof fitting.
                         int tBarW = Math.min(5, Math.max(1, width));
                         int tBarX = sx + (width - tBarW) / 2;
                         int tStemX = sx + width / 2;
-                        graphics.fill(tBarX, bodyY, tBarX + tBarW, bodyY + 1, iconColour);
-                        graphics.fill(tStemX, bodyY + 1, tStemX + 1, bodyY + 2, iconColour);
+                        graphics.fill(tBarX, band, tBarX + tBarW, band + 1, iconColour);
+                        graphics.fill(tStemX, band + 1, tStemX + 1, band + 2, iconColour);
                     }
                 }
             }

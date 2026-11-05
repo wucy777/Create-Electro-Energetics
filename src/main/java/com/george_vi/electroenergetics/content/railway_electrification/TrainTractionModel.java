@@ -633,6 +633,15 @@ public final class TrainTractionModel {
         //
         // Zero on level ground at rest, which is correct: there is nothing to hold
         // against, so the brake has no direction to push.
+        // Which way a lever brake pushes. It must OPPOSE the motion, so it is the sign of the VELOCITY, and at
+        // rest it is whatever holds the train against the slope.
+        //
+        // Every use below multiplies by -brakeHeading, so a positive brakeHeading means "the brake pushes
+        // backwards". Signing this with v (rather than with speed) is what keeps REVERSE honest: rolling
+        // backwards, v is negative, the brake must push forwards, and -brakeHeading then yields the positive
+        // force that does it. Signed with speed it was always +1, so in reverse the "brake" pushed BACKWARDS -
+        // the direction of travel - and every stop became brake plus traction, which is the report of an
+        // emergency stop that pulled 100 m/s down in under five seconds.
         double brakeHeading = speed < 1e-6d ? -Math.signum(gradeToPlusX) : Math.signum(v);
 
         // Braking is blended rather than a single number, and the blend depends on
@@ -748,7 +757,14 @@ public final class TrainTractionModel {
                         // full power from the catenary while recovering nothing. The
                         // driver reported exactly that - the reverse position stopping the
                         // train with the traction at full draw and no regeneration.
-                        leverBrakeForce = -brakeHeading * brakeTotal * mass;
+                        // `-Math.abs(brakeHeading)`, not `-brakeHeading`.
+                        //
+                        // brakeHeading is signed with the VELOCITY, so in reverse it is -1 and -brakeHeading
+                        // is +1: the brake pushed the train the way it was already going. Braking opposes
+                        // motion by definition, so the sign here must not depend on which way that is. The
+                        // lever force is therefore always negative, and in reverse it slows a train that is
+                        // rolling backwards exactly as it slows one rolling forwards.
+                        leverBrakeForce = -Math.abs(brakeHeading) * brakeTotal * mass;
                         force += leverBrakeForce;
                         dynamicApplied = dynamicPart;
                     } else {

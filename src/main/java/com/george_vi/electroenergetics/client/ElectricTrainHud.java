@@ -41,7 +41,50 @@ import net.neoforged.api.distmarker.OnlyIn;
  * row is drawn; it is read from the train directly.
  */
 @OnlyIn(Dist.CLIENT)
-public class ElectricTrainHud implements LayeredDraw.Layer {
+public class ElectricTrainHud
+
+ implements LayeredDraw.Layer {
+
+    /**
+     * The displayed speed in tenths of a m/s, per train, eased toward the server's figure.
+     *
+     * <p>train.speed only changes when the server syncs it, so the readout stepped and the operator asked
+     * for it to flow. Easing here rather than in the world model keeps the cost where it belongs: one float
+     * per train, advanced once per frame, no packet and no allocation.
+     */
+    private static final java.util.Map<java.util.UUID, Float> SHOWN_SPEED = new java.util.HashMap<>();
+
+    /** How much of the remaining gap is closed per frame. Smooth, still responsive at a glance. */
+    private static final float SPEED_EASE = 0.18f;
+
+    private static float easeShownSpeed(UUID trainId, float target) {
+        Float previous = SHOWN_SPEED.get(trainId);
+        if (previous == null) {
+            SHOWN_SPEED.put(trainId, target);   // first sighting: no ease-in from zero
+            return target;
+        }
+        float next = previous + (target - previous) * SPEED_EASE;
+        // Snap when close enough that another frame would not move the printed tenth.
+        if (Math.abs(target - next) < 0.05f)
+            next = target;
+        SHOWN_SPEED.put(trainId, next);
+        return next;
+    }
+
+    /**
+     * The displayed speed in tenths of a m/s, per train, eased toward the server's figure.
+     *
+     * <p>train.speed only changes when the server syncs it, so the readout stepped and the operator asked for it
+     * to flow. Easing here rather than in the world model keeps the cost where it belongs: one float per train,
+     * advanced once per frame, no packet, no allocation.
+     *
+     * <p>It is a display value and nothing else. Nothing is read back from it, so a slow frame can only make the
+     * number arrive late, never make the train behave differently.
+     */
+    private static final java.util.Map<UUID, Float> SHOWN_SPEED = new java.util.HashMap<>();
+
+    /** How much of the remaining gap is closed per frame. Smooth, still responsive at a glance. */
+    private static final float SPEED_EASE = 0.18f;
 
     /**
      * Displayed speed, eased towards the last value the server sent.
@@ -461,6 +504,9 @@ public class ElectricTrainHud implements LayeredDraw.Layer {
         // driver can do anything about. Everything below the top still moves in tenths.
         if (cap > 0 && speed >= cap - 1)
             speed = cap;
+        // Ease the DISPLAYED figure toward the server's. The cap is applied before easing so the readout still
+        // parks exactly on the ceiling instead of creeping up to it.
+        speed = easeShownSpeed(train.id, speed);
         textSpeed = String.format("%.1f / %.1f m/s", speed / 10d, cap / 10d);
         textSpeedKmh = String.format("%.0f km/h", speed / 10d * 3.6d);
         textGear = gear < 0 || gear >= TrainGear.values().length
