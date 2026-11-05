@@ -128,7 +128,14 @@ public class CarriageFloorMixin {
         // "jumping while pressing against the side of the carriage, sometimes you go straight through".
         //
         // Only a descending-or-still player can be given a footing.
-        return player.getDeltaMovement().y > 0.01d || player.isSwimming() || player.isFallFlying();
+        // Creative flight counts: the operator flew into a parked train and the flight stopped dead, then
+        // carried on falling, and sometimes ended up inside the carriage. Grounding a flying player is the same
+        // mistake as grounding a jumping one - the game reads it as supported and the flight is cut.
+        return player.getDeltaMovement().y > 0.01d
+                || player.isSwimming()
+                || player.isFallFlying()
+                || player.getAbilities().flying
+                || player.isNoGravity();
     }
 
     @Unique
@@ -144,7 +151,15 @@ public class CarriageFloorMixin {
         // Clearing `fallDistance` and setting the flag is all the floor needs: it is what stops the fall
         // damage and what lets a step or a jump work. Whatever vertical motion the game has decided on is
         // left to the game.
-        player.setOnGround(true);
+        // fallDistance only. setOnGround(true) was here and it is what let players through the carriage wall.
+        //
+        // The ground flag does more than stop fall damage: the game treats a grounded entity as supported and
+        // skips the collision response it would otherwise apply, so a player pressed against a carriage side and
+        // jumping had nothing stopping them crossing it. The operator hit it from both sides - inside jumping at
+        // the shell and coming out, outside flying into a parked train and ending up standing on its floor.
+        //
+        // Clearing fallDistance is the part that was actually needed: it is what stops a fall being recorded
+        // while a carriage floor passes underneath. Grounding is the game's own answer and it is left to it.
         player.fallDistance = 0;
     }
 

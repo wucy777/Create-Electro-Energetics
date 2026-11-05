@@ -437,6 +437,47 @@ public final class RiderSeatGate {
         return data != null && data.hasTractionMotors;
     }
 
+    /**
+     * Puts a driver back in their seat when the lock has been bypassed.
+     *
+     * <p>The lock is two injections and the operator found a path past both: the refusal message appeared and the
+     * player stepped off anyway, then was thrown forward down the train and re-seated as an ordinary passenger.
+     * That is not the lock failing to decide - it decided - it is a second exit that does not go through either
+     * of the two methods the lock knows about. Create's own seat handling removes a passenger directly on some
+     * paths, so no amount of guarding {@code stopRiding} and {@code wantsToStopRiding} can cover it.
+     *
+     * <p>So the rule is enforced where it cannot be bypassed: a driver of a train above the ceiling is seated
+     * again every tick. The window in which they are loose is one tick, which is far too short to be thrown.
+     *
+     * <p>Nobody else is touched. A passenger who stands up at speed is the gate's business, not this method's,
+     * and re-seating them here would fight {@code trySeatAll} for no reason.
+     */
+    public static void keepDriverSeated(Train train) {
+        if (train == null)
+            return;
+        var data = ((com.george_vi.electroenergetics.mixin_interfaces.ICEETrainExtension) train)
+                .getElectricTrainData();
+        if (data == null || data.driver == null || data.driver.claimOwner == null)
+            return;
+        if (!atOrAboveCeiling(train))
+            return;
+        UUID owner = data.driver.claimOwner;
+        for (Carriage carriage : train.carriages) {
+            carriage.forEachPresentEntity(cce -> {
+                if (cce.level().isClientSide())
+                    return;
+                for (Entity passenger : cce.getIndirectPassengers()) {
+                    if (passenger instanceof net.minecraft.server.level.ServerPlayer sp
+                            && owner.equals(sp.getUUID()))
+                        return;                  // still aboard: nothing to repair
+                }
+            });
+        }
+        // Not riding any carriage of this train. Seat them again, without the eviction the claim path uses - a
+        // driver who is not in a seat is a driver who is not in anybody's way.
+        seatClaimedDriver(train, reservedDriverSeats(train));
+    }
+
     /** Tells the player their dismount was refused. */
     public static void refuseDismount(net.minecraft.world.entity.player.Player player) {
         player.displayClientMessage(

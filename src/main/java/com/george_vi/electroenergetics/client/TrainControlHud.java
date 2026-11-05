@@ -334,9 +334,9 @@ public class TrainControlHud implements LayeredDraw.Layer {
         // automatic this line announced a key that does nothing, which reads as a broken control.
         // The row is left blank instead, and the panel's height does not change.
         if (anyManualPantograph(pantographs)) {
-            drawSmallFitted(graphics, font, key(TrainControlKeys.PANTOGRAPH_TOGGLE) + " "
-                            + pantographStateText(train, pantographs), x + PANTO_DETAIL_X, y,
-                    FITTED_MAX_W - PANTO_DETAIL_X, pantographStateColour(train, pantographs));
+            drawPantoDetailRight(graphics, font, key(TrainControlKeys.PANTOGRAPH_TOGGLE) + " "
+                    + pantographStateText(train, pantographs), x, y,
+                    pantographStateColour(train, pantographs));
         }
     }
 
@@ -404,9 +404,9 @@ public class TrainControlHud implements LayeredDraw.Layer {
             // Same rule as the lever panel: the manual-mode line is blank while every arm is on
             // automatic, so a driver handed to Create sees the original mod's appearance by default.
             if (anyManualPantograph(pantographs)) {
-                drawSmallFitted(graphics, font, key(TrainControlKeys.PANTOGRAPH_TOGGLE) + " "
-                                + pantographStateText(train, pantographs), x + PANTO_DETAIL_X, y + 15,
-                        FITTED_MAX_W - PANTO_DETAIL_X, pantographStateColour(train, pantographs));
+                drawPantoDetailRight(graphics, font, key(TrainControlKeys.PANTOGRAPH_TOGGLE) + " "
+                        + pantographStateText(train, pantographs), x, y + 15,
+                        pantographStateColour(train, pantographs));
             }
         } else {
             // Nothing to name, but the driver still needs the state: on an electric train there is
@@ -686,6 +686,22 @@ public class TrainControlHud implements LayeredDraw.Layer {
      * a bit mask in a {@code long}, and the count digits come from a static table. This runs every
      * frame while the driver holds the cab.
      */
+
+    /**
+     * The pantograph detail line, right-aligned against the panel's right inset.
+     *
+     * <p>The operator's instruction: the text must not sit in the consist strip's columns. The strip is laid out
+     * from the left and owns PANTO_DETAIL_X pixels, so a line STARTING at that column still reserves nothing and
+     * the strip happily grows into it. Anchoring the line to the RIGHT edge instead means the strip's budget is
+     * the only thing that decides where the strip ends, and the text can never be overlapped by a long consist.
+     */
+    private static void drawPantoDetailRight(GuiGraphics graphics, Font font, String text,
+                                             int panelX, int y, int colour) {
+        int maxW = FITTED_MAX_W - PANTO_DETAIL_X;
+        int w = Math.min(font.width(text), maxW);
+        drawSmallFitted(graphics, font, text, panelX + FITTED_MAX_W - w, y, maxW, colour);
+    }
+
     private static void drawPantographConsist(GuiGraphics graphics, Train train,
                                               java.util.List<
                                                       com.george_vi.electroenergetics.content
@@ -849,8 +865,12 @@ public class TrainControlHud implements LayeredDraw.Layer {
                         //   red    the driver switched this arm OFF with M (parked)
                         //   blue   automatic, but the arm is down (nothing in reach, or not yet raised)
                         //   green  raised and collecting
+                        // ARGB, and the alpha byte is not optional. These two carried 0x00 there, so the mark
+                        // was drawn fully transparent whenever the switch was on - the operator saw the red
+                        // parked mark and nothing else, and reported it as "invisible when running, invisible
+                        // again after M". A colour written as a bare RGB triple here is an invisible colour.
                         int iconColour = !entry.autoRaise() ? DANGER
-                                : (entry.active() ? 0x5CD65C : 0x5AB0FF);
+                                : (entry.active() ? 0xFF5CD65C : 0xFF5AB0FF);
                         // Bar on the mark row and a one-pixel stem under it, so the glyph reads as a T
                         // sitting on the roof. The stem ends on the row above the body, which is why the
                         // body starts at band + 2: the two never overlap.
@@ -858,7 +878,10 @@ public class TrainControlHud implements LayeredDraw.Layer {
                         // the row below, and the body starts two rows down. The mark is a roof fitting.
                         int tBarW = Math.min(5, Math.max(1, width));
                         int tBarX = sx + (width - tBarW) / 2;
-                        int tStemX = sx + width / 2;
+                        // The stem is placed under the BAR, not under the carriage: on a narrow slot the bar is
+                        // clipped to the slot's width and centring the stem on the carriage put it off the bar's
+                        // end, which read as a r rather than a T.
+                        int tStemX = tBarX + (tBarW - 1) / 2;
                         graphics.fill(tBarX, band, tBarX + tBarW, band + 1, iconColour);
                         graphics.fill(tStemX, band + 1, tStemX + 1, band + 2, iconColour);
                     }

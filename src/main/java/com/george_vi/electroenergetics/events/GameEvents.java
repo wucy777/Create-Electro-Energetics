@@ -260,6 +260,10 @@ public class GameEvents {
             // before.
             if (DriverAuthority.appliesTo(train)) {
                 DriverAuthority.tickClaim(train, driver, server);
+            // After the claim, not before: tickClaim can release it, and a released claim has no driver to hold
+            // in a seat. This is the belt to the lock's braces - see keepDriverSeated for the exit that got past
+            // both injections.
+            RiderSeatGate.keepDriverSeated(train);
             } else {
                 driver.setDriverPresent(controllingPlayer(train));
             }
