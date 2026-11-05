@@ -260,15 +260,12 @@ public class GameEvents {
             // before.
             if (DriverAuthority.appliesTo(train)) {
                 DriverAuthority.tickClaim(train, driver, server);
-            // After the claim, not before: tickClaim can release it, and a released claim has no driver to hold
-            // in a seat. This is the belt to the lock's braces - see keepDriverSeated for the exit that got past
-            // both injections.
+            // No per-tick seat enforcement. The operator asked for the original author's collision and riding
+            // behaviour back: the forcing loop was added to paper over a dismount the lock kept missing, and it
+            // cost every tick of every driven train to do it. The lock mixins are gone with it, so the rule is
+            // simply not enforced at speed any more - which is what the original mod does.
             //
-            // Gated on the two conditions that make it possible at all. Both are scalar reads on state this loop
-            // already holds, so a train that is stopped, or has nobody driving it, pays a branch and nothing
-            // else - which is the case for every train on the server except the one being driven at speed.
-            if (driver.claimOwner != null && RiderSeatGate.atOrAboveCeiling(train))
-                RiderSeatGate.keepDriverSeated(train, server);
+            // Keeping the method in RiderSeatGate for a future that wants it, but nothing calls it.
             } else {
                 driver.setDriverPresent(controllingPlayer(train));
             }
