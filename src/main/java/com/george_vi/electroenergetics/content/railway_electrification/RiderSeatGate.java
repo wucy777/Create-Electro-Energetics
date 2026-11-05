@@ -390,11 +390,24 @@ public final class RiderSeatGate {
             return false;
 
         Contraption contraption = carriage.getContraption();
-        if (contraption == null || !contraption.getSeatMapping().containsKey(player.getUUID()))
+        if (contraption == null)
             return false;
 
         var c = carriage.getCarriage();
-        return c != null && c.train != null && atOrAboveCeiling(c.train);
+        if (c == null || c.train == null || !atOrAboveCeiling(c.train))
+            return false;
+
+        // Above the ceiling the seat cannot be left at all, and that includes the driver stepping away from
+        // the desk: the desk and the seat are one thing, so leaving either is leaving the train. The operator
+        // put it plainly - a driver who leaves the desk at speed is a driver being thrown off.
+        //
+        // Checked against the claim as well as the seat mapping, because the driver is seated BY the claim and
+        // the two can be a tick apart.
+        if (contraption.getSeatMapping().containsKey(player.getUUID()))
+            return true;
+        var data = ((com.george_vi.electroenergetics.mixin_interfaces.ICEETrainExtension) c.train)
+                .getElectricTrainData();
+        return data != null && data.driver != null && player.getUUID().equals(data.driver.claimOwner);
     }
 
     /** Tells the player their dismount was refused. */

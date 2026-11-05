@@ -508,7 +508,10 @@ public class TrainControlHud implements LayeredDraw.Layer {
     // pixels, so twelve made each carriage about two pixels wide - wide enough to show that a carriage exists
     // and nothing else. The operator asked for longer carriages, and the cost of it is an earlier wrap onto
     // the second row.
-    private static final int SINGLE_ROW_MAX = 8;
+    // Six slots per row. The strip has a fixed pixel budget, so the slot count IS the carriage length: eight
+    // made each carriage about four pixels, which reads shorter than the cab noses drawn beside them. Six
+    // gives the body enough columns to look like a carriage next to its own nose.
+    private static final int SINGLE_ROW_MAX = 6;
 
     /**
      * Height of a carriage body, in pixels - five rows, in BOTH layouts.
@@ -545,7 +548,9 @@ public class TrainControlHud implements LayeredDraw.Layer {
      * to agree: the strip reserves {@code 2 * CARRIAGE_NOSE_W} pixels for the two noses, and the body
      * starts that far inside the strip's left edge. An arc wider than this would overrun the reserve.
      */
-    private static final int CARRIAGE_NOSE_W = 5;
+    // Three, not five: the nose is drawn INSIDE the slot budget, and at five the cab was longer than the
+    // carriage behind it. Three keeps the rake visible without making the ends outgrow the body.
+    private static final int CARRIAGE_NOSE_W = 3;
 
     /**
      * Rows the strip may use inside the panel, counted down from the y the caller passes in.
@@ -836,39 +841,20 @@ public class TrainControlHud implements LayeredDraw.Layer {
                         int displayPos = leadingEndIsFirst ? carriageIndex : n - 1 - carriageIndex;
                         if (displayPos != pos)
                             continue;
-                        // Blue while the arm is working (the switch is on), red once it is parked.
-                        int iconColour = entry.autoRaise() ? 0x5AB0FF : DANGER;
-                        // Five columns, two rows, the operator's own art:
-                        //   lowered   11111        raised   00001
-                        //             10101                 00010
-                        // Lowered is the collector bar seen from the side, lying flat on three feet; raised is
-                        // the arm raked up, the same stroke the side view shows. Five wide rather than eight:
-                        // at eight the last column fell into the one-pixel gap between carriages and left a
-                        // stray mark on the black divider, and the origin is clamped inside the carriage so it
-                        // cannot happen again at any width.
-                        //
-                        // Two rows CLEAR of the carriage body: band is the mark row and the body starts at
-                        // band + 1, so drawing at band - 2 leaves one empty row between the arm and its roof.
-                        // The operator's art, flush on the carriage roof - the last row of the mark is the
-                        // row immediately above the body, with no blank line between them.
-                        //
-                        //   lowered   11111      raised   00010
-                        //             10101               00100
-                        //
-                        // Raised is the first two rows of the five-row chevron the operator drew, because the
-                        // strip only has two rows of headroom above the body: five would need the count and
-                        // the direction arrow to give up their rows.
-                        int gy = band;
-                        int gx = sx + Math.max(0, Math.min((width - 5) / 2, width - 5));
-                        if (entry.active()) {
-                            graphics.fill(gx + 3, gy, gx + 4, gy + 1, iconColour);
-                            graphics.fill(gx + 2, gy + 1, gx + 3, gy + 2, iconColour);
-                        } else {
-                            graphics.fill(gx, gy, gx + 5, gy + 1, iconColour);
-                            graphics.fill(gx, gy + 1, gx + 1, gy + 2, iconColour);
-                            graphics.fill(gx + 2, gy + 1, gx + 3, gy + 2, iconColour);
-                            graphics.fill(gx + 4, gy + 1, gx + 5, gy + 2, iconColour);
-                        }
+                        // The T, as before, with three states instead of two:
+                        //   red    the driver switched this arm OFF with M (parked)
+                        //   blue   automatic, but the arm is down (nothing in reach, or not yet raised)
+                        //   green  raised and collecting
+                        int iconColour = !entry.autoRaise() ? DANGER
+                                : (entry.active() ? 0x5CD65C : 0x5AB0FF);
+                        // Bar on the mark row and a one-pixel stem under it, so the glyph reads as a T
+                        // sitting on the roof. The stem ends on the row above the body, which is why the
+                        // body starts at band + 2: the two never overlap.
+                        int barW = Math.min(5, Math.max(1, width));
+                        int barX = sx + (width - barW) / 2;
+                        int mx = sx + width / 2;
+                        graphics.fill(barX, band, barX + barW, band + 1, iconColour);
+                        graphics.fill(mx, band + 1, mx + 1, band + 2, iconColour);
                     }
                 }
             }
