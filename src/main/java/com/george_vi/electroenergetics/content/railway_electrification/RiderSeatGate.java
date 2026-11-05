@@ -445,12 +445,18 @@ public final class RiderSeatGate {
                 && seat.getRootVehicle()
                 instanceof com.simibubi.create.content.trains.entity.CarriageContraptionEntity root)
             carriage = root;
-        if (carriage == null)
-            return false;
+        if (carriage == null) {
+            // No vehicle. That is NOT "not on a train": stopRiding clears the vehicle before the ride is torn
+            // down, so this branch is reached by exactly the player who is trying to leave. A driver is caught
+            // here by asking the claim instead - which is why the driver's seat could be left while an ordinary
+            // seat could not: the ordinary one is stopped earlier, in wantsToStopRiding, where the vehicle is
+            // still set.
+            return driverOfLockedTrain(player);
+        }
 
         Contraption contraption = carriage.getContraption();
         if (contraption == null)
-            return false;
+            return driverOfLockedTrain(player);
 
         var c = carriage.getCarriage();
         if (c == null || c.train == null || !atOrAboveCeiling(c.train))
@@ -525,6 +531,32 @@ public final class RiderSeatGate {
         // Not riding any carriage of this train. Seat them again, without the eviction the claim path uses - a
         // driver who is not in a seat is a driver who is not in anybody's way.
         seatClaimedDriver(train, reservedDriverSeats(train));
+    }
+
+
+    /**
+     * Whether this player is the driver of an electric train above the ceiling.
+     *
+     * <p>Asked without any reference to what the player is riding, because the moment that matters is the one
+     * where the ride is already being torn down. The claim is the authority and it is still set at that point.
+     */
+    private static boolean driverOfLockedTrain(net.minecraft.world.entity.player.Player player) {
+        if (!(player.level() instanceof net.minecraft.server.level.ServerLevel))
+            return false;
+        // Only trains that are actually moving can lock anybody, and only a moving train has a speed to test.
+        // A stopped train - the overwhelming majority at any moment, and every parked one - is skipped by two
+        // field reads. This runs on a dismount request, not per tick, so even the full scan would be rare; the
+        // gate is here so that a hundred parked trains cost a hundred comparisons rather than a hundred
+        // electric-data lookups.
+        for (var train : com.simibubi.create.Create.RAILWAYS.trains.values()) {
+            if (!atOrAboveCeiling(train))
+                continue;
+            var data = ((com.george_vi.electroenergetics.mixin_interfaces.ICEETrainExtension) train)
+                    .getElectricTrainData();
+            if (data != null && data.driver != null && player.getUUID().equals(data.driver.claimOwner))
+                return true;
+        }
+        return false;
     }
 
     /** Tells the player their dismount was refused. */
@@ -834,6 +866,8 @@ public final class RiderSeatGate {
      * @return how many players this seated (0 or 1)
      */
     public static int seatClaimedDriver(Train train, Set<SeatRef> held) {
+        if (Boolean.getBoolean("cee.debugSeatLock"))
+            System.out.println("[seatlock] seatClaimedDriver held=" + held.size());
         if (held.isEmpty())
             return 0;
         TrainDriverState driverState = ((com.george_vi.electroenergetics.mixin_interfaces.ICEETrainExtension) train)
@@ -904,7 +938,10 @@ public final class RiderSeatGate {
             if (occupant != null && !occupant.equals(claimed) && !evict(entity, contraption, occupant))
                 continue;
 
-            entity.addSittingPassenger(driver, seat.seatIndex());
+            if (Boolean.getBoolean("cee.debugSeatLock"))
+            System.out.println("[seatlock] seating driver into carriage " + seat.carriageIndex()
+                    + " seat " + seat.seatIndex());
+        entity.addSittingPassenger(driver, seat.seatIndex());
             if (!contraption.getSeatMapping().containsKey(claimed))
                 continue;
 
