@@ -267,6 +267,24 @@ public class TrainMixin implements ICEETrainExtension {
         }
         if (!penalty)
             return ceiling;
+        // NOT while the emergency application is still running.
+        //
+        // maxSpeed() is not a suggestion: Create clamps the train to it every tick, so returning the penalty
+        // figure the instant the handle is pulled IS the stop - the train is teleported from line speed to
+        // 40 km/h and only the last 11 m/s is actually braked. The operator measured ten blocks from 80 m/s,
+        // which is that assignment and nothing else.
+        //
+        // The penalty is a punishment for the rest of the leg, and the leg begins when the train stands. While
+        // the application runs, the ceiling is whatever it was; the stop is the emergency rate's job.
+        // Asked of the synced state as well, so the client reaches the same answer as the server. On the client
+        // `data.driver` is the local copy and can lag; the gear sample is what the server actually sent.
+        boolean stillStopping = data.driver.emergencyArmed;
+        if (!stillStopping) {
+            TrainHudData.GearState syncedGear = TrainHudData.gear(self.id);
+            stillStopping = syncedGear != null && syncedGear.emergencyArmed();
+        }
+        if (stillStopping)
+            return ceiling;
         // The cap has to be able to lower a ceiling, never raise one: if Create's own figure is
         // already below 40 km/h, that smaller figure is the honest answer.
         return Math.min(ceiling, (float) (TrainDriverState.PENALTY_SPEED / 20d));
