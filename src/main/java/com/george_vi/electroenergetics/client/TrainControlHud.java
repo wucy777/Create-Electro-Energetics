@@ -832,9 +832,6 @@ public class TrainControlHud implements LayeredDraw.Layer {
                 // The carriage's arms, above it and in its own column. Two arms on one carriage
                 // overdraw each other at the same spot, exactly as they always have.
                 if ((arms & (1L << pos)) != 0L) {
-                    int mx = sx + (width - 1) / 2;
-                    int barW = Math.min(5, width);
-                    int barX = mx - (barW - 1) / 2;
                     for (int k = 0; k < pantographs.size(); k++) {
                         var entry = pantographs.get(k);
                         int carriageIndex = Math.max(0, Math.min(n - 1, entry.carriageIndex()));
@@ -850,11 +847,11 @@ public class TrainControlHud implements LayeredDraw.Layer {
                         // Bar on the mark row and a one-pixel stem under it, so the glyph reads as a T
                         // sitting on the roof. The stem ends on the row above the body, which is why the
                         // body starts at band + 2: the two never overlap.
-                        int barW = Math.min(5, Math.max(1, width));
-                        int barX = sx + (width - barW) / 2;
-                        int mx = sx + width / 2;
-                        graphics.fill(barX, band, barX + barW, band + 1, iconColour);
-                        graphics.fill(mx, band + 1, mx + 1, band + 2, iconColour);
+                        int tBarW = Math.min(5, Math.max(1, width));
+                        int tBarX = sx + (width - tBarW) / 2;
+                        int tStemX = sx + width / 2;
+                        graphics.fill(tBarX, band, tBarX + tBarW, band + 1, iconColour);
+                        graphics.fill(tStemX, band + 1, tStemX + 1, band + 2, iconColour);
                     }
                 }
             }
