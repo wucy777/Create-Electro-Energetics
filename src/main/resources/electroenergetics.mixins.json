@@ -32,6 +32,8 @@
     "ComparatorBlockMixin",
     "ControlsInputGateMixin",
     "DriverClaimServerMixin",
+    "DriverSeatClickMixin",
+    "ElectricTrainSeatCollisionMixin",
     "FluidPropagatorMixin",
     "LevelChunkMixin",
     "LivingEntityMixin",

@@ -379,6 +379,25 @@ public final class RiderSeatGate {
         return false;
     }
 
+    /**
+     * Whether this player is SITTING on this train - a passenger of one of its carriages, not merely aboard.
+     *
+     * <p>O(1): a vehicle check and one carriage comparison. This is asked once per tick for the one train that has
+     * a driver, so it must not walk the consist.
+     *
+     * <p>Distinct from {@link #isRidingTrain}, which is about being carried at all. Standing in the aisle is
+     * "riding the train" and is not "seated", and the difference is exactly what the ceiling rule turns on.
+     */
+    public static boolean isSeatedInTrain(Train train, net.minecraft.world.entity.Entity player) {
+        if (train == null || player == null || !player.isPassenger())
+            return false;
+        net.minecraft.world.entity.Entity root = player.getRootVehicle();
+        if (!(root instanceof CarriageContraptionEntity cce))
+            return false;
+        Carriage carriage = cce.getCarriage();
+        return carriage != null && carriage.train == train;
+    }
+
     /** Whether this player is riding a carriage of this train. */
     public static boolean isRidingTrain(Train train, net.minecraft.world.entity.Entity player) {
         if (train == null || player == null)

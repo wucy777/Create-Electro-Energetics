@@ -212,6 +212,21 @@ public final class DriverAuthority {
             return;
         }
 
+        // At speed the driver does not get to leave the seat, and this is where that is enforced.
+        //
+        // It is enforced HERE, on the claim, rather than by refusing Create's stopRiding. Two injections used to
+        // do that and the operator stepped off anyway: the refusal message appeared, so the lock had decided, and
+        // Create still removed the passenger on a path neither hook sees. A guard that can be bypassed is worse
+        // than no guard, because it looks like one.
+        //
+        // What cannot be bypassed is the seat being given back. If the train is above the ceiling and its driver
+        // is no longer sitting in it, they are put back in it on the next tick. The window is one tick, which is
+        // far too short to be thrown anywhere.
+        //
+        // Nothing is done below the ceiling: stepping off a slow train is allowed and always has been.
+        if (RiderSeatGate.atOrAboveCeiling(train) && !RiderSeatGate.isSeatedInTrain(train, player))
+            RiderSeatGate.seatClaimedDriver(train, RiderSeatGate.reservedDriverSeats(train));
+
         CarriageContraptionEntity cce = carriageEntity(train, driver.driverCarriage);
         boolean corroborated = cce != null
                 && driver.driverDesk != null
