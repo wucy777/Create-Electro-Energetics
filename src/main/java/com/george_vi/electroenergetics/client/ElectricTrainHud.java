@@ -473,12 +473,12 @@ public class ElectricTrainHud
             speed = cap;
         // Ease the DISPLAYED figure toward the server's. The cap is applied before easing so the readout still
         // parks exactly on the ceiling instead of creeping up to it.
-        speed = electroEnergetics$smooth(speed);
+        float easedTenths = electroEnergetics$smooth(speed);
         // Rebuild the two speed strings only when a digit actually changed. This method runs every frame, and
         // String.format allocates a formatter and a builder each call - four allocations per frame for a number
         // that at rest does not change at all. The eased value moves in sub-tenth steps, so the guard is on the
         // rounded tenth and the kilometre figure that goes with it, which is exactly what is printed.
-        int shownTenth = Math.round(speed);
+        int shownTenth = Math.round(easedTenths);
         int shownCapTenth = Math.round(cap);
         if (shownTenth != cacheSpeedTenth || shownCapTenth != cacheCapTenth) {
             cacheSpeedTenth = shownTenth;
