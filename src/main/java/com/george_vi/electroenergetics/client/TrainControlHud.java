@@ -539,7 +539,10 @@ public class TrainControlHud implements LayeredDraw.Layer {
      * <p>The trailing cab mirrors the same data, so both ends remain symmetric when the train reverses.
      * The array length must equal {@link #CARRIAGE_H}; its maximum must fit {@link #CARRIAGE_NOSE_W}.
      */
-    private static final int[] CARRIAGE_NOSE_ARC = {2, 3, 5, 3, 4};
+    // Every entry must be <= CARRIAGE_NOSE_W. The array is the nose's silhouette row by row, and the strip
+    // reserves exactly CARRIAGE_NOSE_W pixels at each end for it - a longer reach does not make a longer cab, it
+    // makes the cab overlap the carriage beside it and steals that carriage's width.
+    private static final int[] CARRIAGE_NOSE_ARC = {1, 2, 3, 2, 1};
 
     /**
      * How far the nose reaches past the body at its widest row - the arc's maximum.
@@ -847,11 +850,15 @@ public class TrainControlHud implements LayeredDraw.Layer {
                         // Bar on the mark row and a one-pixel stem under it, so the glyph reads as a T
                         // sitting on the roof. The stem ends on the row above the body, which is why the
                         // body starts at band + 2: the two never overlap.
+                        // Drawn ON the body's top two rows rather than above it. Above it, the mark sat on a
+                        // row that the panel's own layout can put under the footer outline or under the previous
+                        // row's link, and the operator reported it as completely invisible. Inside the body it
+                        // is always visible, and a bright pixel on a dim carriage reads as a mark, not as a gap.
                         int tBarW = Math.min(5, Math.max(1, width));
                         int tBarX = sx + (width - tBarW) / 2;
                         int tStemX = sx + width / 2;
-                        graphics.fill(tBarX, band, tBarX + tBarW, band + 1, iconColour);
-                        graphics.fill(tStemX, band + 1, tStemX + 1, band + 2, iconColour);
+                        graphics.fill(tBarX, bodyY, tBarX + tBarW, bodyY + 1, iconColour);
+                        graphics.fill(tStemX, bodyY + 1, tStemX + 1, bodyY + 2, iconColour);
                     }
                 }
             }

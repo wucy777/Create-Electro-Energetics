@@ -222,7 +222,13 @@ public final class DriverAuthority {
                 // seat are one thing: a player who leaves the seat is no longer at the controls, and a
                 // claim that outlived its seat would hold the cab against everybody else while nobody was
                 // driving. Grace of INVALID_GRACE_TICKS covers the tick a seat change is still settling.
-                && RiderSeatGate.isRidingTrain(train, player);
+                // Still at the controls means still ON the train - not necessarily still seated. Opening the
+                // pause menu and coming back drops the seat client-side for a tick, and a claim released on
+                // that tick is a driver standing up at speed, which the seat lock then cannot prevent: the
+                // operator saw exactly that, thrown off the train on returning from ESC. The stand-up rule is
+                // enforced by the seat lock and by release(), not by this corroboration test.
+                && (RiderSeatGate.isRidingTrain(train, player)
+                    || RiderSeatGate.isOnTrainNear(train, player, DESK_REACH));
         if (!corroborated) {
             if (++driver.claimInvalidTicks > INVALID_GRACE_TICKS) {
                 // Reached before the release, so the message can tell the driver why.

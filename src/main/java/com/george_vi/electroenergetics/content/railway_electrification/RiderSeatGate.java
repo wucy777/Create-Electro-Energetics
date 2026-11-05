@@ -352,6 +352,33 @@ public final class RiderSeatGate {
         }
     }
 
+    /**
+     * Whether this player is on the train in any sense - riding it, or standing inside one of its carriages.
+     *
+     * <p>Separate from {@link #isRidingTrain} on purpose. "Is this player at the controls" and "is this player
+     * seated" are different questions, and the pause menu is exactly the case that separates them: the seat is
+     * dropped for a tick on return while the player never left the carriage.
+     */
+    public static boolean isOnTrainNear(Train train, net.minecraft.world.entity.Entity player, double reach) {
+        if (train == null || player == null)
+            return false;
+        if (isRidingTrain(train, player))
+            return true;
+        for (Carriage carriage : train.carriages) {
+            final boolean[] found = {false};
+            carriage.forEachPresentEntity(cce -> {
+                if (found[0] || cce.level() != player.level())
+                    return;
+                if (cce.distanceToSqr(player) <= reach * reach
+                        && isStandingOnCarriageFloor(player, cce))
+                    found[0] = true;
+            });
+            if (found[0])
+                return true;
+        }
+        return false;
+    }
+
     /** Whether this player is riding a carriage of this train. */
     public static boolean isRidingTrain(Train train, net.minecraft.world.entity.Entity player) {
         if (train == null || player == null)
