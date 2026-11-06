@@ -288,15 +288,17 @@ public final class DriverAuthority {
             var carriage = train.carriages.get(driver.driverCarriage);
             // The desk is in the contraption's LOCAL frame and the anchors are in the world's, so the desk is
             // transformed first. Comparing them directly would be comparing two different coordinate systems and
-            // the answer would be noise.
+            // the answer would be noise. The anchors live on the dimensional carriage, not on the carriage.
             CarriageContraptionEntity deskCarriage = carriageEntity(train, driver.driverCarriage);
-            if (carriage != null && carriage.rotationAnchors != null
-                    && driver.driverDesk != null && deskCarriage != null) {
-                var anchors = carriage.rotationAnchors;
-                net.minecraft.world.phys.Vec3 deskWorld = deskCarriage.toGlobalVector(
-                        net.minecraft.world.phys.Vec3.atCenterOf(driver.driverDesk), 1.0f);
-                inverted = deskWorld.distanceToSqr(anchors.getSecond())
-                        < deskWorld.distanceToSqr(anchors.getFirst());
+            if (carriage != null && driver.driverDesk != null && deskCarriage != null) {
+                var dimensional = carriage.getDimensional(deskCarriage.level());
+                if (dimensional != null && dimensional.rotationAnchors != null) {
+                    var anchors = dimensional.rotationAnchors;
+                    net.minecraft.world.phys.Vec3 deskWorld = deskCarriage.toGlobalVector(
+                            net.minecraft.world.phys.Vec3.atCenterOf(driver.driverDesk), 1.0f);
+                    inverted = deskWorld.distanceToSqr(anchors.getSecond())
+                            < deskWorld.distanceToSqr(anchors.getFirst());
+                }
             }
         }
         driver.setDriverCabInverted(inverted);
