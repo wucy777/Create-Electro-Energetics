@@ -226,8 +226,14 @@ public final class DriverAuthority {
         // THE seat, not any seat. A driver who slipped past the dismount lock and ended up in a
         // passenger seat was previously read as "seated" by this check and left there; the lock's
         // outcome rule only means something if the seat it lands in is the one the claim owns.
-        if (RiderSeatGate.atOrAboveCeiling(train) && !RiderSeatGate.isInClaimedDriverSeat(train, player))
-            RiderSeatGate.seatClaimedDriver(train, RiderSeatGate.reservedDriverSeats(train));
+        // NOT here. This used to push the driver back into their reserved seat every tick, and seatClaimedDriver
+        // EVICTS an occupant first - so a driver who was in any other seat was pulled off it and re-seated, at
+        // speed, once per tick. At tick rate 500 that is the operator being flung down the train at 314 km/h with
+        // no input of their own.
+        //
+        // The rule the operator actually wants is "you cannot leave the driver's seat at speed", and that is the
+        // dismount lock's job. Restoring the seat is a recovery for a missed lock, not a per-tick force, and this
+        // path is where it stopped being one.
 
         CarriageContraptionEntity cce = carriageEntity(train, driver.driverCarriage);
         boolean corroborated = cce != null
@@ -287,7 +293,17 @@ public final class DriverAuthority {
         }
         // The claim and the seat go together: releasing the controls stands the driver up, so the reserved
         // seat is empty for the next driver instead of being occupied by somebody who no longer has the desk.
-        if (owner != null) {
+        //
+        // NOT above the ceiling, though. Standing up at 80 m/s is being thrown off the train, and this method
+        // runs on every automatic release as well as the deliberate one - out of reach of the desk, a dropped
+        // mirror, the pause menu. The operator pressed nothing, was accelerating, and found themselves flung
+        // down the train and re-seated as an ordinary passenger: that is this call.
+        //
+        // Above the ceiling the claim is dropped and the player stays where they are. They keep their seat, they
+        // simply stop being the driver; the next driver can take the desk and the seating pass moves them if it
+        // needs the seat back.
+        boolean safeToStandUp = !RiderSeatGate.atOrAboveCeiling(train);
+        if (owner != null && safeToStandUp) {
             for (Carriage carriage : train.carriages) {
                 carriage.forEachPresentEntity(cce -> {
                     for (net.minecraft.world.entity.Entity passenger : cce.getIndirectPassengers()) {

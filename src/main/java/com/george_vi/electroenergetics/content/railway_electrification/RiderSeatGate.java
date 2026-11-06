@@ -123,6 +123,17 @@ public final class RiderSeatGate {
      * have to exceed its own ceiling to arm anything.
      */
     public static boolean atOrAboveCeiling(Train train) {
+        // Deliberately still Blocks per tick, the way it always was.
+        //
+        // It was briefly changed to convert by the live tick rate, so that the gate would work under
+        // /tick rate 500. That made the gate ACTIVE in a configuration nothing here was ever validated in, and
+        // the paths behind it - the seating pass, the dismount lock - promptly threw the operator out of their
+        // seat at 314 km/h. A gate that stays shut in a configuration that was never tested is the safer of the
+        // two failures: at 500 tps this comparison reads the train as slow, the ceiling rule does not arm, and
+        // the train behaves exactly as it did before any of this existed, which the operator confirms was fine.
+        //
+        // Making 500 honest is a whole-model change: twenty-eight conversions across TrainMixin, CatenaryModule
+        // and GameEvents, on top of Create's own tick-rate assumptions, which this mod cannot fix.
         return train != null && Math.abs(train.speed) >= createCeilingBpt() - 1.0e-4d;
     }
 
@@ -842,12 +853,15 @@ public final class RiderSeatGate {
         CarriageContraptionEntity entity = carriageEntity(train, driver.driverCarriage);
         if (entity == null || entity.getContraption() == null)
             return false;
-        List<BlockPos> seats = entity.getContraption().getSeats();
-        int wanted = nearestSeat(seats, driver.driverDesk);
-        if (wanted < 0)
-            return false;
-        return !Integer.valueOf(wanted).equals(entity.getContraption().getSeatMapping()
-                .get(driver.claimOwner));
+        // ONLY when the driver has no seat at all. It used to ask whether they were in the seat NEAREST the desk,
+        // and that is a different question with a destructive answer: seatClaimedDriver evicts an occupant before
+        // seating, so a driver who was sitting anywhere else - already seated, already riding - was pulled off and
+        // re-seated. Once per tick, because a seating pass runs every tick at the ceiling. At tick rate 500 that
+        // is the operator being flung down the train at 314 km/h without touching anything.
+        //
+        // "Has no seat" is the only condition worth acting on: a standing driver at the ceiling needs putting in
+        // the cab. A seated one does not, wherever they happen to be sitting.
+        return entity.getContraption().getSeatMapping().get(driver.claimOwner) == null;
     }
 
     /** Every controls block in this contraption, in its own local coordinates. */
@@ -1393,6 +1407,9 @@ public final class RiderSeatGate {
                     .getElectricTrainData();
             overloaded = data.driver.overloaded;
         }
+        // The cap is 28 m/s, and this method's answer is Blocks per TICK - so the ceiling has to be divided by the
+        // tick rate, not by a hardcoded 20. At /tick rate 500 the old form returned 1.4 Blocks/tick, which is
+        // 700 m/s there: the overload cap did nothing at all.
         return overloaded ? (float) createCeilingBpt() : blocksPerTick;
     }
 }
