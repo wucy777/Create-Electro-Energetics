@@ -268,6 +268,38 @@ public final class DriverAuthority {
             driver.claimInvalidTicks = 0;
         }
         driver.setDriverPresent(owner);
+
+        // WHICH WAY THE DRIVING CAB FACES - and this is the only place it is ever written.
+        //
+        // setDriverCabInverted had no caller at all. The field therefore stayed at its default `false` for every
+        // train, `mirror` in the gear law was always +1, and the whole cab-frame correction never ran: a driver at
+        // the far cab got the near cab's physics. The gear law's comment describes this being written "once a
+        // tick from the carriage the driver is at the controls of", which is exactly here.
+        //
+        // Create answers the question itself: a CarriageContraptionEntity knows whether its controls are
+        // inverted, and that is what CarriageContraptionEntity.control multiplies targetSpeed by. Reading it from
+        // the carriage the DESK is in means switching ends changes it on that tick, which is what the HUD's
+        // direction and the lever's meaning both follow.
+        // Create exposes no accessor for the flag, so the direction is derived the way Create derives it: a
+        // carriage is inverted when its controls face the second bogey rather than the first. `rotationAnchors`
+        // is First/Second in the carriage's own frame, and the desk's offset from each tells which end it is at.
+        boolean inverted = false;
+        if (driver.driverCarriage >= 0 && driver.driverCarriage < train.carriages.size()) {
+            var carriage = train.carriages.get(driver.driverCarriage);
+            // The desk is in the contraption's LOCAL frame and the anchors are in the world's, so the desk is
+            // transformed first. Comparing them directly would be comparing two different coordinate systems and
+            // the answer would be noise.
+            CarriageContraptionEntity deskCarriage = carriageEntity(train, driver.driverCarriage);
+            if (carriage != null && carriage.rotationAnchors != null
+                    && driver.driverDesk != null && deskCarriage != null) {
+                var anchors = carriage.rotationAnchors;
+                net.minecraft.world.phys.Vec3 deskWorld = deskCarriage.toGlobalVector(
+                        net.minecraft.world.phys.Vec3.atCenterOf(driver.driverDesk), 1.0f);
+                inverted = deskWorld.distanceToSqr(anchors.getSecond())
+                        < deskWorld.distanceToSqr(anchors.getFirst());
+            }
+        }
+        driver.setDriverCabInverted(inverted);
     }
 
     /**
