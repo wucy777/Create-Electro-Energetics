@@ -261,6 +261,17 @@ public final class DriverAuthority {
                 && (RiderSeatGate.isRidingTrain(train, player)
                     || RiderSeatGate.isStandingOnAnyFloor(train, player));
         if (!corroborated) {
+            if (Boolean.getBoolean("cee.debugSeatLock"))
+                System.out.println(String.format(
+                        "[claim-invalid] t=%d cce=%s desk=%s sameLevel=%s reach=%s mirror=%s riding=%s floor=%s",
+                        driver.claimInvalidTicks,
+                        cce != null, driver.driverDesk != null,
+                        cce != null && cce.level() == player.level(),
+                        cce != null && driver.driverDesk != null
+                                && cce.canInteractWithBlock(player, driver.driverDesk, DESK_REACH),
+                        cce != null && mirrorHolds(cce, owner),
+                        RiderSeatGate.isRidingTrain(train, player),
+                        RiderSeatGate.isStandingOnAnyFloor(train, player)));
             if (++driver.claimInvalidTicks > INVALID_GRACE_TICKS) {
                 // Reached before the release, so the message can tell the driver why.
                 if (cce != null && driver.driverDesk != null
@@ -293,6 +304,18 @@ public final class DriverAuthority {
         if (owner == null)
             return;
         BlockPos desk = driver.driverDesk == null ? BlockPos.ZERO : driver.driverDesk;
+        // What ended the claim, and who was riding where. One line, printed only when the operator asks with
+        // -Dcee.debugSeatLock=true. Reasoning about which of the release routes fired has cost several rounds;
+        // this answers it from the log instead.
+        if (Boolean.getBoolean("cee.debugSeatLock")) {
+            var d = ((com.george_vi.electroenergetics.mixin_interfaces.ICEETrainExtension) train)
+                    .getElectricTrainData().driver;
+            System.out.println(String.format(
+                    "[claim-release] speed=%.2fbpt(%s ms) invalidTicks=%d desk=%s carriage=%d owner=%s",
+                    Math.abs(train.speed), String.format("%.1f", RiderSeatGate.speedMs(train)),
+                    d.claimInvalidTicks, desk, d.driverCarriage,
+                    String.valueOf(owner).substring(0, 8)));
+        }
         for (Carriage carriage : train.carriages) {
             carriage.forEachPresentEntity(cce -> {
                 if (cce.getControllingPlayer().filter(owner::equals).isPresent())

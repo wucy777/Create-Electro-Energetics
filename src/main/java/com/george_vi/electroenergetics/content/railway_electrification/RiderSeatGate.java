@@ -397,6 +397,10 @@ public final class RiderSeatGate {
     public static void forceDismount(net.minecraft.world.entity.player.Player player) {
         if (player == null || !player.isPassenger())
             return;
+        if (Boolean.getBoolean("cee.debugSeatLock"))
+            System.out.println("[forceDismount] " + player.getName().getString()
+                    + " vehicle=" + (player.getVehicle() == null ? "null"
+                            : player.getVehicle().getClass().getSimpleName()));
         FORCED_DISMOUNTS.add(player.getUUID());
         try {
             player.stopRiding();
@@ -1112,6 +1116,8 @@ public final class RiderSeatGate {
         if (occupant != null) {
             FORCED_DISMOUNTS.add(occupantId);
             try {
+                if (Boolean.getBoolean("cee.debugSeatLock"))
+                    System.out.println("[evict] occupant=" + occupantId);
                 occupant.stopRiding();
             } finally {
                 FORCED_DISMOUNTS.remove(occupantId);
