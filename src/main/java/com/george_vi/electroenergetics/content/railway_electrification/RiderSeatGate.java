@@ -137,6 +137,50 @@ public final class RiderSeatGate {
         return train != null && Math.abs(train.speed) >= createCeilingBpt() - 1.0e-4d;
     }
 
+    /**
+     * The train's speed in METRES PER SECOND, converted through the live tick rate.
+     *
+     * <p>{@code train.speed} is Blocks per TICK, and the tick rate is not always 20. Under {@code /tick rate 500}
+     * a train doing 80 m/s advances 0.16 Blocks per tick, so every Blocks-per-tick threshold in this file reads
+     * it as nearly stopped. That is fine for the per-tick gates, which have always behaved that way and which the
+     * operator has tested around - but it is NOT fine for a decision taken once, at the moment a claim ends,
+     * about whether the driver can safely be stood up. Getting that one wrong throws them off a moving train.
+     *
+     * <p>So this exists for the release path only. It is not used by atOrAboveCeiling, which stays in Blocks per
+     * tick deliberately.
+     */
+    public static double speedMs(Train train) {
+        if (train == null)
+            return 0d;
+        return Math.abs(train.speed) * currentTickRate();
+    }
+
+    /**
+     * The server's tick rate, defaulting to 20.
+     *
+     * <p>Read reflectively and cached: the accessor is not stable across the mappings this mod builds against,
+     * and this is asked on a release, not per tick - so a stale-by-a-second figure is harmless and a compile
+     * failure is not.
+     */
+    private static float cachedTickRate = 20f;
+
+    public static float currentTickRate() {
+        try {
+            Object server = net.neoforged.neoforge.server.ServerLifecycleHooks.getCurrentServer();
+            if (server == null)
+                return cachedTickRate;
+            Object manager = server.getClass().getMethod("tickRateManager").invoke(server);
+            if (manager == null)
+                return cachedTickRate;
+            Object rate = manager.getClass().getMethod("tickrate").invoke(manager);
+            if (rate instanceof Number number && number.floatValue() > 0f)
+                cachedTickRate = number.floatValue();
+        } catch (Throwable ignored) {
+            // Keep the last good figure; 20 is both the default and what every hand test used.
+        }
+        return cachedTickRate;
+    }
+
     /** Whether anybody aboard is standing, on the roof included. */
     public static boolean anyUnseated(Train train) {
         return !allSeated(train);

@@ -310,7 +310,19 @@ public final class DriverAuthority {
         // Above the ceiling the claim is dropped and the player stays where they are. They keep their seat, they
         // simply stop being the driver; the next driver can take the desk and the seating pass moves them if it
         // needs the seat back.
-        boolean safeToStandUp = !RiderSeatGate.atOrAboveCeiling(train);
+        // Whether it is safe to stand the driver up - and the question has to be asked in the units the train
+        // actually moves in.
+        //
+        // atOrAboveCeiling compares against a Blocks-per-tick constant (28 m/s = 1.4), so under /tick rate 500 a
+        // train doing 80 m/s reads 0.16 and the answer is "almost stopped". Every automatic release therefore
+        // took the stand-up branch and forceDismount removed a driver who was doing 288 km/h and holding J.
+        // That is the "I was thrown out of the seat without touching anything" report, and it is why it only
+        // happened at speed on one particular day's testing.
+        //
+        // A physical question deserves a physical figure, so the speed is converted through the live tick rate
+        // here. This is a RELEASE path, not a per-tick rule: it runs when a claim ends.
+        boolean atSpeed = RiderSeatGate.speedMs(train) >= RiderSeatGate.createCeilingBps() - 1.0e-4d;
+        boolean safeToStandUp = !atSpeed;
         if (owner != null && safeToStandUp) {
             for (Carriage carriage : train.carriages) {
                 carriage.forEachPresentEntity(cce -> {
