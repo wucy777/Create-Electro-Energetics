@@ -516,7 +516,16 @@ public class GameEvents {
                     driver.clearTrip();
                     driver.tripTicks = 0;
                 }
-            } else if (owned && moving) {
+            } else if (owned && moving && !driver.emergencyArmed
+                    && !(driver.gear == TrainGear.BRAKE && driver.braking)) {
+                // NOT during an emergency application. The emergency brake is already stopping the train as hard
+                // as it can and it cannot be acknowledged - J is refused while the controls are locked - so the
+                // vigilance clock was counting towards a trip the driver had no way to prevent. At 35 s the trip
+                // fired, and its failSafe overwrote the lever with BRAKE: the operator's reverse-gear emergency
+                // stop silently became a brake-gear one, mid-stop.
+                //
+                // The clock is held rather than reset, so an application that ends still leaves the driver owing
+                // the acknowledgement they owed when it started.
                 if (driver.confirmWaiting < TrainDriverState.TRIP_TICKS) {
                     driver.confirmWaiting++;
                 } else {
