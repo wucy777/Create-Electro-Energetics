@@ -261,7 +261,9 @@ public final class DriverAuthority {
                 && (RiderSeatGate.isRidingTrain(train, player)
                     || RiderSeatGate.isStandingOnAnyFloor(train, player));
         if (!corroborated) {
-            if (Boolean.getBoolean("cee.debugSeatLock"))
+            // Throttled to the first few ticks of a failure run: the point is to see WHICH term broke, and a
+            // per-tick log would bury it in ten thousand identical lines.
+            if (driver.claimInvalidTicks < 3 || driver.claimInvalidTicks == 5)
                 System.out.println(String.format(
                         "[claim-invalid] t=%d cce=%s desk=%s sameLevel=%s reach=%s mirror=%s riding=%s floor=%s",
                         driver.claimInvalidTicks,
@@ -307,7 +309,7 @@ public final class DriverAuthority {
         // What ended the claim, and who was riding where. One line, printed only when the operator asks with
         // -Dcee.debugSeatLock=true. Reasoning about which of the release routes fired has cost several rounds;
         // this answers it from the log instead.
-        if (Boolean.getBoolean("cee.debugSeatLock")) {
+        if (true) {
             var d = ((com.george_vi.electroenergetics.mixin_interfaces.ICEETrainExtension) train)
                     .getElectricTrainData().driver;
             System.out.println(String.format(

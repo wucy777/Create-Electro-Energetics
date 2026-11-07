@@ -397,7 +397,7 @@ public final class RiderSeatGate {
     public static void forceDismount(net.minecraft.world.entity.player.Player player) {
         if (player == null || !player.isPassenger())
             return;
-        if (Boolean.getBoolean("cee.debugSeatLock"))
+        if (true)
             System.out.println("[forceDismount] " + player.getName().getString()
                     + " vehicle=" + (player.getVehicle() == null ? "null"
                             : player.getVehicle().getClass().getSimpleName()));
@@ -508,7 +508,7 @@ public final class RiderSeatGate {
         // Diagnostic: the operator reports the lock works on an ordinary seat and not on the driver's. The two
         // differ in what the player is riding, so the vehicle is named in the log before anything else is
         // decided. Temporary, and removed once the answer is known.
-        if (Boolean.getBoolean("cee.debugSeatLock")) {
+        if (true) {
             net.minecraft.world.entity.Entity v = player.getVehicle();
             System.out.println(String.format(
                     "[seatlock] %s vehicle=%s root=%s",
@@ -982,7 +982,7 @@ public final class RiderSeatGate {
      * @return how many players this seated (0 or 1)
      */
     public static int seatClaimedDriver(Train train, Set<SeatRef> held) {
-        if (Boolean.getBoolean("cee.debugSeatLock"))
+        if (true)
             System.out.println("[seatlock] seatClaimedDriver held=" + held.size());
         if (held.isEmpty())
             return 0;
@@ -1054,7 +1054,7 @@ public final class RiderSeatGate {
             if (occupant != null && !occupant.equals(claimed) && !evict(entity, contraption, occupant))
                 continue;
 
-            if (Boolean.getBoolean("cee.debugSeatLock"))
+            if (true)
             System.out.println("[seatlock] seating driver into carriage " + seat.carriageIndex()
                     + " seat " + seat.seatIndex());
         entity.addSittingPassenger(driver, seat.seatIndex());
@@ -1116,7 +1116,7 @@ public final class RiderSeatGate {
         if (occupant != null) {
             FORCED_DISMOUNTS.add(occupantId);
             try {
-                if (Boolean.getBoolean("cee.debugSeatLock"))
+                if (true)
                     System.out.println("[evict] occupant=" + occupantId);
                 occupant.stopRiding();
             } finally {
