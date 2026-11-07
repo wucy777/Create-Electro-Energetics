@@ -268,18 +268,6 @@ public final class DriverAuthority {
             driver.claimInvalidTicks = 0;
         }
         driver.setDriverPresent(owner);
-
-        // The driving cab's direction is NOT recorded, and that is a deliberate revert.
-        //
-        // TrainDriverState.setDriverCabInverted had no caller, so driverCabInverted stayed false and `mirror` in
-        // the gear law was always +1. Wiring it up looked like completing a feature. It was not: the whole
-        // mirrored path had never executed, and the first end that used it started throwing the operator out of
-        // the cab under /tick rate 500 - while the other end, and straight-line acceleration to 100 m/s, stayed
-        // fine. A path that has never run is not a path that works.
-        //
-        // Left at false so both ends behave identically, which is what the operator confirms used to be true.
-        // Making the mirrored frame correct is its own job, and it needs a test at both ends at tick 20 before it
-        // goes anywhere near a release.
     }
 
     /**
