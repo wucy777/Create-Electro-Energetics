@@ -372,7 +372,12 @@ public final class RiderSeatGate {
             player.teleportTo(level, seatWorld.x, seatWorld.y, seatWorld.z,
                     player.getYRot(), player.getXRot());
         }
-        entity.addSittingPassenger(player, seat);
+        SEATING.add(player.getUUID());
+        try {
+            entity.addSittingPassenger(player, seat);
+        } finally {
+            SEATING.remove(player.getUUID());
+        }
         boolean riding = player.getVehicle() == entity;
         LOG.info("SEATRESTORE claim seat={} seats={} dist={} ridingBefore={} ridingAfter={}",
                 seat, contraption.getSeats().size(),
@@ -503,6 +508,17 @@ public final class RiderSeatGate {
         // FORCED_DISMOUNTS: the lock is about a player choosing to leave a fast train, not about a
         // forced change of seat inside it.
         if (FORCED_DISMOUNTS.contains(player.getUUID()))
+            return false;
+        // SEATING IN PROGRESS - and this is the one that mattered.
+        //
+        // AbstractContraptionEntity.addSittingPassenger calls stopRiding on the entity BEFORE seating it: the
+        // passenger is taken off whatever they were riding, then put on the seat. Our lock saw that inner
+        // stopRiding, refused it because the train was fast, and the seating therefore never completed - after
+        // which Create retried on the next tick, and the next. The log shows 262 refusals across three minutes,
+        // and by then the reservation had been re-evaluated enough times to lose track of the driver.
+        //
+        // A call that is part of seating somebody is not somebody choosing to get off.
+        if (SEATING.contains(player.getUUID()))
             return false;
 
         // Diagnostic: the operator reports the lock works on an ordinary seat and not on the driver's. The two
@@ -684,7 +700,12 @@ public final class RiderSeatGate {
         }
         if (chosenEntity == null)
             return false;
-        chosenEntity.addSittingPassenger(player, bestIndex);
+        SEATING.add(player.getUUID());
+        try {
+            chosenEntity.addSittingPassenger(player, bestIndex);
+        } finally {
+            SEATING.remove(player.getUUID());
+        }
         return true;
     }
 
@@ -988,17 +1009,23 @@ public final class RiderSeatGate {
     public static int seatClaimedDriver(Train train, Set<SeatRef> held) {
         if (true)
             System.out.println("[seatlock] seatClaimedDriver held=" + held.size());
-        if (held.isEmpty())
+        if (held.isEmpty()) {
+            System.out.println("[seat] path=no-held-seats");
             return 0;
+        }
         TrainDriverState driverState = ((com.george_vi.electroenergetics.mixin_interfaces.ICEETrainExtension) train)
                 .getElectricTrainData().driver;
         UUID claimed = driverState.claimOwner;
-        if (claimed == null)
+        if (claimed == null) {
+            System.out.println("[seat] path=no-claim");
             return 0;
+        }
 
         CarriageContraptionEntity deskCarriage = carriageEntity(train, driverState.driverCarriage);
-        if (deskCarriage == null || deskCarriage.level().isClientSide())
+        if (deskCarriage == null || deskCarriage.level().isClientSide()) {
+            System.out.println("[seat] path=no-desk-carriage carriage=" + driverState.driverCarriage);
             return 0;
+        }
         Player driver = null;
         for (Player candidate : deskCarriage.level().players()) {
             if (candidate.getUUID().equals(claimed)) {
@@ -1006,8 +1033,10 @@ public final class RiderSeatGate {
                 break;
             }
         }
-        if (driver == null)
+        if (driver == null) {
+            System.out.println("[seat] path=driver-not-online");
             return 0;
+        }
 
         boolean aboard = carriageIndexOf(train, driver) >= 0;
         if (!aboard) {
@@ -1020,8 +1049,10 @@ public final class RiderSeatGate {
             }
         }
         // A live cab claim is not permission to pull somebody aboard from the platform.
-        if (!aboard)
+        if (!aboard) {
+            System.out.println("[seat] path=not-aboard");
             return 0;
+        }
 
         SeatRef current = null;
         for (int i = 0; i < train.carriages.size(); i++) {
@@ -1034,8 +1065,10 @@ public final class RiderSeatGate {
                 break;
             }
         }
-        if (current != null && held.contains(current))
+        if (current != null && held.contains(current)) {
+            System.out.println("[seat] path=already-in-reserved seat=" + current.seatIndex());
             return 0;
+        }
         if (current != null) {
             CarriageContraptionEntity entity = carriageEntity(train, current.carriageIndex());
             if (entity == null || entity.getContraption() == null
@@ -1061,7 +1094,14 @@ public final class RiderSeatGate {
             if (true)
             System.out.println("[seatlock] seating driver into carriage " + seat.carriageIndex()
                     + " seat " + seat.seatIndex());
-        entity.addSittingPassenger(driver, seat.seatIndex());
+        System.out.println("[seat] path=seating carriage=" + seat.carriageIndex()
+                + " seat=" + seat.seatIndex() + " from=" + (current == null ? "none" : current.seatIndex()));
+        SEATING.add(driver.getUUID());
+        try {
+            entity.addSittingPassenger(driver, seat.seatIndex());
+        } finally {
+            SEATING.remove(driver.getUUID());
+        }
         // The re-seat lands one tick after a successful dismount attempt; at ceiling speed that tick
         // has carried the driver up to a block and a half forward, which is what reads as "thrown
         // out of the cab". Landing in the seat with the drift still applied would seat a driver
@@ -1161,7 +1201,10 @@ public final class RiderSeatGate {
      * exists for - 28 Blocks/second and above - so the eviction marks the player for the duration of
      * the one {@code stopRiding()} call that does it. Server thread only, and always removed.
      */
-    private static final Set<UUID> FORCED_DISMOUNTS = new HashSet<>();    /**
+    private static final Set<UUID> FORCED_DISMOUNTS = new HashSet<>();
+
+    /** Players who are being seated right now: their inner stopRiding is part of seating, not a dismount. */
+    private static final Set<UUID> SEATING = new HashSet<>();    /**
      * Players whose seat is being restored after a relogin, with a deadline tick. A seated
      * player who logs out keeps their claim, and the restore has to survive the gap between
      * PlayerLoggedInEvent (too early: Create has not loaded its trains yet) and the first tick
@@ -1461,7 +1504,12 @@ public final class RiderSeatGate {
 
             // Create's own entry point for sitting somebody on a moving contraption. It writes the seat
             // mapping and starts the ride, so nothing here has to know how either works.
-            best.entity().addSittingPassenger(player, best.index());
+            SEATING.add(player.getUUID());
+            try {
+                best.entity().addSittingPassenger(player, best.index());
+            } finally {
+                SEATING.remove(player.getUUID());
+            }
             // Tell the client which seat it landed in, so its intent state resets against
             // the authoritative choice instead of guessing from the render.
             if (player instanceof net.minecraft.server.level.ServerPlayer serverPlayer)

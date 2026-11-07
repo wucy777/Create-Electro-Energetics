@@ -172,6 +172,11 @@ public final class DriverAuthority {
         int carriageIndex = train.carriages.indexOf(carriage);
         if (carriageIndex < 0)
             return false;
+        var claimEntity = carriage.anyAvailableEntity();
+        System.out.println("[claim] carriage=" + carriageIndex + " desk=" + localPos
+                + " seats=" + (claimEntity == null || claimEntity.getContraption() == null ? "?"
+                        : String.valueOf(claimEntity.getContraption().getSeats().size()))
+                + " cars=" + train.carriages.size());
         driver.claim(player.getUUID(), carriageIndex, localPos);
         // The desk's own seat is the driver's, and it cannot be taken by clicking the seat: the way to sit
         // in it is to take the controls. So the seating happens here, on the claim, rather than waiting for
