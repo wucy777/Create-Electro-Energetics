@@ -901,6 +901,10 @@ public final class RiderSeatGate {
                     continue;
                 if (claimed != null && carriageIndex == claimedCarriage)
                     foundClaimedDesk = true;
+                if (claimed != null)
+                    System.out.println("[held] desk=" + desk + " carriage=" + carriageIndex
+                            + " seat=" + seat + " claimedCarriage=" + claimedCarriage
+                            + " claimedDesk=" + claimedDesk);
                 held.add(new SeatRef(carriageIndex, seat));
             }
         }

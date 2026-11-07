@@ -405,7 +405,12 @@ public final class DriverAuthority {
 
     /** Whether Create's record on this carriage still says the claim owner is at the controls. */
     private static boolean mirrorHolds(CarriageContraptionEntity cce, UUID owner) {
-        return cce.getControllingPlayer().filter(owner::equals).isPresent();
+        boolean holds = cce.getControllingPlayer().filter(owner::equals).isPresent();
+        if (!holds)
+            System.out.println("[mirror] carriage=" + cce.carriageIndex
+                    + " controlling=" + cce.getControllingPlayer().map(UUID::toString).orElse("none")
+                    + " owner=" + String.valueOf(owner).substring(0, 8));
+        return holds;
     }
 
     /** A player's display name, resolved from the server list, with a neutral fallback. */
