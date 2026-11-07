@@ -250,8 +250,16 @@ public final class DriverAuthority {
                 // that tick is a driver standing up at speed, which the seat lock then cannot prevent: the
                 // operator saw exactly that, thrown off the train on returning from ESC. The stand-up rule is
                 // enforced by the seat lock and by release(), not by this corroboration test.
+                // Riding counts, and so does standing in the cab - but not standing on the ground outside.
+                //
+                // The near test alone was too loose: a driver thrown clear of the train, still within the desk's
+                // sixteen Blocks, kept the claim and the reserved seat. But riding alone is too tight in the other
+                // direction, because getIndirectPassengers briefly misses a rider at speed and that is exactly the
+                // tick this would fire on.
+                //
+                // So: riding, or standing on a carriage floor. NOT merely within reach of the desk.
                 && (RiderSeatGate.isRidingTrain(train, player)
-                    || RiderSeatGate.isOnTrainNear(train, player, DESK_REACH));
+                    || RiderSeatGate.isStandingOnAnyFloor(train, player));
         if (!corroborated) {
             if (++driver.claimInvalidTicks > INVALID_GRACE_TICKS) {
                 // Reached before the release, so the message can tell the driver why.

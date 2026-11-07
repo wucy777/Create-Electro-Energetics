@@ -409,6 +409,29 @@ public final class RiderSeatGate {
         return carriage != null && carriage.train == train;
     }
 
+    /**
+     * Whether this player is standing on a carriage floor of this train.
+     *
+     * <p>Floor support, not proximity. A driver thrown clear of the train stands on the world and fails this;
+     * a driver standing in the cab passes it even on the tick the passenger list has not caught up.
+     */
+    public static boolean isStandingOnAnyFloor(Train train, net.minecraft.world.entity.Entity player) {
+        if (train == null || player == null)
+            return false;
+        for (Carriage carriage : train.carriages) {
+            final boolean[] found = {false};
+            carriage.forEachPresentEntity(cce -> {
+                if (found[0] || cce.level() != player.level())
+                    return;
+                if (isStandingOnCarriageFloor(player, cce))
+                    found[0] = true;
+            });
+            if (found[0])
+                return true;
+        }
+        return false;
+    }
+
     /** Whether this player is riding a carriage of this train. */
     public static boolean isRidingTrain(Train train, net.minecraft.world.entity.Entity player) {
         if (train == null || player == null)
@@ -1190,13 +1213,27 @@ public final class RiderSeatGate {
             if (mapping == null || mapping.isEmpty())
                 continue;
 
+            // Who is actually riding THIS carriage, asked of the entity rather than derived from the passenger
+            // list. getIndirectPassengers is rebuilt by Create and is briefly empty for a rider at speed - the
+            // list is the thing that lags, not the ride. Pruning on the list alone therefore deleted the seat of
+            // a player who was sitting in it, at which point the driver read as "not aboard", the claim was
+            // released, and the train went on without them while still holding their reserved seat.
+            //
+            // That is the operator being thrown out while holding J and never touching the dismount key.
+            java.util.Set<UUID> ridingHere = new java.util.HashSet<>();
+            for (Entity rider : entity.getPassengers())
+                ridingHere.add(rider.getUUID());
+            for (Entity rider : entity.getIndirectPassengers())
+                ridingHere.add(rider.getUUID());
+
             boolean changed = false;
             java.util.Iterator<Map.Entry<UUID, Integer>> it = mapping.entrySet().iterator();
             while (it.hasNext()) {
-                if (!aboard.contains(it.next().getKey())) {
-                    it.remove();
-                    changed = true;
-                }
+                UUID seated = it.next().getKey();
+                if (aboard.contains(seated) || ridingHere.contains(seated))
+                    continue;
+                it.remove();
+                changed = true;
             }
             if (changed) {
                 try {
