@@ -516,8 +516,7 @@ public class GameEvents {
                     driver.clearTrip();
                     driver.tripTicks = 0;
                 }
-            } else if (owned && moving && !driver.emergencyArmed
-                    && !(driver.gear == TrainGear.BRAKE && driver.braking)) {
+            } else if (owned && moving && !driver.emergencyArmed && driver.gear != TrainGear.BRAKE) {
                 // NOT during an emergency application. The emergency brake is already stopping the train as hard
                 // as it can and it cannot be acknowledged - J is refused while the controls are locked - so the
                 // vigilance clock was counting towards a trip the driver had no way to prevent. At 35 s the trip
