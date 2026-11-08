@@ -49,6 +49,7 @@
     "TrainHUDUpdateAccessor",
     "TrainMixin",
     "TrainPantographAutoStateMixin",
+    "TrainStopProbeMixin",
     "TrainThrottleGateMixin",
     "compat.ElectricFanBlockEntityMixin"
   ]
