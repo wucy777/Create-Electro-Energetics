@@ -104,6 +104,16 @@ public final class DriverAuthority {
      * motors but no pantograph, and a shoe-only metro all keep Create's controls exactly
      * as they were, for anybody, and never take a claim.
      */
+    /** Whether this player owns the driving claim of this train. */
+    public static boolean isClaimOwner(Train train, java.util.UUID playerId) {
+        if (train == null || playerId == null)
+            return false;
+        var data = ((com.george_vi.electroenergetics.mixin_interfaces.ICEETrainExtension) train)
+                .getElectricTrainData();
+        return data != null && data.driver != null
+                && playerId.equals(data.driver.claimOwner);
+    }
+
     public static boolean appliesTo(Train train) {
         if (train == null)
             return false;
