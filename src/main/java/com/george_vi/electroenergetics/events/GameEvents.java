@@ -326,7 +326,7 @@ public class GameEvents {
                 if (!atCeiling && driver.overloadBraking) {
                     driver.overloadBraking = false;
                     if (driver.gear == TrainGear.BRAKE) {
-                        driver.captureCruiseSetpointFromWorld(train.speed * 20d);
+                        driver.captureCruiseSetpointFromWorld(RiderSeatGate.bptToMs(train.speed));
                         driver.gear = TrainGear.CRUISE;
                     }
                 }
@@ -416,7 +416,7 @@ public class GameEvents {
                             // captured when the driver selects the position themselves. Forcing the position
                             // without it left the target at its old value - zero, on a train that had never
                             // cruised - so "hold this speed" meant "brake to a stand".
-                            driver.captureCruiseSetpointFromWorld(train.speed * 20d);
+                            driver.captureCruiseSetpointFromWorld(RiderSeatGate.bptToMs(train.speed));
                             driver.gear = TrainGear.CRUISE;
                         }
                     }
@@ -532,7 +532,17 @@ public class GameEvents {
                 //
                 // The clock is held rather than reset, so an application that ends still leaves the driver owing
                 // the acknowledgement they owed when it started.
-                if (driver.confirmWaiting < TrainDriverState.TRIP_TICKS) {
+                // Counted in TICKS COMPARED AGAINST A TIME BUDGET, so the window is the same number of seconds at
+                // any tick rate. Incrementing a tick counter and comparing it against a tick constant made the 36
+                // second window 3.6 seconds under /tick rate 200, and the device then tripped while the operator
+                // was accelerating normally - which is what a brake nobody asked for looked like from the cab.
+                //
+                // The count keeps its old meaning (ticks of inattention) so the HUD lamps and every existing
+                // reader stay correct; only the budget it is measured against is now time.
+                double budget = TrainDriverState.TRIP_SECONDS
+                        * com.george_vi.electroenergetics.content.railway_electrification.RiderSeatGate
+                                .ticksPerSecond();
+                if (driver.confirmWaiting < budget) {
                     driver.confirmWaiting++;
                 } else {
                     driver.trip();

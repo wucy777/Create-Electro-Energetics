@@ -4,6 +4,7 @@ import com.george_vi.electroenergetics.CEEElectricTrainSoundTypes;
 import com.george_vi.electroenergetics.CEERegistries;
 import com.george_vi.electroenergetics.config.CEEConfigs;
 import com.george_vi.electroenergetics.content.railway_electrification.ElectricTrainData;
+import com.george_vi.electroenergetics.content.railway_electrification.RiderSeatGate;
 import com.george_vi.electroenergetics.content.railway_electrification.TrainDriverState;
 import com.george_vi.electroenergetics.content.railway_electrification.TrainGear;
 import com.george_vi.electroenergetics.content.railway_electrification.TrainHudData;
@@ -176,7 +177,7 @@ public class TrainMixin implements ICEETrainExtension {
             // the side that has no authority. The synced table is still consulted, but only as a fallback
             // for the window before the first solve has produced a number.
             if (electricTrainData.maxSpeed > 0f)
-                return electroEnergetics$withPenalty(electricTrainData.maxSpeed / 20f, self,
+                return electroEnergetics$withPenalty((float) RiderSeatGate.msToBpt(electricTrainData.maxSpeed), self,
                         electricTrainData);
             float synced = TrainHudData.maxSpeedFor(self.id);
             if (synced > 0f)
@@ -185,7 +186,7 @@ public class TrainMixin implements ICEETrainExtension {
             // configured design ceiling so a driven train is not briefly capped by
             // Create while the first circuit build is still pending.
             return electroEnergetics$withPenalty(
-                    (float) (TrainTractionModel.designMaxSpeed() / 20d), self, electricTrainData);
+                    (float) RiderSeatGate.msToBpt(TrainTractionModel.designMaxSpeed()), self, electricTrainData);
         }
 
         // Not under this mod's control ON THIS SIDE. Two quite different situations land here.
@@ -499,7 +500,7 @@ public class TrainMixin implements ICEETrainExtension {
         boolean inverted = st.driverCabInverted;
         double mirror = inverted ? -1d : 1d;
 
-        double signedSpeedMs = self.speed * 20d * mirror;
+        double signedSpeedMs = RiderSeatGate.bptToMs(self.speed) * mirror;
 
         // trainGrade is a rise-over-run along the consist, which for a train
         // moving in -x is the grade towards -x, so it is mirrored into +x. The sign is
@@ -526,7 +527,7 @@ public class TrainMixin implements ICEETrainExtension {
         a *= mirror;
 
         // m/s² -> Blocks/Tick². 1 block = 1 m, so only the tick conversion is needed.
-        double next = self.speed + a / 400d;
+        double next = self.speed + a / RiderSeatGate.accelerationDivisor();
 
         // Diagnostic for the emergency brake. The operator reports a 150 t train stopping instantly under the
         // emergency application, and the model as written cannot produce that: friction is about 1 m/s2 and the
@@ -735,7 +736,7 @@ public class TrainMixin implements ICEETrainExtension {
             // speed: friction plus whatever the motor brake can still absorb. The
             // electric part is reported back so the circuit build can regenerate it,
             // which is the same route the gear-driven path uses.
-            double speedMs = Math.abs(self.speed) * 20d;
+            double speedMs = Math.abs(RiderSeatGate.bptToMs(self.speed));
             double electric = TrainTractionModel.dynamicBrake()
                     * TrainTractionModel.dynamicBrakeFade(speedMs);
             data.gearStep.dynamicBrake = electric;

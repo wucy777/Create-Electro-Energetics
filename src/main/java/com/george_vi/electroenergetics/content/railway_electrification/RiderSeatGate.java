@@ -138,6 +138,45 @@ public final class RiderSeatGate {
     }
 
     /**
+     * Ticks per second, live, as a double.
+     *
+     * <p>Everything that converts between Blocks-per-tick and metres-per-second has to agree on this figure, or the
+     * train answers three different speeds to three different subsystems. It is the same accessor {@link
+     * #currentTickRate()} reads, returned as a double so the conversions do not lose precision.
+     */
+    public static double ticksPerSecond() {
+        return currentTickRate();
+    }
+
+    /**
+     * Blocks per tick to metres per second.
+     *
+     * <p>The conversion was a flat `* 20` in every caller, which is only correct at the default tick rate. Under
+     * `/tick rate 200` a train whose speed field said 0.16 moved 32 Blocks a second while every reader was told it
+     * was doing 3.2 - a factor of ten, in the direction that hides overspeed.
+     */
+    public static double bptToMs(double bpt) {
+        return bpt * ticksPerSecond();
+    }
+
+    /** Metres per second to Blocks per tick. */
+    public static double msToBpt(double ms) {
+        double tps = ticksPerSecond();
+        return tps > 0d ? ms / tps : ms / 20d;
+    }
+
+    /**
+     * The divisor that turns m/s^2 into Blocks per tick squared.
+     *
+     * <p>{@code a * (1/tps)^2}, written as a divisor because that is how the integrator uses it. 400 at the default
+     * tick rate, which is what the hard-coded constant said - and wrong by that factor squared at any other rate.
+     */
+    public static double accelerationDivisor() {
+        double tps = ticksPerSecond();
+        return tps > 0d ? tps * tps : 400d;
+    }
+
+    /**
      * The train's speed in METRES PER SECOND, converted through the live tick rate.
      *
      * <p>{@code train.speed} is Blocks per TICK, and the tick rate is not always 20. Under {@code /tick rate 500}

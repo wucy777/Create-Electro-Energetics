@@ -30,6 +30,19 @@ public class TrainDriverState {
      */
     public static final int WARN_AMBER_TICKS = 20 * 20;
 
+    /**
+     * The same three moments as SECONDS, which is what they are measured in.
+     *
+     * <p>The tick constants above stay for the default-rate path and for anything that reads them directly, but the
+     * device itself now counts real time. The operator's rule: 35 seconds of inattention is 35 seconds whether the
+     * server is running 20 ticks a second or 200. Counting ticks meant a rate of 200 tripped the device in 3.6
+     * seconds - a safety timer that fires early is worse than none, because the driver cannot learn its rhythm.
+     */
+    public static final double WARN_AMBER_SECONDS = 20d;
+
+    /** Red at this many seconds of inattention. */
+    public static final double WARN_RED_SECONDS = 30d;
+
     /** When the warning turns red: the prompt is now overdue [ticks]. */
     public static final int WARN_RED_TICKS = 30 * 20;
 
@@ -44,6 +57,9 @@ public class TrainDriverState {
      * it is not wired to the emergency path.
      */
     public static final int TRIP_TICKS = 36 * 20;
+
+    /** The trip, in seconds. See {@link #WARN_AMBER_SECONDS}. */
+    public static final double TRIP_SECONDS = 36d;
 
     /** The lever. Defaults to the brake, which is where every failure lands. */
     public TrainGear gear = TrainGear.BRAKE;
@@ -782,9 +798,13 @@ public class TrainDriverState {
     public int warningStage() {
         if (vigilanceTripped)
             return 2;
-        if (confirmWaiting < WARN_AMBER_TICKS)
+        // Time, not ticks - see WARN_AMBER_SECONDS. The lamps have to share the trip's clock or the escalation is
+        // wrong at every rate but 20: at 200 ticks a second the amber lamp would have become red instantly.
+        double tps = com.george_vi.electroenergetics.content.railway_electrification.RiderSeatGate
+                .ticksPerSecond();
+        if (confirmWaiting < WARN_AMBER_SECONDS * tps)
             return 0;
-        if (confirmWaiting < WARN_RED_TICKS)
+        if (confirmWaiting < WARN_RED_SECONDS * tps)
             return 1;
         return 2;
     }
