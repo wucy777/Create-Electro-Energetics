@@ -45,9 +45,12 @@ public class DriverLoadoutGuardMixin {
         try {
             if (player == null)
                 return;
-            Object self = this;
-            Carriage carriage = ((com.simibubi.create.content.trains.entity.Carriage.DimensionalCarriageEntity)
-                    self).this$0;
+            // The train is reached from the PLAYER's own ride rather than from the mixin target: this$0 is a
+            // compiler-generated field and cannot be named from source. The player being removed is by definition
+            // riding the carriage this loadout belongs to, so their vehicle answers the same question.
+            if (!(player.getVehicle() instanceof com.simibubi.create.content.trains.entity.CarriageContraptionEntity cce))
+                return;
+            Carriage carriage = cce.getCarriage();
             if (carriage == null || carriage.train == null)
                 return;
             Train train = carriage.train;
