@@ -310,13 +310,11 @@ public final class DriverAuthority {
             long now = server.getTickCount();
             if (now % 40 == 0)
                 System.out.println(String.format(
-                        "[heartbeat] tick=%d speed=%.2fbpt seated=%s riding=%s vehicle=%s pos=%.1f,%.1f,%.1f",
-                        now, train.speed,
+                        "[heartbeat] tick=%d speed=%.3fbpt gear=%s inverted=%s cab=%d seated=%s riding=%s",
+                        now, train.speed, data.driver.gear,
+                        data.driver.driverCabInverted, data.driver.driverCarriage,
                         RiderSeatGate.isInClaimedDriverSeat(train, player),
-                        RiderSeatGate.isRidingTrain(train, player),
-                        player.getVehicle() == null ? "null"
-                                : player.getVehicle().getClass().getSimpleName(),
-                        player.getX(), player.getY(), player.getZ()));
+                        RiderSeatGate.isRidingTrain(train, player)));
         }
         driver.setDriverPresent(owner);
     }
