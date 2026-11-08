@@ -311,8 +311,8 @@ public final class DriverAuthority {
             if (now % 40 == 0)
                 System.out.println(String.format(
                         "[heartbeat] tick=%d speed=%.3fbpt gear=%s inverted=%s cab=%d seated=%s riding=%s",
-                        now, train.speed, data.driver.gear,
-                        data.driver.driverCabInverted, data.driver.driverCarriage,
+                        now, train.speed, driver.gear,
+                        driver.driverCabInverted, driver.driverCarriage,
                         RiderSeatGate.isInClaimedDriverSeat(train, player),
                         RiderSeatGate.isRidingTrain(train, player)));
         }
