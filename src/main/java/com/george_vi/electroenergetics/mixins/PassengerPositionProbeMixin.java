@@ -9,37 +9,55 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /**
- * TEMPORARY DIAGNOSTIC - see Document\临时诊断日志清单.md
+ * TEMPORARY DIAGNOSTIC - see Document\\临时诊断日志清单.md. The whole file goes.
  *
- * <p>Watches {@code getPassengerPosition} and prints what it was asked for and what it produced, or the exception it
- * threw. This is the call that decides where a rider is drawn, and it is the only thing between "the server says the
- * driver is seated" (which the heartbeat proves) and "the driver is outside the train on screen".
+ * <h2>The question this answers</h2>
+ *
+ * <p>The server says the driver is seated, riding and at the controls for the whole run - 187 heartbeats, no gaps.
+ * On screen the driver leaves the train and stands beside the track while it keeps going. So the disagreement is
+ * not about state at all, it is about WHERE the rider is drawn, and the only function that decides that is this one.
+ *
+ * <h2>What is printed</h2>
+ *
+ * <p>The seat position the contraption resolves, converted to world coordinates, next to where the rider's own
+ * entity actually is. While everything is working those two agree to within a block; the tick they diverge is the
+ * tick the operator is thrown out, and the numbers say whether the cause is a missing seat, a bad transform, or
+ * the rider's entity being somewhere it should not be.
+ *
+ * <p>Only printed for the local player and only when the gap exceeds a tolerance, so an ordinary ride is silent and
+ * a run costs nothing.
  */
 @Mixin(AbstractContraptionEntity.class)
 public class PassengerPositionProbeMixin {
 
-    @Inject(method = "getPassengerPosition", at = @At("HEAD"), remap = false)
-    private void electroEnergetics$probeHead(Entity rider, float partialTicks,
+    /** Beyond this the two answers disagree by more than interpolation can explain. */
+    private static final double TOLERANCE_SQ = 4.0d * 4.0d;
+
+    @Inject(method = "getPassengerPosition", at = @At("RETURN"), cancellable = false, remap = false)
+    private void electroEnergetics$comparePosition(Entity rider, float partialTicks,
             CallbackInfoReturnable<Vec3> cir) {
         try {
-            AbstractContraptionEntity self = (AbstractContraptionEntity) (Object) this;
-            if (self.getContraption() == null)
+            Vec3 seatWorld = cir.getReturnValue();
+            if (seatWorld == null)
                 return;
-            var map = self.getContraption().getSeatMapping();
-            var seats = self.getContraption().getSeats();
-            Integer idx = map.get(rider.getUUID());
-            String problem = "";
-            if (idx == null)
-                problem = " NO-MAPPING";
-            else if (idx < 0 || idx >= seats.size())
-                problem = " OUT-OF-RANGE idx=" + idx + " seats=" + seats.size();
-            if (!problem.isEmpty())
-                System.out.println("[passpos] rider=" + rider.getName().getString()
-                        + " entities=" + self.getId() + problem
-                        + " mappingSize=" + map.size()
-                        + " seatCount=" + seats.size());
-        } catch (Throwable t) {
-            System.out.println("[passpos] probe threw " + t);
+            AbstractContraptionEntity self = (AbstractContraptionEntity) (Object) this;
+            if (self.level() == null || !self.level().isClientSide())
+                return;
+            // One line per divergent tick is already a lot at 100 ticks a second; the whole point is the first one.
+            double gapSq = seatWorld.distanceToSqr(rider.getX(), rider.getY(), rider.getZ());
+            if (gapSq <= TOLERANCE_SQ)
+                return;
+            Vec3 anchor = self.position();
+            System.out.println(String.format(
+                    "[rider-gap] gap=%.2f seat=(%.1f,%.1f,%.1f) rider=(%.1f,%.1f,%.1f) "
+                            + "entPos=(%.1f,%.1f,%.1f) entId=%d partial=%.2f",
+                    Math.sqrt(gapSq),
+                    seatWorld.x, seatWorld.y, seatWorld.z,
+                    rider.getX(), rider.getY(), rider.getZ(),
+                    anchor.x, anchor.y, anchor.z,
+                    self.getId(), partialTicks));
+        } catch (Throwable ignored) {
+            // A probe must never be the reason a rider is misplaced.
         }
     }
 }

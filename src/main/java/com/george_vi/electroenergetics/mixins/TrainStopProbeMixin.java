@@ -61,8 +61,9 @@ public class TrainStopProbeMixin {
             if (now % 20 != 0)
                 return;
             System.out.println(String.format(
-                    "[state] t=%d speed=%.3f gear=%s trip=%s armed=%s ovl=%s ovlBrk=%s "
+                    "[state] id=%s t=%d speed=%.3f gear=%s trip=%s armed=%s ovl=%s ovlBrk=%s "
                             + "unseatedTicks=%d cw=%d blocked=%s derailed=%s station=%s",
+                    String.valueOf(self.id).substring(0, 8),
                     now, self.speed, d.gear, d.vigilanceTripped, d.emergencyArmed,
                     d.overloaded, d.overloadBraking, d.unseatedTicks, d.confirmWaiting,
                     d.blockedParked, self.derailed, self.getCurrentStation() != null));
