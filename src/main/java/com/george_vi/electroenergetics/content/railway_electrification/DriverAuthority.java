@@ -303,6 +303,21 @@ public final class DriverAuthority {
         } else {
             driver.claimInvalidTicks = 0;
         }
+        // Per-second heartbeat for the driver's own state, so a throw can be told apart from a dismount: if the
+        // heartbeat keeps saying riding=true while the operator reports being outside, the seat was never lost and
+        // the fault is in where the client is putting them.
+        if (Boolean.getBoolean("cee.debugSeatLock") || true) {
+            long now = server.getTickCount();
+            if (now % 40 == 0)
+                System.out.println(String.format(
+                        "[heartbeat] tick=%d speed=%.2fbpt seated=%s riding=%s vehicle=%s pos=%.1f,%.1f,%.1f",
+                        now, train.speed,
+                        RiderSeatGate.isInClaimedDriverSeat(train, player),
+                        RiderSeatGate.isRidingTrain(train, player),
+                        player.getVehicle() == null ? "null"
+                                : player.getVehicle().getClass().getSimpleName(),
+                        player.getX(), player.getY(), player.getZ()));
+        }
         driver.setDriverPresent(owner);
     }
 

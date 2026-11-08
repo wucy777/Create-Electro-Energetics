@@ -43,6 +43,11 @@ public class DriverLoadoutGuardMixin {
                                                     boolean savePassenger,
                                                     CallbackInfo ci) {
         try {
+            System.out.println("[loadout] dismountPlayer called player="
+                    + (player == null ? "null" : player.getName().getString())
+                    + " seat=" + seat + " save=" + savePassenger
+                    + " vehicle=" + (player == null || player.getVehicle() == null ? "null"
+                            : player.getVehicle().getClass().getSimpleName()));
             if (player == null)
                 return;
             // The train is reached from the PLAYER's own ride rather than from the mixin target: this$0 is a
