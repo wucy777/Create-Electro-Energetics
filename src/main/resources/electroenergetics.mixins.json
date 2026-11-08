@@ -38,6 +38,7 @@
     "LevelChunkMixin",
     "LivingEntityMixin",
     "MinecraftServerMixin",
+    "PassengerPositionProbeMixin",
     "RiderDismountLockMixin",
     "RiderStopRidingLockMixin",
     "SchematicLevelMixin",
