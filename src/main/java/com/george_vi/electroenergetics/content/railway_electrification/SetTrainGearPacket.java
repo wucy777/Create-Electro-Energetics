@@ -104,6 +104,11 @@ public record SetTrainGearPacket(UUID trainId, int gearOrdinal, boolean confirm,
                 // part-way through the stop therefore finishes on friction and STAYS without power,
                 // which is the point: the emergency brake is not to be completed by the motors.
                 state.controlsLocked = true;
+                // Remember WHICH position this was pulled in. Reverse is the only position the emergency brake
+                // can be pulled from, so this is always REVERSE today - but the rule is "the lever is held where
+                // it was", not "the lever is forced to reverse", and writing the actual value keeps it correct
+                // if a second position ever gains the button.
+                state.emergencyHeldGear = state.gear;
                 // Restart the lockout tail from zero, or a second application inherits whatever the
                 // first one had already counted and the panel unlocks early.
                 //
@@ -147,6 +152,16 @@ public record SetTrainGearPacket(UUID trainId, int gearOrdinal, boolean confirm,
         if (state.emergencyArmed || state.controlsLocked)
             return;
 
+        // The lever is held where the emergency brake was pulled until the train stands. Checked separately from
+        // the block above because the two end at different moments: emergencyArmed clears AT the stand, which is
+        // the instant the hold should end, while controlsLocked keeps the rest of the panel shut for two seconds
+        // after it. Changing the position is what this refuses; acknowledging is still allowed, since a driver
+        // should not be locked out of clearing a vigilance prompt while the train rolls to a stop.
+        if (state.emergencyHeldGear != null && !confirm) {
+            if (state.gear != state.emergencyHeldGear)
+                return;
+        }
+
         // A vigilance trip is not a suggestion. Once it fires the brake is the train's, and the driver's
         // only valid input is the acknowledgement that ends it - otherwise they can simply select another
         // position and drive out of a brake the device applied. Reported as "the automatic brake after 35 s
@@ -154,8 +169,14 @@ public record SetTrainGearPacket(UUID trainId, int gearOrdinal, boolean confirm,
         //
         // Acknowledge is deliberately still accepted here: it runs only at a stand (the branch below checks
         // the speed), and refusing it would leave the driver with no way out of a tripped train at all.
-        if (state.vigilanceTripped && !confirm)
-            return;
+        // THE OPERATOR'S RULE, and it reverses what this used to do: a train held by the vigilance device may be
+        // driven out of it. Their reasoning is that the trip is a brake for inattention, not a lockout - the
+        // device has already done its job the moment it stopped the train, and refusing every other lever
+        // position afterwards turns a recoverable safety stop into a train the driver has to fight.
+        //
+        // The emergency brake is the one that DOES lock the lever, and it does so through emergencyArmed and
+        // controlsLocked above, which are untouched by this. So the two are now clearly different: a vigilance
+        // stop is recoverable from the lever, an emergency stop is not.
 
         if (confirm) {
             // Acknowledge: reset the vigilance clock to zero. Pressing early therefore

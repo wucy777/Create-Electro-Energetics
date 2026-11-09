@@ -351,7 +351,7 @@ public class TrainMixin implements ICEETrainExtension {
             // from line speed. The speed-dependent blend is applied in
             // approachTargetSpeed, which does know the speed.
             return (float) ((TrainTractionModel.frictionBrake()
-                    + TrainTractionModel.dynamicBrake()) / 400d);
+                    + TrainTractionModel.dynamicBrake()) / RiderSeatGate.accelerationDivisor());
         }
         return original.call();
     }
@@ -382,6 +382,14 @@ public class TrainMixin implements ICEETrainExtension {
     private void electroEnergetics$tickPassiveSlowdown(Operation<Void> original) {
         Train self = (Train) (Object) this;
         ElectricTrainData data = electroenergetics$electricTrainData;
+
+        // One call per server tick, and the only place this mod is guaranteed to run on every train every tick.
+        // Everything that converts Blocks-per-tick to metres-per-second depends on the figure it maintains; see
+        // RiderSeatGate.noteServerTick for why it is measured rather than read from the server.
+        // One call per server tick, and the only place this mod runs for every train every tick regardless of
+        // supply, gear or occupancy. RiderSeatGate.noteServerTick measures the rate; see there for why it cannot be
+        // read from the server.
+        RiderSeatGate.noteServerTick();
 
         // Gear driving owns the speed of a driven electric train, and this is the
         // one place per tick that writes it. Doing it here rather than in
@@ -725,7 +733,7 @@ public class TrainMixin implements ICEETrainExtension {
         float traction = data.availableAcceleration > 0f
                 ? data.availableAcceleration
                 : CEEConfigs.server().trainValues.electricTrainMaxAcceleration.getF();
-        double up = Math.max(traction, 0f) / 400d;
+        double up = Math.max(traction, 0f) / RiderSeatGate.accelerationDivisor();
 
         if (self.speed < actualTarget) {
             data.braking = false;
@@ -740,7 +748,8 @@ public class TrainMixin implements ICEETrainExtension {
             double electric = TrainTractionModel.dynamicBrake()
                     * TrainTractionModel.dynamicBrakeFade(speedMs);
             data.gearStep.dynamicBrake = electric;
-            double down = TrainTractionModel.serviceBrakeDeceleration(speedMs) / 400d;
+            double down = TrainTractionModel.serviceBrakeDeceleration(speedMs)
+                    / RiderSeatGate.accelerationDivisor();
             data.braking = true;
             self.speed = Math.max(self.speed - down * accelerationMod, actualTarget);
         }

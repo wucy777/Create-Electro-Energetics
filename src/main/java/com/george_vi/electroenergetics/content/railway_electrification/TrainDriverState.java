@@ -466,6 +466,25 @@ public class TrainDriverState {
     public boolean emergencyArmed = false;
 
     /**
+     * The lever position the emergency brake was PULLED in, or null when no emergency stop is running.
+     *
+     * <p>The operator's rule: pulling the emergency brake from the reverse position must hold the lever in reverse
+     * until the train has stopped. Without this the lever was free the moment {@link #emergencyArmed} cleared - which
+     * happens at a stand, BEFORE the lockout tail has run out - so a driver could notch it forward while the train
+     * was still creeping to a halt under a brake they had just declared unrecoverable.
+     *
+     * <p>Separate from {@link #controlsLocked} on purpose. That flag protects the whole panel for a couple of
+     * seconds after the stop and then releases; this one only holds ONE lever position, and only while the
+     * application is actually running. A driver who pulls the emergency brake in reverse should find the handle
+     * still in reverse when the train stops, and free immediately after - which is what this delivers without
+     * keeping the rest of the panel dead any longer than it already was.
+     *
+     * <p>Null rather than a boolean, because the rule is about WHICH position was held, and an ordinal sentinel
+     * would be one more thing to keep in step with the enum.
+     */
+    public TrainGear emergencyHeldGear = null;
+
+    /**
      * Whether the post-emergency speed cap is in force: 40 km/h until the next station.
      *
      * <p>This is the penalty for using the emergency brake, and it applies in BOTH control schemes.

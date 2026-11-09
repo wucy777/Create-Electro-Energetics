@@ -203,21 +203,68 @@ public final class RiderSeatGate {
      */
     private static float cachedTickRate = 20f;
 
-    public static float currentTickRate() {
-        try {
-            Object server = net.neoforged.neoforge.server.ServerLifecycleHooks.getCurrentServer();
-            if (server == null)
-                return cachedTickRate;
-            Object manager = server.getClass().getMethod("tickRateManager").invoke(server);
-            if (manager == null)
-                return cachedTickRate;
-            Object rate = manager.getClass().getMethod("tickrate").invoke(manager);
-            if (rate instanceof Number number && number.floatValue() > 0f)
-                cachedTickRate = number.floatValue();
-        } catch (Throwable ignored) {
-            // Keep the last good figure; 20 is both the default and what every hand test used.
+    /**
+     * Ticks per second, MEASURED rather than asked for.
+     *
+     * <p>The previous implementation read it from {@code MinecraftServer.tickRateManager()}. That method does not
+     * exist in this version - the class it belongs to is absent from every jar on the classpath - so the reflective
+     * lookup threw on every call, the catch swallowed it, and the answer was the hard-coded default twenty forever.
+     * Everything built on it therefore did nothing: the acceleration divisor stayed 400 and the train kept
+     * accelerating at the same rate whatever {@code /tick rate} said, which is exactly what the operator reported
+     * after the last build.
+     *
+     * <p>So it is measured instead. Each call to this method during a server tick advances a counter; a wall-clock
+     * window decides how many ticks happened in the last second. Measured from {@code System.nanoTime} rather than
+     * the level's game time, because game time is what is being sped up and cannot time itself.
+     *
+     * <p>Falls back to twenty until a full second has been observed, and never returns anything but a sane positive
+     * figure - a zero here would divide the physics by zero and stop every train dead.
+     */
+    private static long tickRateWindowStart = 0L;
+    private static int tickRateTicksInWindow = 0;
+
+    /**
+     * Called once per server tick from the train tick path. Cheap: a counter and, once a second, one division.
+     */
+    public static void noteServerTick() {
+        long now = System.nanoTime();
+        if (tickRateWindowStart == 0L) {
+            tickRateWindowStart = now;
+            tickRateTicksInWindow = 0;
+            return;
         }
+        tickRateTicksInWindow++;
+        long elapsed = now - tickRateWindowStart;
+        // A full second of observation, then start again. Long enough to smooth a hiccup, short enough that a
+        // /tick rate change takes effect within a second.
+        if (elapsed >= 1_000_000_000L) {
+            float measured = tickRateTicksInWindow * 1_000_000_000f / elapsed;
+            if (measured > 0.1f && measured < 100000f)
+                cachedTickRate = measured;
+            tickRateWindowStart = now;
+            tickRateTicksInWindow = 0;
+        }
+    }
+
+    /**
+     * The tick rate the CLIENT should convert with.
+     *
+     * <p>The client never ticks the server loop, so it cannot measure this itself - on a client the measured figure
+     * would stay at the default forever and the HUD would keep reporting the twenty-based number while the train
+     * actually moved at the server's rate. That is exactly the disagreement the operator saw: their own velocity
+     * readout said five hundred while the cab said ninety.
+     *
+     * <p>The server's figure is broadcast with the rest of the per-train HUD data, and this is where the client
+     * reads it. Falls back to the local (server-side measured, or default) figure when nothing has arrived yet.
+     */
+    public static float currentTickRate() {
         return cachedTickRate;
+    }
+
+    /** Set from the synced payload on the client. Ignored on the server, which measures its own. */
+    public static void acceptSyncedTickRate(float rate) {
+        if (rate > 0.1f && rate < 100000f)
+            cachedTickRate = rate;
     }
 
     /** Whether anybody aboard is standing, on the roof included. */

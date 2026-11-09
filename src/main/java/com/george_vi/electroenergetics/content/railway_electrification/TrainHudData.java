@@ -48,6 +48,28 @@ public final class TrainHudData {
     private static final Map<UUID, Sample> SAMPLES = new ConcurrentHashMap<>();
 
     /**
+     * The server's measured tick rate, as of the last gauge update.
+     *
+     * <p>Kept here rather than in the packet's record because it belongs to the SERVER, not to a train: every train
+     * shares one figure, and adding a field to the per-train broadcast would grow a payload that is already sent for
+     * every train every tick. The gauge packet already arrives on that schedule, so it carries the figure.
+     *
+     * <p>Zero means "nothing has arrived yet"; readers fall back to their local default.
+     */
+    private static volatile float serverTickRate = 0f;
+
+    /** Record the tick rate that came with a gauge update. */
+    public static void setServerTickRate(float rate) {
+        if (rate > 0.1f && rate < 100000f)
+            serverTickRate = rate;
+    }
+
+    /** The server's tick rate, or zero before the first update. */
+    public static float serverTickRate() {
+        return serverTickRate;
+    }
+
+    /**
      * Lever and driver state, kept apart from {@link Sample} because it changes on
      * a different schedule: the traction figures come from the electrical solve,
      * while the lever only moves when the driver does something. Merging them

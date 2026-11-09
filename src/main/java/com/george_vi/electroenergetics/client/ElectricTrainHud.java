@@ -198,7 +198,16 @@ public class ElectricTrainHud
         // One easing, not two. This used to pass through electroEnergetics$smooth and then through
         // lerp() as well, so the number lagged twice and still stepped: train.speed itself only
         // changes when the server syncs it. lerp() below now eases with a real time constant.
-        float speed = (float) Math.abs(train.speed) * 20f;
+        // Converted with the SERVER's measured tick rate, not a hard-coded twenty.
+        //
+        // train.speed is Blocks per tick as the server integrated it. Multiplying by twenty answers "what would this
+        // be at twenty ticks a second", which is a different question from "how fast is this train moving" the
+        // moment the server runs at any other rate - and under /tick rate 500 it understated the real speed by a
+        // factor of twenty-five. The operator's own velocity readout said five hundred while this said ninety.
+        float tps = TrainHudData.serverTickRate();
+        if (tps <= 0.1f)
+            tps = 20f;
+        float speed = (float) Math.abs(train.speed) * tps;
         lerp(speed, manualCap, sample.power());
 
         // Bottom-left, with the rows stacked upwards from the bottom margin, so

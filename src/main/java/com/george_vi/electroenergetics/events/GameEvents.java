@@ -657,6 +657,10 @@ public class GameEvents {
                 if (atStand || ++driver.emergencyTicks > TrainDriverState.EMERGENCY_BACKSTOP_TICKS) {
                     driver.emergencyArmed = false;
                     driver.emergencyTicks = 0;
+                    // The lever is released the instant the application ends. The rule the operator set is that
+                    // it is held until the train has STOPPED, so this is the far end of that window - not the
+                    // lockout tail, which runs two seconds longer and exists for the rest of the panel.
+                    driver.emergencyHeldGear = null;
 
                     // The stop is finished, so the pantographs come down.
                     //

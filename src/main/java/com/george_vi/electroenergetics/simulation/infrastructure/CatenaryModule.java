@@ -890,7 +890,9 @@ public class CatenaryModule {
                                         trainData.regenPower > 0d,
                                         driver.autoArrive, driver.unmanned,
                                         (float) TrainTractionModel.designMaxSpeed(),
-                                        trainData.controlMode.ordinal(), driver.overloaded)
+                                        trainData.controlMode.ordinal(), driver.overloaded,
+                                        com.george_vi.electroenergetics.content.railway_electrification
+                                                .RiderSeatGate.currentTickRate())
                         );
                         trainData.lastSyncedVoltage = voltage;
                         trainData.lastSyncedCurrent = totalCurrent;

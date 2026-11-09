@@ -1,5 +1,6 @@
 package com.george_vi.electroenergetics.content.railway_electrification.gauges;
 
+import com.george_vi.electroenergetics.content.railway_electrification.RiderSeatGate;
 import com.george_vi.electroenergetics.CEEPackets;
 import com.george_vi.electroenergetics.content.railway_electrification.TrainHudData;
 import io.netty.buffer.ByteBuf;
@@ -57,7 +58,8 @@ public record SyncTrainGaugeDataPacket(UUID trainId, double voltage, double curr
                                        boolean emergencyArmed,
                                        boolean emergencyPenalty, int cruiseState,
                                        boolean regen, boolean autoArrive, boolean unmanned,
-                                       float designMaxSpeed, int controlMode, boolean overloaded)
+                                       float designMaxSpeed, int controlMode, boolean overloaded,
+                                       float tickRate)
         implements ClientboundPacketPayload {
 
     public static final StreamCodec<ByteBuf, SyncTrainGaugeDataPacket> STREAM_CODEC = new StreamCodec<>() {
@@ -95,10 +97,12 @@ public record SyncTrainGaugeDataPacket(UUID trainId, double voltage, double curr
             int vigilanceStage = (flags >> 4) & 3;
             boolean autoArrive = (flags & 64) != 0;
             boolean unmanned = (flags & 128) != 0;
+            float tickRate = buffer.readFloat();
             return new SyncTrainGaugeDataPacket(trainId, voltage, current, maxSpeed, power,
                     grade, powered, carriages, motorCars, powerPerCarriage, manualFullSpeed,
                     gear, confirmDue, vigilanceStage, emergencyArmed, emergencyPenalty,
-                    cruiseState, regen, autoArrive, unmanned, designMaxSpeed, controlMode, overloaded);
+                    cruiseState, regen, autoArrive, unmanned, designMaxSpeed, controlMode, overloaded,
+                    tickRate);
         }
 
         @Override
@@ -126,6 +130,10 @@ public record SyncTrainGaugeDataPacket(UUID trainId, double voltage, double curr
             // whether to show the electric panel, because the decision depends on whether a
             // pantograph is within reach of catenary - server-side geometry the client never sees.
             buffer.writeByte((p.controlMode & 3) | (p.overloaded ? 4 : 0));
+            // How many ticks the server ran in the last second. Four bytes on a payload that already carries
+            // nine floats, sent per train per update, and it is the only way the client can convert a speed
+            // field into metres per second and get the same answer the train is actually moving at.
+            buffer.writeFloat(p.tickRate);
         }
     };
 
@@ -139,6 +147,8 @@ public record SyncTrainGaugeDataPacket(UUID trainId, double voltage, double curr
         TrainHudData.updateGear(trainId, gear, confirmDue, vigilanceStage, emergencyArmed,
                 emergencyPenalty, cruiseState, regen, autoArrive, unmanned);
         TrainHudData.setOverloaded(trainId, overloaded);
+        TrainHudData.setServerTickRate(tickRate);
+        RiderSeatGate.acceptSyncedTickRate(tickRate);
     }
 
     @Override
