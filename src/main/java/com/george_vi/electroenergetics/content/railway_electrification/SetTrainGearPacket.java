@@ -224,7 +224,7 @@ public record SetTrainGearPacket(UUID trainId, int gearOrdinal, boolean confirm,
             // arrives between ticks and cannot know which cab is driving). One rule, one wording
             // of the setpoint - see TrainDriverState.captureCruiseSetpoint.
             if (gear == TrainGear.CRUISE)
-                state.captureCruiseSetpointFromWorld(train.speed * 20d);
+                state.captureCruiseSetpointFromWorld(com.george_vi.electroenergetics.content.railway_electrification.RiderSeatGate.bptToMs(train.speed));
         }
     }
 

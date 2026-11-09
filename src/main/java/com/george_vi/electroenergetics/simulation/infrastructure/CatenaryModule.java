@@ -488,7 +488,7 @@ public class CatenaryModule {
             builder.addNode(trainNode);
             builder.ground(groundNode, 10);
 
-            double trainSpeedMs = Math.abs(train.speed) * 20d;
+            double trainSpeedMs = Math.abs(com.george_vi.electroenergetics.content.railway_electrification.RiderSeatGate.bptToMs(train.speed));
             double accelerationMs2 = acceleration * 400d;
             int carriages = Math.max(1, train.carriages.size());
 

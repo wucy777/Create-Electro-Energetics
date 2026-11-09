@@ -17,6 +17,9 @@ public class MinecraftServerMixin {
 
     @Inject(method = "tickServer", at = @At(value = "HEAD"), remap = false)
     public void electroEnergetics$tickServerPre(BooleanSupplier hasTimeLeft, CallbackInfo ci) {
+        // Exactly once per server tick, which is what a rate measurement needs. Called from the train tick instead it
+        // would run once per train and report a rate multiplied by the size of the fleet.
+        com.george_vi.electroenergetics.content.railway_electrification.RiderSeatGate.noteServerTick();
         SimulationTicker.profiler.clear();
         SimulationTicker.allStats.clear();
 

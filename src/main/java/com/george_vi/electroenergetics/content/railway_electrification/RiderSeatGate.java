@@ -166,14 +166,15 @@ public final class RiderSeatGate {
     }
 
     /**
-     * The divisor that turns m/s^2 into Blocks per tick squared.
+     * The divisor that turns m/s^2 into Blocks per tick squared: {@code 1 / (secondsPerTick)^2}.
      *
-     * <p>{@code a * (1/tps)^2}, written as a divisor because that is how the integrator uses it. 400 at the default
-     * tick rate, which is what the hard-coded constant said - and wrong by that factor squared at any other rate.
+     * <p>Kept as a divisor because that is how the integrator reads: {@code speed += a / divisor}. At twenty ticks a
+     * second it is 400, which is the literal that used to be in both call sites - so the default-rate behaviour is
+     * bit-for-bit what it was.
      */
     public static double accelerationDivisor() {
-        double tps = ticksPerSecond();
-        return tps > 0d ? tps * tps : 400d;
+        double spt = secondsPerTick();
+        return spt > 0d ? 1d / (spt * spt) : 400d;
     }
 
     /**
@@ -220,45 +221,63 @@ public final class RiderSeatGate {
      * <p>Falls back to twenty until a full second has been observed, and never returns anything but a sane positive
      * figure - a zero here would divide the physics by zero and stop every train dead.
      */
-    private static long tickRateWindowStart = 0L;
-    private static int tickRateTicksInWindow = 0;
+    private static long lastServerTickNanos = 0L;
 
     /**
-     * Called once per server tick from the train tick path. Cheap: a counter and, once a second, one division.
+     * Instantaneous ticks per second, from the gap between the last two server ticks.
+     *
+     * <p>The operator's objection to averaging over a window is correct and it decided the design: a tick rate is
+     * capped by the machine, so asking for ten thousand and getting three hundred is normal, and a one-second
+     * average would spend that second reporting a figure the server had already stopped running at. Worse, the
+     * average would be wrong in the direction that matters - it would lag a train that had just sped up.
+     *
+     * <p>So the gap between consecutive ticks is measured instead. Raw, it is far too noisy to integrate against:
+     * one garbage-collection pause and the next tick claims 3 ticks per second, which would make every train on the
+     * server lurch. What is kept is the PREVIOUS smoothed figure moved toward the new one, so a single bad gap can
+     * move it by at most a quarter and a real rate change settles within a handful of ticks.
+     *
+     * <p>Clamped to a sane band. Below twenty the physics is already in a regime the design does not cover, and
+     * above a few thousand the gap is mostly measurement noise rather than the server's real speed.
+     */
+    private static final float TICK_RATE_SMOOTHING = 0.25f;
+    private static final float TICK_RATE_MIN = 1f;
+    private static final float TICK_RATE_MAX = 100000f;
+
+    /**
+     * Called once per server tick, from the server's own tick hook - not from train ticks, which would call it once
+     * per train and inflate the count by the size of the fleet.
      */
     public static void noteServerTick() {
         long now = System.nanoTime();
-        if (tickRateWindowStart == 0L) {
-            tickRateWindowStart = now;
-            tickRateTicksInWindow = 0;
+        long previous = lastServerTickNanos;
+        lastServerTickNanos = now;
+        if (previous == 0L)
             return;
-        }
-        tickRateTicksInWindow++;
-        long elapsed = now - tickRateWindowStart;
-        // A full second of observation, then start again. Long enough to smooth a hiccup, short enough that a
-        // /tick rate change takes effect within a second.
-        if (elapsed >= 1_000_000_000L) {
-            float measured = tickRateTicksInWindow * 1_000_000_000f / elapsed;
-            if (measured > 0.1f && measured < 100000f)
-                cachedTickRate = measured;
-            tickRateWindowStart = now;
-            tickRateTicksInWindow = 0;
-        }
+        long gap = now - previous;
+        if (gap <= 0L)
+            return;
+        float instant = 1_000_000_000f / gap;
+        if (instant < TICK_RATE_MIN || instant > TICK_RATE_MAX)
+            return;
+        // One bad gap moves the answer by a quarter, so a stall cannot throw the whole fleet's physics for a tick.
+        cachedTickRate += (instant - cachedTickRate) * TICK_RATE_SMOOTHING;
+    }
+
+    /** Ticks per second, smoothed from the last few server ticks. Twenty until the first one is observed. */
+    public static float currentTickRate() {
+        return cachedTickRate;
     }
 
     /**
-     * The tick rate the CLIENT should convert with.
+     * The reciprocal of the tick rate - SECONDS PER TICK - which is what the integrator actually wants.
      *
-     * <p>The client never ticks the server loop, so it cannot measure this itself - on a client the measured figure
-     * would stay at the default forever and the HUD would keep reporting the twenty-based number while the train
-     * actually moved at the server's rate. That is exactly the disagreement the operator saw: their own velocity
-     * readout said five hundred while the cab said ninety.
-     *
-     * <p>The server's figure is broadcast with the rest of the per-train HUD data, and this is where the client
-     * reads it. Falls back to the local (server-side measured, or default) figure when nothing has arrived yet.
+     * <p>Speed is in Blocks per tick and acceleration in metres per second squared, so a step is
+     * {@code a * secondsPerTick * secondsPerTick}. Written as a named quantity because the two places that need it
+     * were both written as a literal 400 and both were wrong at any rate but twenty.
      */
-    public static float currentTickRate() {
-        return cachedTickRate;
+    public static double secondsPerTick() {
+        float tps = cachedTickRate;
+        return tps > 0.1f ? 1d / tps : 1d / 20d;
     }
 
     /** Set from the synced payload on the client. Ignored on the server, which measures its own. */

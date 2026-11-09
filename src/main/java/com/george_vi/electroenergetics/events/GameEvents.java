@@ -539,11 +539,13 @@ public class GameEvents {
                 //
                 // The count keeps its old meaning (ticks of inattention) so the HUD lamps and every existing
                 // reader stay correct; only the budget it is measured against is now time.
-                double budget = TrainDriverState.TRIP_SECONDS
-                        * com.george_vi.electroenergetics.content.railway_electrification.RiderSeatGate
-                                .ticksPerSecond();
-                if (driver.confirmWaiting < budget) {
-                    driver.confirmWaiting++;
+                // Advanced by the length of THIS tick, so confirmWaiting is elapsed seconds and the budget is
+                // TRIP_SECONDS with no conversion. A window averaged over a second would report a rate the server
+                // had already left; secondsPerTick is the same figure the physics integrates with, so the clock and
+                // the train can never disagree about how long a tick was.
+                if (driver.confirmWaiting < TrainDriverState.TRIP_SECONDS) {
+                    driver.confirmWaiting += com.george_vi.electroenergetics.content.railway_electrification
+                            .RiderSeatGate.secondsPerTick();
                 } else {
                     driver.trip();
                     driver.tripTicks = 0;

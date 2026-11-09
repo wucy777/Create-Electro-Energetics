@@ -564,7 +564,7 @@ public class TrainDriverState {
      * the 30 s as well as clear the warning - there is no separate prompt timer left to
      * disagree with it.
      */
-    public int confirmWaiting = 0;
+    public double confirmWaiting = 0d;
 
     /** Whether the vigilance device has tripped and the train is being stopped. */
     public boolean vigilanceTripped = false;
@@ -817,13 +817,12 @@ public class TrainDriverState {
     public int warningStage() {
         if (vigilanceTripped)
             return 2;
-        // Time, not ticks - see WARN_AMBER_SECONDS. The lamps have to share the trip's clock or the escalation is
-        // wrong at every rate but 20: at 200 ticks a second the amber lamp would have become red instantly.
-        double tps = com.george_vi.electroenergetics.content.railway_electrification.RiderSeatGate
-                .ticksPerSecond();
-        if (confirmWaiting < WARN_AMBER_SECONDS * tps)
+        // SECONDS OF INATTENTION, not ticks. confirmWaiting is advanced by secondsPerTick each tick, so it already
+        // holds elapsed time and the comparison needs no tick rate at all - which is the point of counting this way:
+        // there is one place that knows how long a tick was, and it is the same place the physics asks.
+        if (confirmWaiting < WARN_AMBER_SECONDS)
             return 0;
-        if (confirmWaiting < WARN_RED_SECONDS * tps)
+        if (confirmWaiting < WARN_RED_SECONDS)
             return 1;
         return 2;
     }

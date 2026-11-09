@@ -386,10 +386,7 @@ public class TrainMixin implements ICEETrainExtension {
         // One call per server tick, and the only place this mod is guaranteed to run on every train every tick.
         // Everything that converts Blocks-per-tick to metres-per-second depends on the figure it maintains; see
         // RiderSeatGate.noteServerTick for why it is measured rather than read from the server.
-        // One call per server tick, and the only place this mod runs for every train every tick regardless of
-        // supply, gear or occupancy. RiderSeatGate.noteServerTick measures the rate; see there for why it cannot be
-        // read from the server.
-        RiderSeatGate.noteServerTick();
+
 
         // Gear driving owns the speed of a driven electric train, and this is the
         // one place per tick that writes it. Doing it here rather than in
@@ -594,7 +591,7 @@ public class TrainMixin implements ICEETrainExtension {
         // is now doing.
         if (st.gear == TrainGear.ACCELERATE && !st.vigilanceTripped && !st.autoArrive
                 && !st.emergencyArmed
-                && TrainTractionModel.atDesignCeiling(Math.abs(next) * 20d, carriages)) {
+                && TrainTractionModel.atDesignCeiling(Math.abs(com.george_vi.electroenergetics.content.railway_electrification.RiderSeatGate.bptToMs(next)), carriages)) {
             st.gear = TrainGear.CRUISE;
             // Cruise holds the speed it is engaged at, which is where the train just
             // arrived. Captured here because this lever move did not come from a packet,
