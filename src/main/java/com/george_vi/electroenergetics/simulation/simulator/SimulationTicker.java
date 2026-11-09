@@ -68,9 +68,40 @@ public class SimulationTicker {
         electricalExecutorService.shutdownNow();
     }
 
+    /**
+     * Ticks skipped so the simulation runs at WALL-CLOCK rate rather than once per server tick.
+     *
+     * <p>The electrical solve advances by {@link #microTicks} fixed steps per call, and those steps are sized for
+     * twenty ticks a second. Under {@code /tick rate 500} the server therefore ran the solve twenty-five times as
+     * often, which does not make the grid simulate better - it makes every device in the world consume twenty-five
+     * times the energy per second, because each solve still bills a full tick's worth. The operator predicted
+     * exactly this: raise the rate and the grid collapses.
+     *
+     * <p>The solve is skipped instead, at the ratio of the live rate to twenty. At twenty the divisor is one and
+     * nothing changes; at five hundred the solve runs every twenty-fifth tick and the grid sees the same number of
+     * solves per second it always did.
+     *
+     * <p>Measured through the train tick's own clock ({@code RiderSeatGate.currentTickRate}) rather than asked of
+     * the server, because this version has no server-side accessor for it - see that method.
+     */
+    private int skipCounter = 0;
+
     public void tick() {
         if (level.tickRateManager().isFrozen())
             return;
+
+        // Wall-clock pacing. The remainder is carried in the counter rather than recomputed, so twenty-five skips
+        // do not accumulate into a drift against the rate they were derived from.
+        float liveRate = com.george_vi.electroenergetics.content.railway_electrification.RiderSeatGate
+                .currentTickRate();
+        if (liveRate > 21f) {
+            int stride = Math.max(1, Math.round(liveRate / 20f));
+            if (++skipCounter < stride)
+                return;
+            skipCounter = 0;
+        } else {
+            skipCounter = 0;
+        }
         microTicks = CEEConfigs.server().simulationConfig.microTicks.get();
 
         profiler.push(level.dimension().location().toString());

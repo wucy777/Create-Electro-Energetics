@@ -554,7 +554,7 @@ public class GameEvents {
                 // the train can never disagree about how long a tick was.
                 if (driver.confirmWaiting < TrainDriverState.TRIP_SECONDS) {
                     driver.confirmWaiting += com.george_vi.electroenergetics.content.railway_electrification
-                            .RiderSeatGate.secondsPerTick();
+                            .RiderSeatGate.realSecondsPerTick();
                 } else {
                     driver.trip();
                     driver.tripTicks = 0;

@@ -191,31 +191,38 @@ public final class RiderSeatGate {
     }
 
     /**
-     * THE SPEED CEILING WHILE THE SERVER IS NOT RUNNING AT TWENTY TICKS A SECOND.
+     * Whether the COMMANDED tick rate is not twenty.
      *
-     * <p>The operator's decision, and it is the right one for a reason that has nothing to do with physics: the
-     * rider is drawn one position update behind the train, always. At twenty ticks a second that lag is a fraction
-     * of a Block and nobody can see it. Under {@code /tick rate 500} the same lag is the whole distance the train
-     * covers between updates - several Blocks - and the driver is left standing beside the track while the train
-     * carries on. That is the "thrown out" report, and it is not really being thrown anywhere.
+     * <p>Read from the server's tick rate manager, which is the instruction the operator typed - not from the
+     * measured rate. That distinction matters: a machine that cannot keep up with {@code /tick rate 500} and settles
+     * at 300 is still being COMMANDED to run at 500, and the train should behave according to what was asked for
+     * rather than according to what the hardware managed. Measured rate is used for nothing but reporting.
      *
-     * <p>Chasing it by integrating the physics against the live rate was tried and does not work: it makes the
-     * train's speed field mean a different thing at every rate, so the HUD, the network, Create's own ceiling and
-     * the passenger position update all disagree. Measured on the operator's machine, the cab read ninety while
-     * their own velocity HUD read five hundred.
-     *
-     * <p>So a raised tick rate now buys a hard twenty-eight metre per second cap instead of more speed. The figures
-     * that already worked - twenty ticks, the ceiling, the HUD, the physics - are untouched at the rate they were
-     * designed for, and raising the rate simply tells the train to slow down.
-     *
-     * <p>Twenty-eight rather than some larger figure: it is Create's own ceiling, the one the seat rules already
-     * use, and the one below which the passenger update has always been able to keep up.
+     * <p>This version's obfuscated server class exposes no named accessor, so the manager is reached through
+     * {@code Level.tickRateManager()} - which IS mapped here, because NeoForge patches it into {@code Level} as a
+     * named method - and asks it for the commanded rate.
      */
     public static boolean overspeedTickRate() {
-        // A tolerance rather than equality: the rate is measured from tick gaps, so it lands on 19.98 as readily as
-        // on 20.00. Anything within a percent of twenty is the default rate.
-        float tps = cachedTickRate;
-        return Math.abs(tps - 20f) > 0.2f;
+        try {
+            Object server = net.neoforged.neoforge.server.ServerLifecycleHooks.getCurrentServer();
+            if (server == null)
+                return false;
+            Object manager = null;
+            if (server instanceof net.minecraft.server.MinecraftServer ms) {
+                // Every level on the server shares one tick rate manager; any of them will answer.
+                var levels = ms.getAllLevels().iterator();
+                if (levels.hasNext())
+                    manager = levels.next().tickRateManager();
+            }
+            if (manager == null)
+                return false;
+            Object rate = manager.getClass().getMethod("tickrate").invoke(manager);
+            if (rate instanceof Number number)
+                return Math.abs(number.floatValue() - 20f) > 0.2f;
+        } catch (Throwable ignored) {
+            // No answer is the safe answer: behave as though the rate were twenty.
+        }
+        return false;
     }
 
     /** The ceiling in Blocks per tick that applies right now. */
@@ -323,6 +330,22 @@ public final class RiderSeatGate {
      */
     public static double secondsPerTick() {
         return 1d / SPEED_BASE_TPS;
+    }
+
+    /**
+     * How much REAL time elapsed during the last tick, for clocks that must run at wall-clock speed.
+     *
+     * <p>Deliberately separate from {@link #secondsPerTick()}, which is the fixed 1/20 the PHYSICS integrates
+     * against. The two answer different questions and the whole of this change is the distinction: the train's speed
+     * field must mean the same thing at every tick rate, while the vigilance device must count real seconds.
+     *
+     * <p>At twenty ticks a second these are equal and nothing changes. At five hundred the vigilance clock advances
+     * twenty-five times faster per tick, so its thirty-six seconds stay thirty-six seconds instead of stretching to
+     * fifteen minutes.
+     */
+    public static double realSecondsPerTick() {
+        float tps = cachedTickRate;
+        return tps > 0.1f ? 1d / tps : 1d / 20d;
     }
 
     /** Set from the synced payload on the client. Ignored on the server, which measures its own. */
