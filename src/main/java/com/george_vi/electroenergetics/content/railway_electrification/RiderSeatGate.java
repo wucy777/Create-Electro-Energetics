@@ -576,9 +576,6 @@ public final class RiderSeatGate {
         if (player == null || !player.isPassenger())
             return;
         if (true)
-            System.out.println("[forceDismount] " + player.getName().getString()
-                    + " vehicle=" + (player.getVehicle() == null ? "null"
-                            : player.getVehicle().getClass().getSimpleName()));
         FORCED_DISMOUNTS.add(player.getUUID());
         try {
             player.stopRiding();
@@ -693,19 +690,6 @@ public final class RiderSeatGate {
         // A call that is part of seating somebody is not somebody choosing to get off.
         if (SEATING.contains(player.getUUID()))
             return false;
-
-        // Diagnostic: the operator reports the lock works on an ordinary seat and not on the driver's. The two
-        // differ in what the player is riding, so the vehicle is named in the log before anything else is
-        // decided. Temporary, and removed once the answer is known.
-        if (true) {
-            net.minecraft.world.entity.Entity v = player.getVehicle();
-            System.out.println(String.format(
-                    "[seatlock] %s vehicle=%s root=%s",
-                    player.getName().getString(),
-                    v == null ? "null" : v.getClass().getSimpleName(),
-                    player.getRootVehicle() == null ? "null"
-                            : player.getRootVehicle().getClass().getSimpleName()));
-        }
 
         com.simibubi.create.content.trains.entity.CarriageContraptionEntity carriage = null;
         if (player.getVehicle()
@@ -1096,9 +1080,6 @@ public final class RiderSeatGate {
                 if (claimed != null && carriageIndex == claimedCarriage)
                     foundClaimedDesk = true;
                 if (claimed != null)
-                    System.out.println("[held] desk=" + desk + " carriage=" + carriageIndex
-                            + " seat=" + seat + " claimedCarriage=" + claimedCarriage
-                            + " claimedDesk=" + claimedDesk);
                 held.add(new SeatRef(carriageIndex, seat));
             }
         }
@@ -1181,22 +1162,18 @@ public final class RiderSeatGate {
      */
     public static int seatClaimedDriver(Train train, Set<SeatRef> held) {
         if (true)
-            System.out.println("[seatlock] seatClaimedDriver held=" + held.size());
         if (held.isEmpty()) {
-            System.out.println("[seat] path=no-held-seats");
             return 0;
         }
         TrainDriverState driverState = ((com.george_vi.electroenergetics.mixin_interfaces.ICEETrainExtension) train)
                 .getElectricTrainData().driver;
         UUID claimed = driverState.claimOwner;
         if (claimed == null) {
-            System.out.println("[seat] path=no-claim");
             return 0;
         }
 
         CarriageContraptionEntity deskCarriage = carriageEntity(train, driverState.driverCarriage);
         if (deskCarriage == null || deskCarriage.level().isClientSide()) {
-            System.out.println("[seat] path=no-desk-carriage carriage=" + driverState.driverCarriage);
             return 0;
         }
         Player driver = null;
@@ -1207,7 +1184,6 @@ public final class RiderSeatGate {
             }
         }
         if (driver == null) {
-            System.out.println("[seat] path=driver-not-online");
             return 0;
         }
 
@@ -1223,7 +1199,6 @@ public final class RiderSeatGate {
         }
         // A live cab claim is not permission to pull somebody aboard from the platform.
         if (!aboard) {
-            System.out.println("[seat] path=not-aboard");
             return 0;
         }
 
@@ -1239,7 +1214,6 @@ public final class RiderSeatGate {
             }
         }
         if (current != null && held.contains(current)) {
-            System.out.println("[seat] path=already-in-reserved seat=" + current.seatIndex());
             return 0;
         }
         if (current != null) {
@@ -1265,10 +1239,6 @@ public final class RiderSeatGate {
                 continue;
 
             if (true)
-            System.out.println("[seatlock] seating driver into carriage " + seat.carriageIndex()
-                    + " seat " + seat.seatIndex());
-        System.out.println("[seat] path=seating carriage=" + seat.carriageIndex()
-                + " seat=" + seat.seatIndex() + " from=" + (current == null ? "none" : current.seatIndex()));
         SEATING.add(driver.getUUID());
         try {
             entity.addSittingPassenger(driver, seat.seatIndex());
@@ -1334,7 +1304,6 @@ public final class RiderSeatGate {
             FORCED_DISMOUNTS.add(occupantId);
             try {
                 if (true)
-                    System.out.println("[evict] occupant=" + occupantId);
                 occupant.stopRiding();
             } finally {
                 FORCED_DISMOUNTS.remove(occupantId);

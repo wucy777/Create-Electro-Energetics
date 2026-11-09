@@ -337,19 +337,53 @@ public final class TrainHudData {
         return ordinal >= 0 && ordinal < modes.length ? modes[ordinal] : null;
     }
 
+    /**
+     * Trains whose sample has been missing from the client's train map, and for how many ticks.
+     *
+     * <p>CreateClient.RAILWAYS is filled by Create's own packets and is NOT authoritative about which trains exist:
+     * a train that is out of range, or whose chunk has been unloaded, simply stops appearing in it for a while. The
+     * caller used to treat "not in the map" as "gone" and dropped the sample on the first such tick, after which
+     * {@code ElectricTrainHud.render} returned early on {@code sample == null} and the whole panel vanished - then
+     * came back when the train was back in range. The operator saw exactly that, and F1 twice "fixed" it because
+     * the second press redrew a frame by which time the sample had returned.
+     *
+     * <p>So absence is now a GRACE PERIOD rather than a verdict. A train has to be missing for
+     * {@link #RETAIN_GRACE_TICKS} consecutive ticks before its sample is dropped, which is long enough to cover a
+     * chunk unload and short enough that the cache still cannot grow without bound.
+     */
+    private static final int RETAIN_GRACE_TICKS = 20 * 30;
+
+    private static final Map<UUID, Integer> MISSING_TICKS = new ConcurrentHashMap<>();
+
     /** Drop samples for trains that no longer exist, so the map cannot grow forever. */
     public static void retain(java.util.function.Predicate<UUID> keep) {
-        SAMPLES.keySet().removeIf(id -> !keep.test(id));
-        GEARS.keySet().removeIf(id -> !keep.test(id));
-        DRIVER_CLAIMS.keySet().removeIf(id -> !keep.test(id));
-        PANTOGRAPHS.keySet().removeIf(id -> !keep.test(id));
-        PANTOGRAPH_LOCKED.removeIf(id -> !keep.test(id));
-        AUTO_RAISE.removeIf(id -> !keep.test(id));
-        OVERLOADED.removeIf(id -> !keep.test(id));
+        // Age every entry first, then drop only those past the grace period.
+        for (UUID id : SAMPLES.keySet()) {
+            if (keep.test(id)) {
+                MISSING_TICKS.remove(id);
+            } else {
+                MISSING_TICKS.merge(id, 1, Integer::sum);
+            }
+        }
+        MISSING_TICKS.entrySet().removeIf(e -> !SAMPLES.containsKey(e.getKey()));
+        SAMPLES.keySet().removeIf(id -> {
+            Integer missing = MISSING_TICKS.get(id);
+            return missing != null && missing >= RETAIN_GRACE_TICKS;
+        });
+        java.util.function.Predicate<UUID> gone = id -> {
+            Integer missing = MISSING_TICKS.get(id);
+            return missing != null && missing >= RETAIN_GRACE_TICKS;
+        };
+        GEARS.keySet().removeIf(gone);
+        DRIVER_CLAIMS.keySet().removeIf(gone);
+        PANTOGRAPHS.keySet().removeIf(gone);
+        PANTOGRAPH_LOCKED.removeIf(gone);
+        AUTO_RAISE.removeIf(gone);
+        OVERLOADED.removeIf(gone);
         // These two were missed, so they accumulated for every train the client had ever seen. Small, but it is
         // the same leak the other seven lines exist to stop.
-        CLAIM_CARRIAGE.keySet().removeIf(id -> !keep.test(id));
-        CARRIAGE_COUNT.keySet().removeIf(id -> !keep.test(id));
+        CLAIM_CARRIAGE.keySet().removeIf(gone);
+        CARRIAGE_COUNT.keySet().removeIf(gone);
     }
 
     // ------------------------------------------------------------------

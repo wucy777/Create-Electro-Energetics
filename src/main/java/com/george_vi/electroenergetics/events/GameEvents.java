@@ -370,10 +370,6 @@ public class GameEvents {
                                 .SEAT_INTENT_GRACE_TICKS;
 
                 driver.overloaded = trulyOverloaded;
-                if (trulyOverloaded && driver.unseatedTicks == com.george_vi.electroenergetics.content.railway_electrification.RiderSeatGate.SEAT_INTENT_GRACE_TICKS)
-                    System.out.println(String.format(
-                            "[overload-onset] speed=%.3fbpt unseated=%s gear=%s",
-                            Math.abs(train.speed), unseated, driver.gear));
                 if (trulyOverloaded) {
                     // Two different situations, and only one of them is a braking matter.
                     //
@@ -395,9 +391,6 @@ public class GameEvents {
                     // ceiling. Neither branch depends on how the train got there, so a missed latch cannot
                     // strand the brake on.
                     if (speed > RiderSeatGate.createCeilingBpt() + 1.0e-4d) {
-                        System.out.println(String.format(
-                                "[overload-brake] speed=%.3fbpt unseatedTicks=%d unseated=%s gear=%s",
-                                speed, driver.unseatedTicks, unseated, driver.gear));
                         // Above the ceiling: brake, and REMEMBER that the brake is ours. Reaching the ceiling
                         // has to release it - otherwise the train brakes past 28 and stops, which is a
                         // stop, not a speed limit.

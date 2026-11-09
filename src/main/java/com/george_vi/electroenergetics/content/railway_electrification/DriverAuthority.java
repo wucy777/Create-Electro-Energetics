@@ -183,10 +183,6 @@ public final class DriverAuthority {
         if (carriageIndex < 0)
             return false;
         var claimEntity = carriage.anyAvailableEntity();
-        System.out.println("[claim] carriage=" + carriageIndex + " desk=" + localPos
-                + " seats=" + (claimEntity == null || claimEntity.getContraption() == null ? "?"
-                        : String.valueOf(claimEntity.getContraption().getSeats().size()))
-                + " cars=" + train.carriages.size());
         driver.claim(player.getUUID(), carriageIndex, localPos);
         // The desk's own seat is the driver's, and it cannot be taken by clicking the seat: the way to sit
         // in it is to take the controls. So the seating happens here, on the claim, rather than waiting for
@@ -276,19 +272,6 @@ public final class DriverAuthority {
                 && (RiderSeatGate.isRidingTrain(train, player)
                     || RiderSeatGate.isStandingOnAnyFloor(train, player));
         if (!corroborated) {
-            // Throttled to the first few ticks of a failure run: the point is to see WHICH term broke, and a
-            // per-tick log would bury it in ten thousand identical lines.
-            if (driver.claimInvalidTicks < 3 || driver.claimInvalidTicks == 5)
-                System.out.println(String.format(
-                        "[claim-invalid] t=%d cce=%s desk=%s sameLevel=%s reach=%s mirror=%s riding=%s floor=%s",
-                        driver.claimInvalidTicks,
-                        cce != null, driver.driverDesk != null,
-                        cce != null && cce.level() == player.level(),
-                        cce != null && driver.driverDesk != null
-                                && cce.canInteractWithBlock(player, driver.driverDesk, DESK_REACH),
-                        cce != null && mirrorHolds(cce, owner),
-                        RiderSeatGate.isRidingTrain(train, player),
-                        RiderSeatGate.isStandingOnAnyFloor(train, player)));
             if (++driver.claimInvalidTicks > INVALID_GRACE_TICKS) {
                 // Reached before the release, so the message can tell the driver why.
                 if (cce != null && driver.driverDesk != null
@@ -302,19 +285,6 @@ public final class DriverAuthority {
             }
         } else {
             driver.claimInvalidTicks = 0;
-        }
-        // Per-second heartbeat for the driver's own state, so a throw can be told apart from a dismount: if the
-        // heartbeat keeps saying riding=true while the operator reports being outside, the seat was never lost and
-        // the fault is in where the client is putting them.
-        if (Boolean.getBoolean("cee.debugSeatLock") || true) {
-            long now = server.getTickCount();
-            if (now % 40 == 0)
-                System.out.println(String.format(
-                        "[heartbeat] tick=%d speed=%.3fbpt gear=%s inverted=%s cab=%d seated=%s riding=%s",
-                        now, train.speed, driver.gear,
-                        driver.driverCabInverted, driver.driverCarriage,
-                        RiderSeatGate.isInClaimedDriverSeat(train, player),
-                        RiderSeatGate.isRidingTrain(train, player)));
         }
         driver.setDriverPresent(owner);
     }
@@ -334,18 +304,6 @@ public final class DriverAuthority {
         if (owner == null)
             return;
         BlockPos desk = driver.driverDesk == null ? BlockPos.ZERO : driver.driverDesk;
-        // What ended the claim, and who was riding where. One line, printed only when the operator asks with
-        // -Dcee.debugSeatLock=true. Reasoning about which of the release routes fired has cost several rounds;
-        // this answers it from the log instead.
-        if (true) {
-            var d = ((com.george_vi.electroenergetics.mixin_interfaces.ICEETrainExtension) train)
-                    .getElectricTrainData().driver;
-            System.out.println(String.format(
-                    "[claim-release] speed=%.2fbpt(%s ms) invalidTicks=%d desk=%s carriage=%d owner=%s",
-                    Math.abs(train.speed), String.format("%.1f", RiderSeatGate.speedMs(train)),
-                    d.claimInvalidTicks, desk, d.driverCarriage,
-                    String.valueOf(owner).substring(0, 8)));
-        }
         for (Carriage carriage : train.carriages) {
             carriage.forEachPresentEntity(cce -> {
                 if (cce.getControllingPlayer().filter(owner::equals).isPresent())
@@ -435,9 +393,6 @@ public final class DriverAuthority {
     private static boolean mirrorHolds(CarriageContraptionEntity cce, UUID owner) {
         boolean holds = cce.getControllingPlayer().filter(owner::equals).isPresent();
         if (!holds)
-            System.out.println("[mirror] carriage=" + cce.carriageIndex
-                    + " controlling=" + cce.getControllingPlayer().map(UUID::toString).orElse("none")
-                    + " owner=" + String.valueOf(owner).substring(0, 8));
         return holds;
     }
 
