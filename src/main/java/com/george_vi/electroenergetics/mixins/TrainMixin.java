@@ -248,6 +248,19 @@ public class TrainMixin implements ICEETrainExtension {
 
     private static float electroEnergetics$withPenaltyRaw(float ceiling, Train self,
                                                        ElectricTrainData data) {
+        // A TICK RATE THAT IS NOT TWENTY CAPS THE TRAIN AT THE BASE CEILING.
+        //
+        // See RiderSeatGate.overspeedTickRate for why this is a speed cap rather than an integration change. In
+        // short: the passenger is drawn one update behind, that lag equals the distance covered per update, and at
+        // an elevated rate nobody can drive the train without the driver being left outside it. Slowing the train is
+        // the fix that does not require every subsystem to agree on a new unit.
+        //
+        // Applied here, before anything else, because this helper is the one point every branch of maxSpeed() passes
+        // through - including Create's own fall-through. A cap anywhere else would leave one control scheme free.
+        if (com.george_vi.electroenergetics.content.railway_electrification.RiderSeatGate.overspeedTickRate())
+            ceiling = Math.min(ceiling,
+                    (float) com.george_vi.electroenergetics.content.railway_electrification.RiderSeatGate
+                            .createCeilingBpt());
         // The flag lives on the driver state, which only the SERVER ever writes: it is set when the
         // emergency brake is pulled (SetTrainGearPacket) and restored from the train tag on load.
         // Nothing on the client assigns it, so reading it alone made this cap a no-op on the client.
@@ -640,6 +653,16 @@ public class TrainMixin implements ICEETrainExtension {
             next = 0d;
 
         self.speed = next;
+
+        // A raised tick rate caps the ACTUAL speed here, for the same reason the emergency penalty does: the gear
+        // law writes train.speed directly and never consults maxSpeed(), so a ceiling that lives only there is a
+        // display while this mode is driving. See RiderSeatGate.overspeedTickRate.
+        if (com.george_vi.electroenergetics.content.railway_electrification.RiderSeatGate.overspeedTickRate()) {
+            double cap = com.george_vi.electroenergetics.content.railway_electrification.RiderSeatGate
+                    .createCeilingBpt();
+            if (Math.abs(self.speed) > cap)
+                self.speed = Math.copySign(cap, self.speed);
+        }
 
         // The emergency penalty caps the ACTUAL speed, not just Create's target: the gear
         // law writes train.speed directly and never consults maxSpeed(), so a cap that

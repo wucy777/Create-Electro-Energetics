@@ -145,8 +145,22 @@ public final class RiderSeatGate {
      * #currentTickRate()} reads, returned as a double so the conversions do not lose precision.
      */
     public static double ticksPerSecond() {
-        return currentTickRate();
+        return SPEED_BASE_TPS;
     }
+
+    /**
+     * The tick rate every speed figure in this mod is expressed against.
+     *
+     * <p>Twenty, always, and deliberately not the server's live rate. {@code train.speed} is created by Create's own
+     * physics, which integrates against twenty; this mod's integrator now does the same; and the HUD, the network,
+     * the gear law and the passenger position update all read the same field. Converting it with anything other than
+     * the rate it was written against is what produced a cab that said ninety while the operator's own velocity
+     * readout said five hundred.
+     *
+     * <p>The live rate is still measured - {@link #currentTickRate()} - because it decides whether the train is
+     * allowed to run above the base ceiling at all. See {@link #overspeedTickRate()}.
+     */
+    private static final double SPEED_BASE_TPS = 20d;
 
     /**
      * Blocks per tick to metres per second.
@@ -173,8 +187,40 @@ public final class RiderSeatGate {
      * bit-for-bit what it was.
      */
     public static double accelerationDivisor() {
-        double spt = secondsPerTick();
-        return spt > 0d ? 1d / (spt * spt) : 400d;
+        return SPEED_BASE_TPS * SPEED_BASE_TPS;
+    }
+
+    /**
+     * THE SPEED CEILING WHILE THE SERVER IS NOT RUNNING AT TWENTY TICKS A SECOND.
+     *
+     * <p>The operator's decision, and it is the right one for a reason that has nothing to do with physics: the
+     * rider is drawn one position update behind the train, always. At twenty ticks a second that lag is a fraction
+     * of a Block and nobody can see it. Under {@code /tick rate 500} the same lag is the whole distance the train
+     * covers between updates - several Blocks - and the driver is left standing beside the track while the train
+     * carries on. That is the "thrown out" report, and it is not really being thrown anywhere.
+     *
+     * <p>Chasing it by integrating the physics against the live rate was tried and does not work: it makes the
+     * train's speed field mean a different thing at every rate, so the HUD, the network, Create's own ceiling and
+     * the passenger position update all disagree. Measured on the operator's machine, the cab read ninety while
+     * their own velocity HUD read five hundred.
+     *
+     * <p>So a raised tick rate now buys a hard twenty-eight metre per second cap instead of more speed. The figures
+     * that already worked - twenty ticks, the ceiling, the HUD, the physics - are untouched at the rate they were
+     * designed for, and raising the rate simply tells the train to slow down.
+     *
+     * <p>Twenty-eight rather than some larger figure: it is Create's own ceiling, the one the seat rules already
+     * use, and the one below which the passenger update has always been able to keep up.
+     */
+    public static boolean overspeedTickRate() {
+        // A tolerance rather than equality: the rate is measured from tick gaps, so it lands on 19.98 as readily as
+        // on 20.00. Anything within a percent of twenty is the default rate.
+        float tps = cachedTickRate;
+        return Math.abs(tps - 20f) > 0.2f;
+    }
+
+    /** The ceiling in Blocks per tick that applies right now. */
+    public static double activeCeilingBpt() {
+        return overspeedTickRate() ? createCeilingBpt() : Double.MAX_VALUE;
     }
 
     /**
@@ -192,7 +238,7 @@ public final class RiderSeatGate {
     public static double speedMs(Train train) {
         if (train == null)
             return 0d;
-        return Math.abs(train.speed) * currentTickRate();
+        return Math.abs(train.speed) * SPEED_BASE_TPS;
     }
 
     /**
@@ -276,8 +322,7 @@ public final class RiderSeatGate {
      * were both written as a literal 400 and both were wrong at any rate but twenty.
      */
     public static double secondsPerTick() {
-        float tps = cachedTickRate;
-        return tps > 0.1f ? 1d / tps : 1d / 20d;
+        return 1d / SPEED_BASE_TPS;
     }
 
     /** Set from the synced payload on the client. Ignored on the server, which measures its own. */
