@@ -434,16 +434,21 @@ public class TrainMixin implements ICEETrainExtension {
         TrainDriverState st = data.driver;
         int carriages = Math.max(1, self.carriages.size());
 
-        // A TRIPPED vigilance device overrides the lever: the train is braked to a
-        // stand and stays that way until the driver acknowledges.
+        // A TRIPPED vigilance device brakes to a stand, and after that the driver may drive away.
         //
-        // The lever's own position is deliberately left alone rather than being forced
-        // back here, so the driver can see where they put the handle - and the red lamp
-        // and the stationary train are what tell them to acknowledge. Re-engaging a gear
-        // without acknowledging therefore does not restart the train, which is the
-        // behaviour a real vigilance device has: the handle moving does nothing until
-        // the alarm is cancelled.
-        TrainGear effectiveGear = st.vigilanceTripped ? TrainGear.BRAKE : st.gear;
+        // The rule used to be that a tripped device overrode the lever until the alarm was acknowledged, so
+        // selecting another position did nothing. The operator reversed it: the device has already done its job
+        // the moment the train stopped, and a train the driver cannot move is a worse outcome than one they can -
+        // especially as acknowledging is a separate action they may not know they owe.
+        //
+        // What survives is the part that matters: the override holds WHILE THE TRAIN IS STILL MOVING. The trip's
+        // purpose is to bring the train to a stand, so a driver who moves the handle mid-stop does not get to
+        // cancel the stop by driving out of it. Once it stands, the lever is theirs again.
+        //
+        // The emergency brake is untouched by this: it holds the lever through emergencyHeldGear until the train
+        // stands, and that rule is enforced where gear commands arrive.
+        boolean tripStillStopping = st.vigilanceTripped && Math.abs(self.speed) > 1e-4d;
+        TrainGear effectiveGear = tripStillStopping ? TrainGear.BRAKE : st.gear;
 
         // AUTOMATIC ARRIVAL: Create's navigation commands the speed, not the lever.
         //
