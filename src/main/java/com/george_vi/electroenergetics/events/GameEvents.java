@@ -524,6 +524,15 @@ public class GameEvents {
                     driver.tripTicks = 0;
                 }
             } else if (owned && moving && !driver.emergencyArmed && driver.gear != TrainGear.BRAKE) {
+                // THE CLOCK ONLY RUNS UNDER TRACTION.
+                //
+                // The operator's rule, stated plainly: a train standing on its brake, or under an emergency
+                // application, is not a train anybody has stopped attending to. Both of those are things the
+                // driver DID, and counting inattention against them would fire the device during a normal stop -
+                // which is what "the automatic brake after 35 s" looked like from the cab.
+                //
+                // So: brake position, no count. Emergency application, no count. Coast and cruise and accelerate,
+                // count. Moving, count; stopped, reset.
                 // NOT during an emergency application. The emergency brake is already stopping the train as hard
                 // as it can and it cannot be acknowledged - J is refused while the controls are locked - so the
                 // vigilance clock was counting towards a trip the driver had no way to prevent. At 35 s the trip

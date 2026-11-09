@@ -211,6 +211,18 @@ public record SetTrainGearPacket(UUID trainId, int gearOrdinal, boolean confirm,
             // the K press fires it. Firing on engagement made every reverse engagement a
             // full emergency stop with the whole penalty chain attached.
             state.gear = gear;
+            // Moving the lever is an acknowledgement, and the operator's rule is that it RESTARTS the vigilance
+            // clock. It also ends a trip: selecting a position is a deliberate act, which is exactly what the
+            // device exists to verify, and their ruling is that a tripped train may be driven out of the brake it
+            // applied - including before it has come to a stand.
+            //
+            // Unconditional rather than "only while tripped": any lever move resets the clock, so a driver who
+            // keeps working the handle is never punished for it.
+            state.confirmWaiting = 0d;
+            if (state.vigilanceTripped) {
+                state.clearTrip();
+                state.tripTicks = 0;
+            }
             // Cruise captures the speed it is to hold at the moment it is engaged, SIGNED.
             //
             // Signed, not a magnitude: cruise holds speed in the direction its notch drives, so

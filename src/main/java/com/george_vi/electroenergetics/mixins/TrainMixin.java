@@ -447,8 +447,14 @@ public class TrainMixin implements ICEETrainExtension {
         //
         // The emergency brake is untouched by this: it holds the lever through emergencyHeldGear until the train
         // stands, and that rule is enforced where gear commands arrive.
-        boolean tripStillStopping = st.vigilanceTripped && Math.abs(self.speed) > 1e-4d;
-        TrainGear effectiveGear = tripStillStopping ? TrainGear.BRAKE : st.gear;
+        // NO override at all. The trip has already moved the lever to the brake; what the driver does with the
+        // lever afterwards is theirs, including during the stop it started. Their rule, in their words: a vigilance
+        // trip that can be driven out of is the whole point - the device's job ends when it has applied the brake,
+        // and a train nobody can move is a worse outcome than one they can.
+        //
+        // The emergency brake is the one that holds the lever, and that is enforced where gear commands arrive,
+        // not here - see TrainDriverState.emergencyHeldGear.
+        TrainGear effectiveGear = st.gear;
 
         // AUTOMATIC ARRIVAL: Create's navigation commands the speed, not the lever.
         //
