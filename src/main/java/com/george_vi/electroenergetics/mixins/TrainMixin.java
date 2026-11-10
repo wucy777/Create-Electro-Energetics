@@ -491,6 +491,30 @@ public class TrainMixin implements ICEETrainExtension {
         // than reverse the train - the mirror already carries "which way is forward".
         double cruiseCommand = st.cruiseSpeed;
 
+        // THE APPROACH CURVE, when Create's navigation is driving the stop.
+        //
+        // Navigation's own command collapses faster than the train can brake near the platform, and the operator
+        // reports the resulting lurch at the very end of every automatic stop - sharper than the service brake and
+        // even than the emergency brake, which is the signature of a target the train cannot honour rather than of
+        // a brake that is too strong. See TrainTractionModel.arrivalSpeedFor for the curve and why it is smooth.
+        //
+        // Only while autoArrive: a driver's own cruise is their setpoint and must not be second-guessed.
+        if (st.autoArrive && self.navigation != null && self.navigation.destination != null) {
+            double distanceLeft = self.navigation.distanceToDestination;
+            double brakeMs2 = TrainTractionModel.serviceBrakeDeceleration(
+                    Math.abs(RiderSeatGate.bptToMs(self.speed)));
+            double dt = RiderSeatGate.secondsPerTick();
+            double curved = TrainTractionModel.arrivalSpeedFor(distanceLeft,
+                    Math.abs(RiderSeatGate.bptToMs(self.speed)),
+                    st.lastArrivalTargetMs, brakeMs2, dt);
+            st.lastArrivalTargetMs = curved;
+            st.arrivalTargetMs = curved;
+            cruiseCommand = curved;
+        } else {
+            st.lastArrivalTargetMs = Double.NaN;
+            st.arrivalTargetMs = Double.NaN;
+        }
+
         // Release the station before commanding traction.
         //
         // Create does this inside approachTargetSpeed (if (manualTick)
@@ -660,8 +684,23 @@ public class TrainMixin implements ICEETrainExtension {
         if (com.george_vi.electroenergetics.content.railway_electrification.RiderSeatGate.overspeedTickRate()) {
             double cap = com.george_vi.electroenergetics.content.railway_electrification.RiderSeatGate
                     .createCeilingBpt();
-            if (Math.abs(self.speed) > cap)
+            if (Math.abs(self.speed) > cap) {
                 self.speed = Math.copySign(cap, self.speed);
+                // AND THE LEVER GOES TO CRUISE, so the train HOLDS the cap instead of being repeatedly clamped.
+                //
+                // Without this the cap is a wall the law drives into every tick: accelerate pushes past it, the
+                // clamp pulls back, and the driver watches a train whose lever says accelerate and whose speed
+                // does not move - the exact report. Cruise is the position that already means "hold this speed",
+                // so the handover is the honest description of what the train is now doing, and it is what an
+                // electric train does at its own ceiling anyway.
+                //
+                // Only from a traction position: braking, coasting and reversing are all legitimate reasons to be
+                // over the cap for a moment, and stealing the driver's brake would be worse than the problem.
+                if (st.gear == TrainGear.ACCELERATE || st.gear == TrainGear.REVERSE) {
+                    st.gear = TrainGear.CRUISE;
+                    st.captureCruiseSetpoint(Math.copySign(cap * 20d, self.speed));
+                }
+            }
         }
 
         // The emergency penalty caps the ACTUAL speed, not just Create's target: the gear
