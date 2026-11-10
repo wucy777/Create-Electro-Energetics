@@ -686,19 +686,20 @@ public class TrainMixin implements ICEETrainExtension {
                     .createCeilingBpt();
             if (Math.abs(self.speed) > cap) {
                 self.speed = Math.copySign(cap, self.speed);
-                // AND TRACTION IS CUT, so the train cannot keep pushing against the cap.
+                // AND THE LEVER MOVES TO CRUISE, holding the cap.
                 //
-                // The rule the operator asked for, in their words: while the cap holds, ACCELERATE is forbidden -
-                // cut the drive - but the brake, the coast position and reverse all stay available. Only the one
-                // position that would keep feeding power into a train that is already at its limit is taken away.
+                // The operator's rule: the cap cuts accelerate and hands over to the cruise position, which holds
+                // the speed. Accelerate is the one position that would keep pushing past the limit, so it is the
+                // one that is taken away - the brake, coast and reverse all stay available, and nothing here
+                // blocks a lever move.
                 //
-                // COAST rather than CRUISE: cruise would HOLD the speed with traction, which is still feeding
-                // power into a train that is at its cap. Coast is the position that already means "no drive",
-                // which is exactly what cutting traction is, and it leaves the driver free to select the brake or
-                // reverse afterwards because nothing here blocks a lever move - it only takes the one position
-                // that is now meaningless.
-                if (st.gear == TrainGear.ACCELERATE)
-                    st.gear = TrainGear.COAST;
+                // The setpoint is captured at the cap itself, not at the current speed: the clamp has just written
+                // exactly the cap, so the two agree on this tick, and capturing the cap directly means the hold
+                // does not inherit a rounding difference from the tick before.
+                if (st.gear == TrainGear.ACCELERATE) {
+                    st.gear = TrainGear.CRUISE;
+                    st.captureCruiseSetpoint(Math.copySign(cap * 20d, self.speed));
+                }
             }
         }
 
