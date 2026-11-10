@@ -193,6 +193,24 @@ public record SetTrainGearPacket(UUID trainId, int gearOrdinal, boolean confirm,
 
         if (gearOrdinal >= 0 && gearOrdinal < TrainGear.values().length) {
             TrainGear gear = TrainGear.values()[gearOrdinal];
+
+            // WHILE THE TICK-RATE CAP IS IN FORCE, ACCELERATE IS REFUSED.
+            //
+            // The operator's rule: cut the drive, do not take the panel. Brake, coast and reverse all remain
+            // selectable - a driver may still stop, still roll, still back up - and only the position that would
+            // feed power into a train already at its limit is unavailable.
+            //
+            // Refused here rather than silently overridden in the gear law, because a lever that moves and then
+            // does nothing is the thing that reads as broken. The client greys the position out from the same
+            // test, so a well-behaved client never sends this at all; this is the authority behind it.
+            if (gear == TrainGear.ACCELERATE
+                    && com.george_vi.electroenergetics.content.railway_electrification.RiderSeatGate
+                            .overspeedTickRate()
+                    && Math.abs(com.george_vi.electroenergetics.content.railway_electrification.RiderSeatGate
+                            .bptToMs(train.speed))
+                            >= com.george_vi.electroenergetics.content.railway_electrification.RiderSeatGate
+                                    .createCeilingBps() - 1.0d)
+                return;
             // A position that commands traction cannot be selected without a supply: it would
             // compute zero effort and leave the driver holding a handle that says "accelerate"
             // while the train coasts. The brake and the power-off position are always available -

@@ -686,20 +686,19 @@ public class TrainMixin implements ICEETrainExtension {
                     .createCeilingBpt();
             if (Math.abs(self.speed) > cap) {
                 self.speed = Math.copySign(cap, self.speed);
-                // AND THE LEVER GOES TO CRUISE, so the train HOLDS the cap instead of being repeatedly clamped.
+                // AND TRACTION IS CUT, so the train cannot keep pushing against the cap.
                 //
-                // Without this the cap is a wall the law drives into every tick: accelerate pushes past it, the
-                // clamp pulls back, and the driver watches a train whose lever says accelerate and whose speed
-                // does not move - the exact report. Cruise is the position that already means "hold this speed",
-                // so the handover is the honest description of what the train is now doing, and it is what an
-                // electric train does at its own ceiling anyway.
+                // The rule the operator asked for, in their words: while the cap holds, ACCELERATE is forbidden -
+                // cut the drive - but the brake, the coast position and reverse all stay available. Only the one
+                // position that would keep feeding power into a train that is already at its limit is taken away.
                 //
-                // Only from a traction position: braking, coasting and reversing are all legitimate reasons to be
-                // over the cap for a moment, and stealing the driver's brake would be worse than the problem.
-                if (st.gear == TrainGear.ACCELERATE || st.gear == TrainGear.REVERSE) {
-                    st.gear = TrainGear.CRUISE;
-                    st.captureCruiseSetpoint(Math.copySign(cap * 20d, self.speed));
-                }
+                // COAST rather than CRUISE: cruise would HOLD the speed with traction, which is still feeding
+                // power into a train that is at its cap. Coast is the position that already means "no drive",
+                // which is exactly what cutting traction is, and it leaves the driver free to select the brake or
+                // reverse afterwards because nothing here blocks a lever move - it only takes the one position
+                // that is now meaningless.
+                if (st.gear == TrainGear.ACCELERATE)
+                    st.gear = TrainGear.COAST;
             }
         }
 
