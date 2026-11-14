@@ -391,6 +391,25 @@ public class TrainMixin implements ICEETrainExtension {
      * an unpowered one, or a scheduled one with a destination - falls through to
      * Create unchanged.
      */
+    /**
+     * During a hold-space arrival the gear law owns the train's speed and follows the arrival brake's
+     * physically bounded curve. Create's own space-approach would answer the same command with its
+     * unbounded integration - its target collapses to zero at the end of the stop and the lerp pulls the
+     * speed down with it, a deceleration far past the service brake at the last moment, which is the
+     * felt spike. So while the arrival runs, this method is a no-op: the law writes, Create watches.
+     *
+     * <p>Everything else passes through untouched: scheduled trains, the W/S path, and any caller this
+     * mod does not own keep Create's approach exactly as it was.
+     */
+    @WrapMethod(method = "approachTargetSpeed")
+    private void electroEnergetics$ownArrivalApproach(float targetSpeed, Operation<Void> original) {
+        Train self = (Train) (Object) this;
+        ElectricTrainData data = electroenergetics$electricTrainData;
+        if (data.underElectricControl() && data.driver != null && data.driver.autoArrive)
+            return;
+        original.call(targetSpeed);
+    }
+
     @WrapMethod(method = "tickPassiveSlowdown")
     private void electroEnergetics$tickPassiveSlowdown(Operation<Void> original) {
         Train self = (Train) (Object) this;
@@ -714,10 +733,20 @@ public class TrainMixin implements ICEETrainExtension {
                 // The setpoint is captured at the cap itself, not at the current speed: the clamp has just written
                 // exactly the cap, so the two agree on this tick, and capturing the cap directly means the hold
                 // does not inherit a rounding difference from the tick before.
-                if (st.gear == TrainGear.ACCELERATE) {
+                //
+                // CRUISE IS RE-CAPTURED TOO, and in the CAB's frame. Both matter:
+                //  * A lever already in cruise holds the setpoint it captured BEFORE the rate changed - 100 m/s
+                //    from the design-ceiling handover. Clamping the speed to 28 while the setpoint still says 100
+                //    meant the hold branch saw 28 far below its target and pulled the train right back up the
+                //    moment the rate returned to twenty - reported as "cruise accelerates by itself".
+                //  * The sign comes from the CAB-frame speed the law drives with, not from the world speed: an
+                //    inverted cab reads the same world motion as a negative cab-frame speed, and a setpoint with
+                //    the world's sign is a direction mismatch the cruise branch brakes away - reported as a
+                //    fight around zero.
+                if (st.gear == TrainGear.ACCELERATE)
                     st.gear = TrainGear.CRUISE;
-                    st.captureCruiseSetpoint(Math.copySign(cap * 20d, self.speed));
-                }
+                if (st.gear == TrainGear.CRUISE)
+                    st.captureCruiseSetpoint(Math.copySign(cap * 20d, signedSpeedMs));
             }
         }
 
