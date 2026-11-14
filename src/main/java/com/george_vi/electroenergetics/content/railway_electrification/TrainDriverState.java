@@ -362,24 +362,6 @@ public class TrainDriverState {
      */
     public boolean autoArrive = false;
 
-    /**
-     * The speed the arrival curve is currently allowed to command [m/s], or NaN when no arrival is running.
-     *
-     * <p>Set by the gear law each tick from the remaining distance and the brake the consist actually has, so the
-     * approach is a curve rather than a sequence of corrections. See {@code TrainMixin}'s arrival branch.
-     */
-    public double arrivalTargetMs = Double.NaN;
-
-    /**
-     * The last commanded arrival speed, so the next one can be checked against the deceleration limit [m/s].
-     *
-     * <p>This is what makes the curve smooth rather than merely bounded: a target that would require more braking
-     * than the train can produce is refused, and the previous one is held instead. Without it the target is a
-     * function of distance alone, which is correct in the ideal case and produces a step at the moment the remaining
-     * distance is small enough for the square root to collapse.
-     */
-    public double lastArrivalTargetMs = Double.NaN;
-
     /** The lever position to restore if the driver cancels before arriving. */
     public TrainGear autoArriveGear = TrainGear.BRAKE;
 

@@ -37,8 +37,24 @@ public class ElectricTrainSounds {
             if (soundBehaviour == null)
                 sounds.put(carriagePair, soundBehaviour = e.getValue().type().soundBehaviour.get());
 
-            soundBehaviour.trainSpeed = e.getValue().speed();
-            soundBehaviour.acceleration = e.getValue().acceleration();
+            // The sound engine was written against CREATE's speed range (top speed 1.5 Blocks/tick):
+            // the phase table, pitch lerps and wind curves all normalize against it. An electric consist
+            // runs to its own design ceiling (up to 5 Blocks/tick), and feeding that raw put every curve
+            // outside its domain - the phase table froze at P1 past ~19 m/s while the wind and ASYNC
+            // branches extrapolated past their stoppers, which is the "sound varies abnormally with
+            // speed" report. Scaling the INPUT to the engine's design domain restores the original
+            // author's curves across the whole electric range: the phases now traverse 0 -> top speed
+            // exactly as the diagram in the phase enum says, and every sound type (Modern/DC/IGBT)
+            // inherits the fix because they all consume these two fields.
+            float createTopBpt = com.simibubi.create.infrastructure.config.AllConfigs.server()
+                    .trains.poweredTrainTopSpeed.getF() / 20f;
+            float electricTopBpt = com.george_vi.electroenergetics.content.railway_electrification.TrainHudData
+                    .maxSpeedFor(trainID) / 20f;
+            float soundScale = 1f;
+            if (electricTopBpt > createTopBpt)
+                soundScale = createTopBpt / electricTopBpt;
+            soundBehaviour.trainSpeed = e.getValue().speed() * soundScale;
+            soundBehaviour.acceleration = e.getValue().acceleration() * soundScale;
             soundBehaviour.pos = null;
             if (train.carriages.size() >= Math.abs(carriageID)) {
                 Carriage.DimensionalCarriageEntity dimensional = train.carriages.get(Math.abs(carriageID) - 1).getDimensional(Minecraft.getInstance().level);

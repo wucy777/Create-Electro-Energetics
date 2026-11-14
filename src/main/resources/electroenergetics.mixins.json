@@ -27,6 +27,7 @@
     "BlockStateBaseMixin",
     "CarriageContraptionEntityMixin",
     "CarriageContraptionMixin",
+    "CarriageChunkProbeMixin",
     "CarriageMixin",
     "ComparatorBlockMixin",
     "ControlsInputGateMixin",

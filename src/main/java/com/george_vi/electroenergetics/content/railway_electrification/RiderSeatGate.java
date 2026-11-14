@@ -202,6 +202,11 @@ public final class RiderSeatGate {
      * {@code Level.tickRateManager()} - which IS mapped here, because NeoForge patches it into {@code Level} as a
      * named method - and asks it for the commanded rate.
      */
+    /** The resolved {@code tickrate()} accessor, found once - {@code getMethod} is a search, and this
+     *  sits on the {@code maxSpeed()} hot path, which runs for every train every tick. */
+    private static volatile java.lang.reflect.Method tickrateAccessor = null;
+    private static boolean tickrateResolved = false;
+
     public static boolean overspeedTickRate() {
         try {
             Object server = net.neoforged.neoforge.server.ServerLifecycleHooks.getCurrentServer();
@@ -216,7 +221,13 @@ public final class RiderSeatGate {
             }
             if (manager == null)
                 return false;
-            Object rate = manager.getClass().getMethod("tickrate").invoke(manager);
+            if (!tickrateResolved) {
+                tickrateAccessor = manager.getClass().getMethod("tickrate");
+                tickrateResolved = true;
+            }
+            if (tickrateAccessor == null)
+                return false;
+            Object rate = tickrateAccessor.invoke(manager);
             if (rate instanceof Number number)
                 return Math.abs(number.floatValue() - 20f) > 0.2f;
         } catch (Throwable ignored) {
@@ -575,7 +586,6 @@ public final class RiderSeatGate {
     public static void forceDismount(net.minecraft.world.entity.player.Player player) {
         if (player == null || !player.isPassenger())
             return;
-        if (true)
         FORCED_DISMOUNTS.add(player.getUUID());
         try {
             player.stopRiding();
@@ -1161,7 +1171,6 @@ public final class RiderSeatGate {
      * @return how many players this seated (0 or 1)
      */
     public static int seatClaimedDriver(Train train, Set<SeatRef> held) {
-        if (true)
         if (held.isEmpty()) {
             return 0;
         }
@@ -1238,7 +1247,6 @@ public final class RiderSeatGate {
             if (occupant != null && !occupant.equals(claimed) && !evict(entity, contraption, occupant))
                 continue;
 
-            if (true)
         SEATING.add(driver.getUUID());
         try {
             entity.addSittingPassenger(driver, seat.seatIndex());
@@ -1303,7 +1311,6 @@ public final class RiderSeatGate {
         if (occupant != null) {
             FORCED_DISMOUNTS.add(occupantId);
             try {
-                if (true)
                 occupant.stopRiding();
             } finally {
                 FORCED_DISMOUNTS.remove(occupantId);
@@ -1545,53 +1552,31 @@ public final class RiderSeatGate {
             Candidate best = null;
             double bestDistance = Double.MAX_VALUE;
 
-            // The seat the player's own client said it was standing nearest to, if that seat is still free on
-            // the carriage it named. This is the whole point of the report: the client knows where it drew the
-            // player, the server only knows where the movement packets last put them.
+            // The client's report is a POSITION HINT, not a seat verdict. The client knows where it
+            // drew the player - the server only knows where the movement packets last put them - so the
+            // point the search measures from is the client's when it has reported. But the seat itself
+            // is chosen HERE, under the operator's ordering rule (nearest free seat on the player's own
+            // carriage first; other carriages only when it has nothing left) and against the SERVER's
+            // free list. Honouring the reported seat verbatim let a stale report - one computed while
+            // the player stood elsewhere, or against a client seat map that had since changed - hand
+            // out a seat that was visibly not the nearest free one.
+            Vec3 refPoint = player.position();
+            int ownCarriage = carriageIndexOf(train, player);
             SeatIntentStore.Intent intent = SeatIntentStore.get(player.getUUID());
-            boolean hasIntent = intent != null && intent.trainId().equals(train.id);
-            if (hasIntent) {
-                for (Candidate candidate : free) {
-                    if (candidate.carriage() == intent.carriageIndex()
-                            && candidate.index() == intent.seatIndex()) {
-                        best = candidate;
-                        break;
-                    }
-                }
-            }
-
-            // The requested seat has just gone: resolve the substitute HERE, from the point the client
-            // reported. Asking that client for a second report would put an extra round trip inside the one
-            // path the owner asked to keep local - every contested seating, not just the uncontested ones.
-            if (best == null && hasIntent) {
+            if (intent != null && intent.trainId().equals(train.id)) {
                 Vec3 clientPoint = intentWorld(train, intent);
                 if (clientPoint != null) {
+                    refPoint = clientPoint;
                     int standingCarriage = intent.standingCarriageIndex() >= 0
                             ? intent.standingCarriageIndex() : intent.carriageIndex();
-                    for (int pass = 0; pass < 2 && best == null; pass++) {
-                        for (Candidate candidate : free) {
-                            // Same carriage first; other carriages only when it has nothing left.
-                            if (pass == 0 && candidate.carriage() != standingCarriage)
-                                continue;
-                            if (pass == 1 && candidate.carriage() == standingCarriage)
-                                continue;
-                            double d = candidate.entity().toLocalVector(clientPoint, 1.0f)
-                                    .distanceToSqr(Vec3.atCenterOf(candidate.local()));
-                            if (best == null
-                                    || d < bestDistance - 1.0e-9d
-                                    || (Math.abs(d - bestDistance) <= 1.0e-9d
-                                        && candidate.local().compareTo(best.local()) < 0)) {
-                                best = candidate;
-                                bestDistance = d;
-                            }
-                        }
-                    }
+                    if (standingCarriage >= 0)
+                        ownCarriage = standingCarriage;
                 }
             }
 
             // No report at all yet (a player who has only just boarded): ask once and give a silent client
             // the grace window. This is the only case that costs a round trip.
-            if (best == null && !hasIntent) {
+            if (intent == null || !intent.trainId().equals(train.id)) {
                 Long requested = SeatIntentStore.requestedTick(player.getUUID());
                 if (requested == null) {
                     SeatIntentStore.markRequested(player.getUUID(), serverTick);
@@ -1604,34 +1589,25 @@ public final class RiderSeatGate {
                     continue;
             }
 
-            int ownCarriage = RiderSeatGate.carriageIndexOf(train, player);
-            for (Candidate candidate : best == null ? free : java.util.List.<Candidate>of()) {
-                // Same carriage first (the operator's refinement): the nearest free seat on the
-                // carriage the player stands on beats a nearer-looking one across a coupling.
-                // Cross-carriage candidates are only considered when the own carriage has none.
-                if (ownCarriage >= 0 && candidate.carriage() != ownCarriage)
-                    continue;
-                // Compared in the carriage's own frame. Converting the seat to world coordinates and the
-                // player to world coordinates as well looked equivalent but was not: the transform is
-                // anchored on the contraption, so mixing the two put the seats in the wrong places and the
-                // "nearest" seat was whichever arithmetic error won. In local space both sides share one
-                // origin and the answer is the seat that is actually closest to the player.
-                Vec3 localPlayer = candidate.entity().toLocalVector(player.position(), 1.0f);
-                double d = Vec3.atCenterOf(candidate.local()).distanceToSqr(localPlayer);
-                if (best == null
-                        || d < bestDistance - 1.0e-9d
-                        || (Math.abs(d - bestDistance) <= 1.0e-9d
-                            && candidate.local().compareTo(best.local()) < 0)) {
-                    best = candidate;
-                    bestDistance = d;
-                }
-            }
-            if (best == null && ownCarriage >= 0) {
-                // Own carriage full: nearest free seat across the other carriages.
+            // Two passes: same carriage first (the operator's refinement); other carriages only when it
+            // has nothing left. Compared in the carriage's own frame: converting the seat to world
+            // coordinates and the player to world coordinates as well looked equivalent but was not - the
+            // transform is anchored on the contraption, so mixing the two put the seats in the wrong
+            // places and the "nearest" seat was whichever arithmetic error won. In local space both sides
+            // share one origin and the answer is the seat that is actually closest.
+            for (int pass = 0; pass < 2 && best == null; pass++) {
+                boolean ownPass = pass == 0 && ownCarriage >= 0;
                 for (Candidate candidate : free) {
-                    double d = candidate.entity().toLocalVector(player.position(), 1.0f)
-                            .distanceToSqr(Vec3.atCenterOf(candidate.local()));
-                    if (best == null || d < bestDistance - 1.0e-9d) {
+                    if (ownPass && candidate.carriage() != ownCarriage)
+                        continue;
+                    if (!ownPass && ownCarriage >= 0 && candidate.carriage() == ownCarriage)
+                        continue;
+                    Vec3 localRef = candidate.entity().toLocalVector(refPoint, 1.0f);
+                    double d = Vec3.atCenterOf(candidate.local()).distanceToSqr(localRef);
+                    if (best == null
+                            || d < bestDistance - 1.0e-9d
+                            || (Math.abs(d - bestDistance) <= 1.0e-9d
+                                && candidate.local().compareTo(best.local()) < 0)) {
                         best = candidate;
                         bestDistance = d;
                     }

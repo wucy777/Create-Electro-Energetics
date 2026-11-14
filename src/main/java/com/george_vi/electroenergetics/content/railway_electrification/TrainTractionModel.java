@@ -510,57 +510,6 @@ public final class TrainTractionModel {
     }
 
     /** Total service braking rate at this speed [m/s²]: friction plus electric. */
-    /**
-     * A physically achievable approach speed for the distance left, in metres per second.
-     *
-     * <h2>Why this exists</h2>
-     *
-     * <p>Create's arrival commands a target speed each tick from the distance remaining, and near the platform that
-     * command collapses faster than any train can brake: the operator reports a lurch at the very end of every
-     * automatic stop, sharper than the service brake and even than the emergency brake. A target that steps down
-     * faster than {@code a_max} allows is not a braking curve, it is a request the train cannot honour - and what
-     * the train does instead is apply full brake until it catches up, which is the lurch.
-     *
-     * <h2>The curve</h2>
-     *
-     * <p>{@code v = sqrt(2 a d)} for the remaining distance {@code d}, which is the exact constant-deceleration
-     * profile: it is the fastest approach that can still stop in the distance left at deceleration {@code a}, and
-     * it is smooth in {@code d} by construction - no step, because the square root has no breakpoint.
-     *
-     * <p>{@code a} is the consist's own service brake, so the profile asks for exactly what the train can deliver
-     * and no more. A margin is subtracted rather than added: the profile should be reachable, not aspirational.
-     *
-     * <h2>Why the result is also rate-limited against the previous command</h2>
-     *
-     * <p>{@code sqrt(2 a d)} is exact only if the train is ON the profile. When it is above it - approaching too
-     * fast, or entering the arrival late - the profile asks for a speed far below the current one, and obeying that
-     * instantly is the same lurch in a different disguise. So the command may only fall as fast as the brake can
-     * actually take the train down: {@code v_prev - a dt}. Above the profile the train therefore decelerates at
-     * exactly its limit, which is the best it can do, and below the profile the command rises to meet it.
-     *
-     * <p>The result is a v-t curve with no discontinuity in slope, an a-t curve that never exceeds the service
-     * brake, and an x-t curve that lands on the platform because it is the integral of the other two.
-     *
-     * @param distanceLeft  metres to the stopping point, negative or zero when the train is there
-     * @param speedMs       current speed, used for the rate limit
-     * @param previousMs    last tick's command, or NaN on the first tick of an arrival
-     * @param brakeMs2      the deceleration the consist can hold
-     * @param dt            seconds this tick
-     */
-    public static double arrivalSpeedFor(double distanceLeft, double speedMs, double previousMs,
-                                         double brakeMs2, double dt) {
-        if (distanceLeft <= 0d)
-            return 0d;
-        // A margin, not a bonus: the profile is what the train can just achieve, so ask for a little less.
-        double usable = Math.max(0.05d, brakeMs2 * 0.85d);
-        double profile = Math.sqrt(2d * usable * distanceLeft);
-        if (Double.isNaN(previousMs))
-            return Math.min(profile, Math.max(0d, speedMs));
-        // The command may not fall faster than the brake can deliver, and may not rise past the profile.
-        double lowestReachable = Math.max(0d, previousMs - Math.max(0.05d, brakeMs2) * dt);
-        return Math.min(profile, Math.max(lowestReachable, 0d));
-    }
-
     public static double serviceBrakeDeceleration(double speedMs) {
         return frictionBrake() + dynamicBrake() * dynamicBrakeFade(speedMs);
     }

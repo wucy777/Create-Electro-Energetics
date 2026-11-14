@@ -416,8 +416,12 @@ public class TrainMixin implements ICEETrainExtension {
         // driver would recognise. The vigilance clock still runs while unmanned and
         // still brakes the train at TRIP_TICKS, so this defers the stop, it does not
         // remove it.
-        if (data.underElectricControl() && data.driver.underGearControl()
-                && !data.driver.autoArrive) {
+        // autoArrive is NOT excluded here: the law owns the speed during a hold-space arrival too.
+        // Create's own approach commands a target that collapses faster than any train can brake, and
+        // its integration answers that with a deceleration spike at the very end of the stop - felt
+        // well past the service brake, past the emergency brake. See the arrival block in applyGearLaw
+        // for the physically bounded curve that replaces it.
+        if (data.underElectricControl() && data.driver.underGearControl()) {
             applyGearLaw(self, data);
             return;
         }
@@ -467,7 +471,12 @@ public class TrainMixin implements ICEETrainExtension {
         //
         // The emergency brake is the one that holds the lever, and that is enforced where gear commands arrive,
         // not here - see TrainDriverState.emergencyHeldGear.
-        TrainGear effectiveGear = st.gear;
+        TrainGear effectiveGear = st.vigilanceTripped ? TrainGear.BRAKE : st.gear;
+        // The arrival drives through the coast term: drag and gravity are integrated by the switch as
+        // usual, and the arrival brake below adds exactly what the profile demands - so a trip fired
+        // mid-approach does not fight the curve, and neither does the lever.
+        if (st.autoArrive)
+            effectiveGear = TrainGear.COAST;
 
         // AUTOMATIC ARRIVAL: Create's navigation commands the speed, not the lever.
         //
@@ -490,30 +499,6 @@ public class TrainMixin implements ICEETrainExtension {
         // negative magnitude into a mirror-symmetric law would cancel the mirror rather
         // than reverse the train - the mirror already carries "which way is forward".
         double cruiseCommand = st.cruiseSpeed;
-
-        // THE APPROACH CURVE, when Create's navigation is driving the stop.
-        //
-        // Navigation's own command collapses faster than the train can brake near the platform, and the operator
-        // reports the resulting lurch at the very end of every automatic stop - sharper than the service brake and
-        // even than the emergency brake, which is the signature of a target the train cannot honour rather than of
-        // a brake that is too strong. See TrainTractionModel.arrivalSpeedFor for the curve and why it is smooth.
-        //
-        // Only while autoArrive: a driver's own cruise is their setpoint and must not be second-guessed.
-        if (st.autoArrive && self.navigation != null && self.navigation.destination != null) {
-            double distanceLeft = self.navigation.distanceToDestination;
-            double brakeMs2 = TrainTractionModel.serviceBrakeDeceleration(
-                    Math.abs(RiderSeatGate.bptToMs(self.speed)));
-            double dt = RiderSeatGate.secondsPerTick();
-            double curved = TrainTractionModel.arrivalSpeedFor(distanceLeft,
-                    Math.abs(RiderSeatGate.bptToMs(self.speed)),
-                    st.lastArrivalTargetMs, brakeMs2, dt);
-            st.lastArrivalTargetMs = curved;
-            st.arrivalTargetMs = curved;
-            cruiseCommand = curved;
-        } else {
-            st.lastArrivalTargetMs = Double.NaN;
-            st.arrivalTargetMs = Double.NaN;
-        }
 
         // Release the station before commanding traction.
         //
@@ -575,9 +560,42 @@ public class TrainMixin implements ICEETrainExtension {
                 // emergency brake would not have applied until a tick later.
                 st.emergencyArmed, data.gearStep);
 
-        // Back out of the mirror: the law worked in the cab's frame, and the speed it
-        // writes is the train's own.
+        // Back out of the mirror: the law worked in the cab's frame, and the speed it writes is the train's own.
         a *= mirror;
+
+        // THE ARRIVAL BRAKE. Create's space-approach commands a target that collapses faster than any
+        // train can brake, and its integration answers that with a deceleration spike at the very end
+        // of the stop - felt well past the service brake, past the emergency brake. So during an
+        // arrival this law owns the speed and follows the physically achievable curve instead:
+        //
+        //   v^2 = 2 a d        (the constant-deceleration braking profile over the distance left)
+        //
+        // Coasting while v^2 < 2 a d - the curve has not caught up to the train yet - and braking at
+        // exactly what the curve demands at this point, v^2/(2d), once it has. That demand IS the
+        // profile's own deceleration: constant while the train rides the curve, so the a-t trace is a
+        // flat line at the service brake, the v-t trace a straight line to zero, and the x-t trace the
+        // parabola that lands on the platform. No moment of the stop exceeds the configured friction
+        // brake - far less the emergency brake - because the excess is not redistributed from one
+        // moment to another, it is never incurred: the whole approach decelerates at one rate instead
+        // of spiking at the end. Drag and gravity are already inside `a` (the coast term), so the
+        // brake only adds the difference between the profile and what passive physics already gives.
+        // Clamped to the friction brake: on a steep downhill the curve can ask for more than the
+        // wheels have, and the honest answer is the service brake plus an overshoot, not a fantasy
+        // deceleration. The 0.9 margin keeps the demand inside what the blend actually delivers.
+        if (st.autoArrive && self.navigation != null && self.navigation.destination != null) {
+            double d = Math.max(0d, self.navigation.distanceToDestination);
+            double vMs = Math.abs(self.speed) * 20d;
+            double massEff = (1d + CEEConfigs.server().resistanceValues.electricTrainRotatingMassFactor.get())
+                    * TrainTractionModel.totalMass(carriages);
+            double aProfile = vMs * vMs / (2d * Math.max(d, 0.5d));
+            // Grade along the direction of travel: positive is climbing, so gravity is already
+            // decelerating the train by this much inside `a`, and the brake covers only the rest.
+            double gradeTravel = data.trackGrade;
+            double aPassive = (TrainTractionModel.runningResistance(vMs, carriages)
+                    + TrainTractionModel.gradeResistance(gradeTravel, carriages)) / massEff;
+            double aBrake = Math.max(0d, Math.min(aProfile - aPassive, TrainTractionModel.frictionBrake()));
+            a -= Math.signum(self.speed) * aBrake;
+        }
 
         // m/s² -> Blocks/Tick². 1 block = 1 m, so only the tick conversion is needed.
         double next = self.speed + a / RiderSeatGate.accelerationDivisor();
