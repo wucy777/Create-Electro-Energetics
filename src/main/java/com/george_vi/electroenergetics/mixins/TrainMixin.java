@@ -582,52 +582,52 @@ public class TrainMixin implements ICEETrainExtension {
         // Back out of the mirror: the law worked in the cab's frame, and the speed it writes is the train's own.
         a *= mirror;
 
-        // THE ARRIVAL BRAKE. Create's space-approach commands a target that collapses faster than any
-        // train can brake, and its integration answers that with a deceleration spike at the very end
-        // of the stop - felt well past the service brake, past the emergency brake. So during an
-        // arrival this law owns the speed and follows the physically achievable curve instead:
+        // THE ARRIVAL. This law owns the speed during a hold-space approach, and the profile is
+        // bounded by the friction brake: no moment of the approach may exceed it.
         //
-        //   v^2 = 2 a d        (the constant-deceleration braking profile over the distance left)
-        //
-        // Coasting while v^2 < 2 a d - the curve has not caught up to the train yet - and braking at
-        // exactly what the curve demands at this point, v^2/(2d), once it has. That demand IS the
-        // profile's own deceleration: constant while the train rides the curve, so the a-t trace is a
-        // flat line at the service brake, the v-t trace a straight line to zero, and the x-t trace the
-        // parabola that lands on the platform. No moment of the stop exceeds the configured friction
-        // brake - far less the emergency brake - because the excess is not redistributed from one
-        // moment to another, it is never incurred: the whole approach decelerates at one rate instead
-        // of spiking at the end. Drag and gravity are already inside `a` (the coast term), so the
-        // brake only adds the difference between the profile and what passive physics already gives.
-        // Clamped to the friction brake: on a steep downhill the curve can ask for more than the
-        // wheels have, and the honest answer is the service brake plus an overshoot, not a fantasy
-        // deceleration. The 0.9 margin keeps the demand inside what the blend actually delivers.
+        // CREATE'S TRIGGER: Navigation declares the arrival once the train is ~0.22 Blocks PAST the
+        // destination reference (distanceToDestination + 0.25 <= 0.03125). Two failure modes this
+        // controller eliminates:
+        //  * a curve that stops the train AT d = 0 never crosses that trigger - the arrival never
+        //    completes, and the restored lever drove the train back into the snap at whatever speed
+        //    remained (the reported 28 km/h -> 0);
+        //  * a train that enters the approach ABOVE the braking curve (space held late, or the
+        //    station closer than the braking distance) cannot follow the curve - the brake saturates
+        //    and Create's snap fired mid-motion at 75 km/h.
+        // The controller brakes along the curve while it is followable, brakes to a stand when it is
+        // not (the honest overshoot - a real consist stops past the platform and backs in), and
+        // creeps the last fraction of a Block into the trigger so the arrival completes at a speed
+        // where Create's snap cannot be felt.
         if (st.autoArrive && self.navigation != null && self.navigation.destination != null) {
-            // The stop point is CREATE's arrival threshold: Navigation declares the arrival when
-            // distanceToDestination + 0.25 <= 0.03125, i.e. ~0.22 Blocks PAST the destination
-            // reference. A curve that stops the train at d = 0 therefore never reaches the trigger -
-            // the arrival never completes on the curve alone, and whatever restores the lever
-            // afterwards drives the train back into Create's snap at whatever speed remains.
-            // Targeting the threshold itself makes the train cross it at crawl speed, where the
-            // arrival's own speed = 0 correction is a centimeter-level event instead of a lurch.
-            double dEff = Math.max(0d, self.navigation.distanceToDestination + 0.25d);
+            double dRaw = self.navigation.distanceToDestination;
+            double dErr = dRaw + 0.21875d;                       // the signed distance to CREATE's arrival trigger
             double vMs = Math.abs(self.speed) * 20d;
+            double aMax = TrainTractionModel.frictionBrake();
+            double aUsable = aMax * 0.9d;
             double massEff = (1d + CEEConfigs.server().resistanceValues.electricTrainRotatingMassFactor.get())
                     * TrainTractionModel.totalMass(carriages);
-            double aProfile = vMs * vMs / (2d * Math.max(dEff, 0.05d));
-            // Grade along the direction of travel: positive is climbing, so gravity is already
-            // decelerating the train by this much inside `a`, and the brake covers only the rest.
             double gradeTravel = data.trackGrade;
             double aPassive = (TrainTractionModel.runningResistance(vMs, carriages)
                     + TrainTractionModel.gradeResistance(gradeTravel, carriages)) / massEff;
-            double aBrake = Math.max(0d, Math.min(aProfile - aPassive, TrainTractionModel.frictionBrake()));
+            // The travel direction toward the trigger, remembered while the train still moves - the
+            // creep needs it when the train has come to rest short of (or past) the trigger.
+            if (vMs > 0.05d)
+                st.arrivalTravelDir = (int) Math.signum(self.speed);
+            boolean toward = Math.signum(self.speed) == Math.signum(dErr) && Math.abs(dErr) > 0.25d;
+            double aBrake = 0d;
+            double aCreep = 0d;
+            if (Math.abs(dErr) <= 0.25d) {
+                // AT the trigger: the arrival fires on its own at crawl speed; nothing to add.
+            } else if (toward && vMs * vMs > 2d * aUsable * Math.abs(dErr)) {
+                // Above the braking curve: brake at the curve's demand, clamped to the service brake.
+                double demand = vMs * vMs / (2d * Math.max(Math.abs(dErr), 0.3d));
+                aBrake = Math.max(0d, Math.min(demand - aPassive, aMax));
+            } else if (vMs <= 0.5d && Math.abs(dErr) > 0.25d) {
+                // Crawling short of (or past) the trigger: creep toward it at <= 0.3 m/s^2.
+                aCreep = Math.min(0.3d, data.availableAcceleration * 20d);
+            }
             a -= Math.signum(self.speed) * aBrake;
-            // THE CREEP. The profile's tail approaches the threshold asymptotically (v -> 0 as the
-            // distance -> the trigger), and a train stopped a fraction of a Block short never crosses
-            // it. Below crawl speed, gentle traction pushes the last fraction of a Block so the
-            // arrival completes at a speed where the snap cannot be felt.
-            if (vMs < 0.4d && dEff > 0.02d)
-                a += Math.signum(self.speed) * Math.min(0.3d,
-                        data.availableAcceleration * 20d);
+            a += Math.signum(dErr) * st.arrivalTravelDir * aCreep;
         }
 
         // m/s² -> Blocks/Tick². 1 block = 1 m, so only the tick conversion is needed.

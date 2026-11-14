@@ -366,6 +366,14 @@ public class TrainDriverState {
     public TrainGear autoArriveGear = TrainGear.BRAKE;
 
     /**
+     * The world-frame direction (+1 / -1) the train was traveling during the arrival approach,
+     * remembered while it still moves. The terminal creep (the last fraction of a Block into the
+     * arrival trigger, or the back-up after an overshoot) needs a traction direction when the
+     * train has come to rest - at rest, {@code Math.signum(speed)} is zero and says nothing.
+     */
+    public int arrivalTravelDir = 0;
+
+    /**
      * Ticks since the controls last reported the space key held.
      *
      * <p>A countdown rather than a flag because Create stops calling
