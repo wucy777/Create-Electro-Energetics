@@ -56,7 +56,13 @@ public class DriverLoadoutGuardMixin {
             Train train = carriage.train;
             if (!DriverAuthority.appliesTo(train))
                 return;
-            if (DriverAuthority.isClaimOwner(train, player.getUUID()))
+            // EVERY player is protected, not only the claim owner. The trim exists for the curve-segment
+            // bookkeeping (which graph edge a seat's local coordinate belongs to), and a dropped seat means
+            // the seating pass starts over: the passengers stand again, the overload verdict arms, the lever
+            // cuts to the brake, and the re-seating happens without the client's report - the assigned seats
+            // stop being the visually nearest ones. Seats are fixed Blocks on the carriage; a rider staying
+            // in one is visually correct at every segment crossing. Mobs and other riders keep the trim.
+            if (player instanceof ServerPlayer)
                 ci.cancel();
         } catch (Throwable ignored) {
             // A failed guard must never be the thing that removes somebody.

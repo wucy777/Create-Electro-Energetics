@@ -1565,7 +1565,16 @@ public final class RiderSeatGate {
             SeatIntentStore.Intent intent = SeatIntentStore.get(player.getUUID());
             if (intent != null && intent.trainId().equals(train.id)) {
                 Vec3 clientPoint = intentWorld(train, intent);
-                if (clientPoint != null) {
+                // STALENESS GUARD. The report is from where the player WAS when their client sent it.
+                // The point travels with the carriage (it is carriage-local), so it stays valid while
+                // the player stands still or walks a little - but a player who has walked well clear of
+                // the reported spot leaves the report pointing at a seat that is no longer theirs to
+                // claim, and seating them there is the "not the visually nearest one" complaint. Both
+                // figures live on this server and track the train, so the distance between them is the
+                // walked distance plus conversion noise - nothing else.
+                boolean fresh = clientPoint == null
+                        || clientPoint.distanceTo(player.position()) <= 6.0d;
+                if (clientPoint != null && fresh) {
                     refPoint = clientPoint;
                     int standingCarriage = intent.standingCarriageIndex() >= 0
                             ? intent.standingCarriageIndex() : intent.carriageIndex();

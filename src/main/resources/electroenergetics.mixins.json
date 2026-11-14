@@ -7,6 +7,7 @@
   "compatibilityLevel": "JAVA_21",
   "plugin": "com.george_vi.electroenergetics.CEEMixinPlugin",
   "client": [
+    "RiderRenderGlueMixin",
     "CarriageSoundsMixin",
     "ControlsHandlerGateMixin",
     "ControlsMovementBehaviourMixin",
@@ -50,6 +51,7 @@
     "TrainMixin",
     "TrainPantographAutoStateMixin",
     "TrainThrottleGateMixin",
-    "compat.ElectricFanBlockEntityMixin"
+    "compat.ElectricFanBlockEntityMixin",
+    "TrainStopProbeMixin"
   ]
 }

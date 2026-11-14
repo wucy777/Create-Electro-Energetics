@@ -602,11 +602,18 @@ public class TrainMixin implements ICEETrainExtension {
         // wheels have, and the honest answer is the service brake plus an overshoot, not a fantasy
         // deceleration. The 0.9 margin keeps the demand inside what the blend actually delivers.
         if (st.autoArrive && self.navigation != null && self.navigation.destination != null) {
-            double d = Math.max(0d, self.navigation.distanceToDestination);
+            // The stop point is CREATE's arrival threshold: Navigation declares the arrival when
+            // distanceToDestination + 0.25 <= 0.03125, i.e. ~0.22 Blocks PAST the destination
+            // reference. A curve that stops the train at d = 0 therefore never reaches the trigger -
+            // the arrival never completes on the curve alone, and whatever restores the lever
+            // afterwards drives the train back into Create's snap at whatever speed remains.
+            // Targeting the threshold itself makes the train cross it at crawl speed, where the
+            // arrival's own speed = 0 correction is a centimeter-level event instead of a lurch.
+            double dEff = Math.max(0d, self.navigation.distanceToDestination + 0.25d);
             double vMs = Math.abs(self.speed) * 20d;
             double massEff = (1d + CEEConfigs.server().resistanceValues.electricTrainRotatingMassFactor.get())
                     * TrainTractionModel.totalMass(carriages);
-            double aProfile = vMs * vMs / (2d * Math.max(d, 0.5d));
+            double aProfile = vMs * vMs / (2d * Math.max(dEff, 0.05d));
             // Grade along the direction of travel: positive is climbing, so gravity is already
             // decelerating the train by this much inside `a`, and the brake covers only the rest.
             double gradeTravel = data.trackGrade;
@@ -614,6 +621,13 @@ public class TrainMixin implements ICEETrainExtension {
                     + TrainTractionModel.gradeResistance(gradeTravel, carriages)) / massEff;
             double aBrake = Math.max(0d, Math.min(aProfile - aPassive, TrainTractionModel.frictionBrake()));
             a -= Math.signum(self.speed) * aBrake;
+            // THE CREEP. The profile's tail approaches the threshold asymptotically (v -> 0 as the
+            // distance -> the trigger), and a train stopped a fraction of a Block short never crosses
+            // it. Below crawl speed, gentle traction pushes the last fraction of a Block so the
+            // arrival completes at a speed where the snap cannot be felt.
+            if (vMs < 0.4d && dEff > 0.02d)
+                a += Math.signum(self.speed) * Math.min(0.3d,
+                        data.availableAcceleration * 20d);
         }
 
         // m/s² -> Blocks/Tick². 1 block = 1 m, so only the tick conversion is needed.
