@@ -684,12 +684,25 @@ public class GameEvents {
             // a carriage is blocked, but other tick handlers run between that and here,
             // and a float equality test on a value several systems write is a bug
             // waiting for a rounding difference.
+            // A BLOCKED CARRIAGE PARKS THE TRAIN, BUT IT MUST NOT LOCK THE LEVER.
+            //
+            // The rule used to be: if a carriage is blocked and the train is at a stand, drop the lever to the
+            // brake. The intent was honest - Create zeroes the speed at a buffer stop and leaves whatever the
+            // driver selected, so the panel said ACCELERATE on a stopped train. But it turned a stoppage into a
+            // deadlock, and the operator hit it on a CLOSED LOOP: the carriage was flagged blocked (a false
+            // positive of its own, see the probe), the brake latched, and every attempt to drive out was
+            // overwritten the same tick - reported as "the train says it reached the end of the track and will
+            // not move".
+            //
+            // The brake is now applied ONCE, on the tick the stoppage is first seen, and the lever is left alone
+            // afterwards. That keeps the honest report (the handle has already moved) without ever fighting the
+            // driver: selecting reverse, or accelerate once the flag clears, is theirs to do.
             boolean outOfTrack = Math.abs(train.speed) < 1e-6d && isBlocked(train);
             if (outOfTrack && !driver.blockedParked) {
                 driver.failSafe();
                 driver.blockedParked = true;
-            } else if (!outOfTrack && Math.abs(train.speed) > 1e-4d) {
-                driver.blockedParked = false;   // moved again: allow a future park
+            } else if (!outOfTrack) {
+                driver.blockedParked = false;   // the flag cleared: allow a future park
             }
 
 
