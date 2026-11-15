@@ -93,7 +93,7 @@ public final class TrainHudData {
                             boolean emergencyArmed, boolean emergencyPenalty,
                             int cruiseState, boolean regen,
                             boolean autoArrive, boolean unmanned,
-                            /** The position to DRAW, or -1 when the lever itself is what to draw. */
+                            // The position to DRAW, or 15 when the lever itself is what to draw.
                             int gearDisplay) {}
 
     private static final Map<UUID, GearState> GEARS = new ConcurrentHashMap<>();

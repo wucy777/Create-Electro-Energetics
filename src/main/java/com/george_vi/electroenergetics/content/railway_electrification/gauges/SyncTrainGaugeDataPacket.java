@@ -108,7 +108,7 @@ public record SyncTrainGaugeDataPacket(UUID trainId, double voltage, double curr
                     grade, powered, carriages, motorCars, powerPerCarriage, manualFullSpeed,
                     gear, confirmDue, vigilanceStage, emergencyArmed, emergencyPenalty,
                     cruiseState, regen, autoArrive, unmanned, designMaxSpeed, controlMode, seatLimited,
-                    tickRate);
+                    tickRate, gearDisplay);
         }
 
         @Override
