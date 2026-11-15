@@ -744,9 +744,12 @@ public class GameEvents {
                     // stop fired. The approach is over and the train is at a platform - parked in the
                     // brake, the driver handed back. A hold that was refused and driven in anyway is
                     // the dispatcher's remote stop the operator named; a hold that was armed gets the
-                    // same parking, which is what an arrival already did.
+                    // same parking, which is what an arrival already did. The latch is what stops
+                    // the still-held key from re-arming the scan's next station: one hold, one
+                    // arrival, and the next departure asks for a fresh press.
                     driver.autoArrive = false;
                     driver.arrivalRefused = false;
+                    driver.approachLatch = true;
                     driver.failSafe();
                     if (wasRefused) {
                         UUID controller = controllingPlayer(train);
@@ -765,6 +768,7 @@ public class GameEvents {
                     // a refused approach never touched the gear.
                     driver.autoArrive = false;
                     driver.arrivalRefused = false;
+                    driver.approachLatch = false;
                     if (train.runtime == null || train.runtime.getSchedule() == null)
                         train.navigation.cancelNavigation();
                     if (wasArmed) {

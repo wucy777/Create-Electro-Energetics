@@ -6,9 +6,13 @@ import com.george_vi.electroenergetics.content.railway_electrification.ElectricT
 import com.george_vi.electroenergetics.content.railway_electrification.TrainTractionModel;
 import com.george_vi.electroenergetics.mixin_interfaces.ICEETrainExtension;
 import com.llamalad7.mixinextras.injector.ModifyExpressionValue;
+import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
+import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.simibubi.create.content.trains.entity.Carriage;
 import com.simibubi.create.content.trains.entity.CarriageContraptionEntity;
+import com.simibubi.create.content.trains.entity.Navigation;
 import com.simibubi.create.content.trains.entity.Train;
+import com.simibubi.create.content.trains.graph.DiscoveredPath;
 import com.simibubi.create.content.trains.station.GlobalStation;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
@@ -98,58 +102,72 @@ public class CarriageContraptionEntityMixin {
     }
 
     /**
-     * THE APPROACH GATE - one verdict, one moment, for both what the driver SEES and what the train
-     * DOES. Create offers "Hold SPACE to approach ..." for any station its scan finds, however
-     * close, and deciding the offer here (mid-tick, at the same instant as the display) instead of
-     * at ServerTickEvent.Post is what makes the operator's guarantee hold: a shown prompt plus a
-     * held key ends in an arrival, because arming happened on the very numbers that drew the
-     * prompt. The old split - the display here, the arming a tick later at Post - let an
-     * accelerating train outgrow its braking distance between the two evaluations: the prompt
-     * showed, the hold was refused, the lever (left at ACCELERATE) drove on, and the front
-     * listener's stop at the platform looked exactly like the speed assignment it replaced.
+     * THE OWN APPROACH. The operator ruled Create's hold-space machinery unfit for this mod's
+     * driving model and asked for a separate one, so this wrap is the seam: for a driven electric
+     * train, Create's scan still runs (its result is our input) but its branch STANDS DOWN - this
+     * handler returns null, control() takes the cleanup path, and nothing Create-side navigates,
+     * prompts or re-arms. What remains of Create is machinery, not policy: the path find (which
+     * also carries the signal reservation once started), the distance the scan keeps fresh, and the
+     * front listener that completes an arrival at crawl speed.
      *
-     * <p>Stoppable (x >= v^2/(2 a_eff), the drag the operator asked for inside a_eff): the prompt
-     * shows AND the approach arms here - no warning exists on this path, which is the operator's
-     * ruling. Not stoppable: no prompt (a promise the train cannot keep), one warning per press
-     * with the numbers, and the lever keeps the train; driving in anyway ends in the front
-     * listener's stop AT the platform - the dispatcher's remote stop (GameEvents parks the train
-     * there). Once armed, this gate stands down: the approach owns the speed and the prompt keeps
-     * showing for what it already controls. Fuel trains and unowned trains keep Create's prompt
-     * exactly as it was.
+     * <p>The lifecycle is the mod's, in this one evaluation per tick while the key is held: latch
+     * (one hold = one arrival - after an arrival the key still being down asks for nothing) ->
+     * armed (the servo owns the speed; nothing re-arms behind its back) -> the gate on the FRESH
+     * path find, not on the navigation's mutable distance: stoppable (x >= v^2/(2 a_eff), the drag
+     * the operator asked for inside a_eff) means startNavigation here - the reservation, the servo,
+     * and a ~5 Hz action-bar readout; otherwise one warning per press with the numbers and the
+     * lever keeps the train (driving in anyway ends in the listener's stop AT the platform, which
+     * GameEvents parks as the dispatcher's remote stop). Fuel trains and unowned trains keep
+     * Create's branch exactly as it was.
      */
-    @Inject(method = "displayApproachStationMessage", at = @At("HEAD"), remap = false, cancellable = true)
-    private void electroEnergetics$approachGate(Player player, GlobalStation station,
-                                                CallbackInfo ci) {
+    @WrapOperation(method = "control", at = @At(value = "INVOKE",
+            target = "Lcom/simibubi/create/content/trains/entity/Navigation;findNearestApproachable(Z)Lcom/simibubi/create/content/trains/station/GlobalStation;"),
+            remap = false)
+    private GlobalStation electroEnergetics$ownApproach(Navigation navigation, boolean doubleEnded,
+                                                        Operation<GlobalStation> original) {
+        GlobalStation station = original.call(navigation, doubleEnded);
         CarriageContraptionEntity self = (CarriageContraptionEntity) (Object) this;
         Carriage carriage = self.getCarriage();
         if (carriage == null || carriage.train == null || carriage.train.navigation == null)
-            return;
+            return station;
         Train train = carriage.train;
         ElectricTrainData data = ((ICEETrainExtension) train).getElectricTrainData();
         if (data == null || !data.underElectricControl() || data.driver == null)
-            return;
-        if (train.navigation.destination != station)
-            return;
-        if (data.driver.autoArrive)
-            return;                          // engaged: the servo owns the speed, the prompt just shows
+            return station;
+        if (station == null || data.driver.approachLatch || data.driver.autoArrive)
+            return null;                     // Create stands down; the mod owns the hold
+        DiscoveredPath path = train.navigation.findPathTo(station, -1.0d);
+        if (path == null || path.destination != station)
+            return null;
         double vMs = Math.abs(train.speed) * 20d;
         double gradeTravel = train.speed < 0 ? -data.trackGrade : data.trackGrade;
         double needed = TrainTractionModel.stoppingDistance(vMs, gradeTravel, train.carriages.size());
-        if (train.navigation.distanceToDestination >= needed) {
+        java.util.UUID controller = self.getControllingPlayer().orElse(null);
+        net.minecraft.server.level.ServerPlayer holder = controller == null
+                || self.level().getServer() == null ? null
+                : self.level().getServer().getPlayerList().getPlayer(controller);
+        if (path.distance >= needed) {
+            train.navigation.startNavigation(path);   // the path and its signal reservation, ours
             data.driver.arrivalRefused = false;
             data.driver.autoArrive = true;
             // Remember what the driver had selected, so cancelling can restore it.
             data.driver.autoArriveGear = data.driver.gear;
-            return;
+            if (holder != null && self.level().getGameTime() % 4 == 0)
+                holder.displayClientMessage(Component.translatable(
+                        "electroenergetics.train.arrival.active",
+                        station.name,
+                        (int) Math.ceil(Math.max(train.navigation.distanceToDestination, 0d))), true);
+            return null;
         }
-        ci.cancel();                         // no prompt where the approach cannot be honoured
         if (!data.driver.arrivalRefused) {
             data.driver.arrivalRefused = true;
-            player.displayClientMessage(Component.translatable(
-                    "electroenergetics.train.arrival.tooClose",
-                    String.format("%.0f", vMs * 3.6d),
-                    (int) Math.ceil(needed),
-                    (int) Math.floor(Math.max(train.navigation.distanceToDestination, 0d))), true);
+            if (holder != null)
+                holder.displayClientMessage(Component.translatable(
+                        "electroenergetics.train.arrival.tooClose",
+                        String.format("%.0f", vMs * 3.6d),
+                        (int) Math.ceil(needed),
+                        (int) Math.floor(Math.max(path.distance, 0d))), true);
         }
+        return null;
     }
 }

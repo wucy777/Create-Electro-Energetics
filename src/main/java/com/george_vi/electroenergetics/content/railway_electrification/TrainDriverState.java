@@ -369,6 +369,15 @@ public class TrainDriverState {
      */
     public boolean arrivalRefused = false;
 
+    /**
+     * One hold of space = one arrival. Set when an approach completes (the front listener's stop at
+     * the platform) and cleared when the key is genuinely released. Without it, the scan that runs
+     * while the key is still held finds the NEXT station and the approach re-arms on the spot: the
+     * operator reported holding space through an arrival and being dispatched onward before the
+     * train had even settled - this latch is what hands a held-space arrival back as a parked train.
+     */
+    public boolean approachLatch = false;
+
     /** The lever position to restore if the driver cancels before arriving. */
     public TrainGear autoArriveGear = TrainGear.BRAKE;
 
@@ -874,6 +883,7 @@ public class TrainDriverState {
         // GameEvents, so there is one writer and no ordering to get wrong.
         autoArrive = false;
         arrivalRefused = false;
+        approachLatch = false;
         spaceTicks = 0;
         powerLossCoasted = false;
         blockedParked = false;
