@@ -347,6 +347,24 @@ public class TrainDriverState {
     public boolean powerLossCoasted = false;
 
     /**
+     * The position the panel should DRAW, or null to draw the lever as it is.
+     *
+     * <p>This is HUD ONLY, and it is the single surviving piece of the hold-space approach. When the driver holds
+     * the key at a station, Create is deciding the speed - its own scan, its own prompt, its own navigation and its
+     * own braking. The lever underneath is still whatever the driver left it at, so the scale would report
+     * ACCELERATE on a train that is slowing for a platform, which is the opposite of the truth. This field makes the
+     * handle read BRAKE for as long as the key is down.
+     *
+     * <p>It is deliberately NOT written into {@code gear}. Three rules read the real lever - the station release,
+     * the accelerate-at-ceiling handover and the cruise setpoint capture - and a display concern must not fire any of
+     * them. Nothing else in the law reads this field: the speed is Create's for the duration.
+     *
+     * <p>Written once per tick from GameEvents (see the "hold the handle at the brake" line there) and read by the
+     * HUD through the gear sync packet's high nibble, 15 meaning "no override".
+     */
+    public TrainGear gearDisplay = null;
+
+    /**
      * The speed cruise is holding, in Blocks/Second, SIGNED in the driving cab's frame.
      *
      * <p>Positive is the normal case: the train was already running the way the ACCELERATE

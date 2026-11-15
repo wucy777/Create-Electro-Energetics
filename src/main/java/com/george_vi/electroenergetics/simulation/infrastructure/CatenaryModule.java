@@ -893,7 +893,11 @@ public class CatenaryModule {
                                         (float) TrainTractionModel.designMaxSpeed(),
                                         trainData.controlMode.ordinal(), RiderSeatGate.ceilingRuleApplies(train),
                                         com.george_vi.electroenergetics.content.railway_electrification
-                                                .RiderSeatGate.currentTickRate())
+                                                .RiderSeatGate.currentTickRate(),
+                                        // The position to DRAW (15 = the lever itself). HUD only: it carries the
+                                        // brake position while the driver holds space for Create's own arrival.
+                                        driver.gearDisplay != null
+                                                ? driver.gearDisplay.ordinal() : 15)
                         );
                         trainData.lastSyncedVoltage = voltage;
                         trainData.lastSyncedCurrent = totalCurrent;

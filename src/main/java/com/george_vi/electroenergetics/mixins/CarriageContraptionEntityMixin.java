@@ -3,6 +3,7 @@ package com.george_vi.electroenergetics.mixins;
 import com.george_vi.electroenergetics.content.railway_electrification.CabOrientation;
 import com.george_vi.electroenergetics.content.railway_electrification.ElectricManualSpeed;
 import com.george_vi.electroenergetics.content.railway_electrification.ElectricTrainData;
+import com.george_vi.electroenergetics.content.railway_electrification.TrainGear;
 import com.george_vi.electroenergetics.mixin_interfaces.ICEETrainExtension;
 import com.llamalad7.mixinextras.injector.ModifyExpressionValue;
 import com.simibubi.create.content.trains.entity.Carriage;
@@ -77,5 +78,22 @@ public class CarriageContraptionEntityMixin {
         if (!data.underElectricControl())
             return;
         data.driver.setDriverCabInverted(CabOrientation.isInverted(self, controlsLocalPos));
+
+        // HOLD THE HANDLE AT THE BRAKE WHILE SPACE IS DOWN. Pure observation of Create's own key set.
+        //
+        // Index 4 is jump, which Create's controls block reads as "take me to the next station". While it is down
+        // Create is running the arrival - its scan, its prompt, its navigation, its braking - and the lever the
+        // driver left in ACCELERATE is no longer what is moving the train, so the scale would report the opposite of
+        // the truth. This writes the DISPLAY field only: no gear change, no speed write, no return value touched.
+        //
+        // A plain assignment rather than an OR, because this runs on every tick the driver holds ANY key: a tick
+        // where the method runs and index 4 is absent IS the tick the key came up.
+        //
+        // Create calls control() once more with an EMPTY collection when the last key is released
+        // (ControlsServerHandler.tick invokes control() and only then tests keys.isEmpty()), so the release is seen
+        // here rather than only as an absence of calls - which is what lets the panel return to the real gear on the
+        // same tick the driver lets go. GameEvents clears the field as well, for a driver who leaves the controls
+        // entirely and therefore stops reaching this method at all.
+        data.driver.gearDisplay = heldControls.contains(4) ? TrainGear.BRAKE : null;
     }
 }

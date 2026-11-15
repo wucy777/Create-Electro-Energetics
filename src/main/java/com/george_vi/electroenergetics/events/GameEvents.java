@@ -704,6 +704,21 @@ public class GameEvents {
                 driver.blockedParked = false;   // the flag cleared: allow a future park
             }
 
+            // THE PANEL FOLLOWS CREATE'S OWN ARRIVAL, AND THAT IS ALL THIS MOD DOES WITH SPACE NOW.
+            //
+            // The arrival itself - the scan, the prompt, the navigation and the braking - is Create's, and this mod
+            // does not touch it. What is left is one display concern: while the driver holds the key, the train is
+            // being slowed by Create, so the scale should read BRAKE rather than the ACCELERATE notch the driver
+            // happened to leave the handle in.
+            //
+            // The key is read where Create reads it (heldControls.contains(4), see CarriageContraptionEntityMixin),
+            // and that mixin writes this field on every tick control() runs. This line is the other half of the pair:
+            // control() stops being called at all once the driver walks away from the desk, and a handle left drawn
+            // at the brake on a train this mod no longer has a driver at would be a stale lie. Cleared here for
+            // anybody not currently at the controls of this train.
+            if (!driver.isDriven())
+                driver.gearDisplay = null;
+
             // The lever is deliberately NOT forced to the brake while a station is
             // held. An earlier version did that to stop a train being dispatched
             // still set to shunt, but it deadlocked instead: it fought the depart
