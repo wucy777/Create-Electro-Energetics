@@ -1369,7 +1369,18 @@ public final class RiderSeatGate {
     private static final Set<UUID> FORCED_DISMOUNTS = new HashSet<>();
 
     /** Players who are being seated right now: their inner stopRiding is part of seating, not a dismount. */
-    private static final Set<UUID> SEATING = new HashSet<>();    /**
+    private static final Set<UUID> SEATING = new HashSet<>();
+
+    /**
+     * Whether this player is inside the gate's own seating pass right now.
+     *
+     * <p>Asked by {@code DriverSeatAdmissionMixin}, which refuses a driver's seat to everybody except the gate - so
+     * the gate has to be able to say "this one is mine". Reading the set directly from another package would work
+     * but would leave the marker's meaning spread across two files.
+     */
+    public static boolean isSeatingPassenger(net.minecraft.world.entity.Entity player) {
+        return player != null && SEATING.contains(player.getUUID());
+    }    /**
      * Players whose seat is being restored after a relogin, with a deadline tick. A seated
      * player who logs out keeps their claim, and the restore has to survive the gap between
      * PlayerLoggedInEvent (too early: Create has not loaded its trains yet) and the first tick

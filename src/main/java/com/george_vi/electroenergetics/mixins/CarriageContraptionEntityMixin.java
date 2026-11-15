@@ -11,6 +11,7 @@ import com.simibubi.create.content.trains.entity.CarriageContraptionEntity;
 import com.simibubi.create.content.trains.entity.Train;
 import com.simibubi.create.content.trains.station.GlobalStation;
 import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.Component;
 import net.minecraft.world.entity.player.Player;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
@@ -97,22 +98,28 @@ public class CarriageContraptionEntityMixin {
     }
 
     /**
-     * THE APPROACH PROMPT GATE. Create offers "Hold SPACE to approach ..." for any station its scan
-     * finds, however close it is - and a station nearer than the consist's braking distance cannot be
-     * stopped for, so accepting the offer ended in the front listener's speed = 0 snap at the platform.
+     * THE APPROACH GATE - one verdict, one moment, for both what the driver SEES and what the train
+     * DOES. Create offers "Hold SPACE to approach ..." for any station its scan finds, however
+     * close, and deciding the offer here (mid-tick, at the same instant as the display) instead of
+     * at ServerTickEvent.Post is what makes the operator's guarantee hold: a shown prompt plus a
+     * held key ends in an arrival, because arming happened on the very numbers that drew the
+     * prompt. The old split - the display here, the arming a tick later at Post - let an
+     * accelerating train outgrow its braking distance between the two evaluations: the prompt
+     * showed, the hold was refused, the lever (left at ACCELERATE) drove on, and the front
+     * listener's stop at the platform looked exactly like the speed assignment it replaced.
      *
-     * <p>While this mod drives the train, the offer is withheld for a station the train cannot stop
-     * for: Create still re-runs this branch every tick the key is held, but no prompt appears and the
-     * arming gate in GameEvents refuses the arrival with a one-time warning carrying the numbers. A
-     * display that showed while x < v^2/(2 a_eff) would be a false promise - the operator's words -
-     * so the gate, not a pass-through, is the whole fix: slowing down while still holding space arms
-     * the approach the moment the distance becomes sufficient, and holding space all the way in
-     * anyway ends in the front listener's stop AT the platform. Fuel trains and unowned trains keep
-     * Create's prompt exactly as it was.
+     * <p>Stoppable (x >= v^2/(2 a_eff), the drag the operator asked for inside a_eff): the prompt
+     * shows AND the approach arms here - no warning exists on this path, which is the operator's
+     * ruling. Not stoppable: no prompt (a promise the train cannot keep), one warning per press
+     * with the numbers, and the lever keeps the train; driving in anyway ends in the front
+     * listener's stop AT the platform - the dispatcher's remote stop (GameEvents parks the train
+     * there). Once armed, this gate stands down: the approach owns the speed and the prompt keeps
+     * showing for what it already controls. Fuel trains and unowned trains keep Create's prompt
+     * exactly as it was.
      */
     @Inject(method = "displayApproachStationMessage", at = @At("HEAD"), remap = false, cancellable = true)
-    private void electroEnergetics$withholdImpossibleApproach(Player player, GlobalStation station,
-                                                              CallbackInfo ci) {
+    private void electroEnergetics$approachGate(Player player, GlobalStation station,
+                                                CallbackInfo ci) {
         CarriageContraptionEntity self = (CarriageContraptionEntity) (Object) this;
         Carriage carriage = self.getCarriage();
         if (carriage == null || carriage.train == null || carriage.train.navigation == null)
@@ -123,10 +130,26 @@ public class CarriageContraptionEntityMixin {
             return;
         if (train.navigation.destination != station)
             return;
+        if (data.driver.autoArrive)
+            return;                          // engaged: the servo owns the speed, the prompt just shows
         double vMs = Math.abs(train.speed) * 20d;
         double gradeTravel = train.speed < 0 ? -data.trackGrade : data.trackGrade;
         double needed = TrainTractionModel.stoppingDistance(vMs, gradeTravel, train.carriages.size());
-        if (train.navigation.distanceToDestination < needed)
-            ci.cancel();
+        if (train.navigation.distanceToDestination >= needed) {
+            data.driver.arrivalRefused = false;
+            data.driver.autoArrive = true;
+            // Remember what the driver had selected, so cancelling can restore it.
+            data.driver.autoArriveGear = data.driver.gear;
+            return;
+        }
+        ci.cancel();                         // no prompt where the approach cannot be honoured
+        if (!data.driver.arrivalRefused) {
+            data.driver.arrivalRefused = true;
+            player.displayClientMessage(Component.translatable(
+                    "electroenergetics.train.arrival.tooClose",
+                    String.format("%.0f", vMs * 3.6d),
+                    (int) Math.ceil(needed),
+                    (int) Math.floor(Math.max(train.navigation.distanceToDestination, 0d))), true);
+        }
     }
 }

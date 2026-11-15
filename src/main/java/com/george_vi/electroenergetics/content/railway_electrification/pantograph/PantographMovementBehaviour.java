@@ -134,7 +134,20 @@ public class PantographMovementBehaviour implements MovementBehaviour {
             raised = entry.active && !context.disabled;
         } else {
             Boolean synced = syncedActive(e, context);
-            raised = (synced == null || synced) && !context.disabled;
+            // NO SYNC IS NOT "RAISED".
+            //
+            // This read `synced == null || synced`, so a client that had not yet been told anything drew
+            // every arm UP. On a fresh world load the client has never heard about any pantograph - the sync
+            // packet is only sent to a driver at the controls - so every arm was drawn raised until somebody
+            // sat down, which is exactly the operator's report: "the HUD remembers the switch but the model
+            // comes back up after a restart". The switch was in fact persisted correctly all along; only the
+            // drawing was wrong.
+            //
+            // Holding the current pose instead is the honest answer: this side does not know, so it should
+            // not move the arm. `context.blockEntityData`'s ExtensionState is what the carriage was saved
+            // with, so an arm parked before the restart stays parked, and one that was up stays up until the
+            // first sync says otherwise.
+            raised = (synced == null ? targetExtensionState > 0.01f : synced) && !context.disabled;
         }
         if (!raised)
             targetExtensionState = 0f;

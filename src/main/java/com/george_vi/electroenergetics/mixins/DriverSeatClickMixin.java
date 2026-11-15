@@ -47,8 +47,29 @@ public class DriverSeatClickMixin {
             if (contraption == null)
                 return;
             int seat = contraption.getSeats().indexOf(localPos);
-            if (seat < 0)
-                return;
+            if (seat < 0) {
+                // A CLICK ON A SEAT BLOCK MAY NOT ARRIVE AS THE SEAT'S OWN POSITION.
+                //
+                // handlePlayerInteraction is called for every contraption block the player targets, and the
+                // position it carries is the block that was clicked. Create's seat behaviour accepts the seat
+                // block itself, but the interaction also reaches this method for the block BEHIND a seat, for a
+                // seat two high, and - when the click is resolved against the carriage's collision shape - for a
+                // position a fraction off. Matching only an exact seat position therefore missed clicks that
+                // still seated the player, which is what the operator reported after the exact-match version.
+                //
+                // So a click within one block of a reserved seat is refused too. Passenger seats are unaffected:
+                // they are never in the reserved set.
+                int near = -1;
+                for (int i = 0; i < contraption.getSeats().size(); i++) {
+                    if (contraption.getSeats().get(i).distManhattan(localPos) <= 1) {
+                        near = i;
+                        break;
+                    }
+                }
+                if (near < 0)
+                    return;
+                seat = near;
+            }
             int carriageIndex = RiderSeatGate.carriageIndexOf(carriage.train, cce);
             if (carriageIndex < 0)
                 return;

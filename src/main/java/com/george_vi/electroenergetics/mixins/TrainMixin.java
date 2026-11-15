@@ -617,12 +617,18 @@ public class TrainMixin implements ICEETrainExtension {
             double gradeTravel = data.trackGrade;
             double aPassive = (TrainTractionModel.runningResistance(vMs, carriages)
                     + TrainTractionModel.gradeResistance(gradeTravel, carriages)) / massEff;
-            // The travel direction toward the trigger, remembered while the train still moves - the
-            // traction below needs it when the train has come to rest short of the station. A train
-            // armed from a standstill with no remembered direction gets no traction: the driver
-            // releases space, moves the train a notch with the lever, and holds space again.
+            // The travel direction toward the trigger, remembered while the train still moves. A
+            // train armed FROM A STANDSTILL has no remembered direction, and the fallback is the way
+            // the lever's own ACCELERATE notch would drive - the cab's forward, in world
+            // coordinates - so holding space at a platform departs toward the station instead of
+            // sitting forever.
             if (vMs > 0.05d)
                 st.arrivalTravelDir = (int) Math.signum(self.speed);
+            int travelDir = st.arrivalTravelDir;
+            if (travelDir == 0)
+                travelDir = (int) Math.signum(TrainTractionModel.gearAcceleration(signedSpeedMs,
+                        gradeToPlusX, carriages, data.powerScale, TrainGear.ACCELERATE, cruiseCommand,
+                        TrainTractionModel.frictionBrake(), st.emergencyArmed, data.gearStep) * mirror);
             double aBrake = 0d;
             double aTraction = 0d;
             if (Math.abs(dErr) <= 0.25d) {
@@ -635,6 +641,7 @@ public class TrainMixin implements ICEETrainExtension {
                 double demand = vMs * vMs / (2d * Math.max(Math.abs(dErr), 0.3d));
                 aBrake = Math.max(0d, Math.min(demand - aPassive, aMax));
             } else if (dErr > 0.25d
+                    && (vMs < 0.05d || Math.signum(self.speed) == Math.signum(dErr) * travelDir)
                     && vMs * vMs < 0.81d * 2d * aUsable * dErr) {
                 // WELL below the braking curve - the approach has spare budget, so traction brings
                 // the train UP TO the curve instead of waiting for the curve to collapse onto a
@@ -643,12 +650,13 @@ public class TrainMixin implements ICEETrainExtension {
                 // forever, which would break the guarantee the display threshold makes - a shown
                 // prompt must always end in a completed arrival. The band between 0.9 and 1.0 of the
                 // curve coasts, so a normal boundary-riding approach never flip-flops between power
-                // and brake; traction is for the approach's own run-up and the last crawl home, and
-                // only while the station is genuinely ahead.
+                // and brake. The direction guard keeps a wrong guess (a station behind the cab's
+                // forward) from being chased: once the train moves away from the station the
+                // traction stands down and the driver's lever answers for it.
                 aTraction = Math.min(0.5d, data.availableAcceleration * 20d);
             }
             a -= Math.signum(self.speed) * aBrake;
-            a += Math.signum(dErr) * st.arrivalTravelDir * aTraction;
+            a += Math.signum(dErr) * travelDir * aTraction;
         }
 
         // m/s² -> Blocks/Tick². 1 block = 1 m, so only the tick conversion is needed.

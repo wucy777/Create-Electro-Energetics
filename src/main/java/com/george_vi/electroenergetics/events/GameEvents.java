@@ -725,47 +725,13 @@ public class GameEvents {
             driver.tickSpace();
             boolean arriving = driver.isSpaceHeld() && arrivingAtStation(train);
 
-            if (arriving && !driver.autoArrive) {
-                // THE STOPABILITY GATE. The operator's rule, in their own words: with x the distance to
-                // the station and a the brake notch's deceleration, x < v^2/(2a) cannot be stopped for -
-                // so it must not be offered, and it must not be driven. The drag term they asked for is
-                // inside runningResistance (it decelerates a braking train, so it SHORTENS the honest
-                // figure), grade travels with the direction of motion, and the brake carries the same
-                // 0.9 usable margin the arrival curve is held to. Below the distance the approach is
-                // refused: no prompt, no arming, one warning with the numbers. NOTHING passes through
-                // the station and NOTHING backs into it - the front listener stays native, and a
-                // refused hold driven all the way to the platform ends in its stop: the dispatcher's
-                // remote stop, with the driver handed back a parked train.
-                double d = train.navigation.distanceToDestination;
-                double vMs = Math.abs(train.speed) * 20d;
-                double gradeTravel = train.speed < 0 ? -data.trackGrade : data.trackGrade;
-                double needed = TrainTractionModel.stoppingDistance(vMs, gradeTravel, train.carriages.size());
-                // ONE TICK OF TRAVEL of leniency, here and never in the display gate. The display
-                // evaluates inside control(), mid-tick; this gate runs on ServerTickEvent.Post, after
-                // the train has moved again, so its distance is up to one tick of travel smaller. At
-                // the boundary the two verdicts could disagree: the prompt shows, the hold is refused.
-                // The operator's guarantee is "if the prompt shows and I hold space, the approach
-                // engages" - so the LENIENT side is the arming, and the display stays exactly on the
-                // operator's formula. The curve's own 0.9 margin dwarfs one tick of travel.
-                double travelSlack = vMs * 0.05d;
-                if (d < needed - travelSlack) {
-                    if (!driver.arrivalRefused) {
-                        driver.arrivalRefused = true;
-                        UUID controller = controllingPlayer(train);
-                        ServerPlayer holder = controller == null ? null : server.getPlayerList().getPlayer(controller);
-                        if (holder != null)
-                            holder.displayClientMessage(Component.translatable(
-                                    "electroenergetics.train.arrival.tooClose",
-                                    String.format("%.0f", vMs * 3.6d),
-                                    (int) Math.ceil(needed), (int) Math.floor(Math.max(d, 0d))), true);
-                    }
-                } else {
-                    driver.arrivalRefused = false;
-                    driver.autoArrive = true;
-                    // Remember what the driver had selected, so cancelling can restore it.
-                    driver.autoArriveGear = driver.gear;
-                }
-            } else if (!arriving && (driver.autoArrive || driver.arrivalRefused)) {
+            // THE STOPABILITY GATE lives where the prompt is drawn: control() evaluates it at the
+            // same instant it decides whether the approach prompt shows, and arms the approach on
+            // the same verdict - one evaluation, one moment, with no window for an accelerating
+            // train to outgrow its braking distance between the two (see
+            // CarriageContraptionEntityMixin's approachGate). This hook handles only the ENDING of
+            // an approach: the release, or the front listener's stop.
+            if (!arriving && (driver.autoArrive || driver.arrivalRefused)) {
                 // LEAVE, classified by WHY the approach ended, because the ending decides who owns
                 // the train. The destination only ever vanishes two ways while this state is live:
                 // the front listener's stop fired (it clears it exactly there, and Create's scan-fail

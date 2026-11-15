@@ -26,14 +26,15 @@
   },
   "mixins": [
     "BlockStateBaseMixin",
+    "CarriageChunkProbeMixin",
     "CarriageContraptionEntityMixin",
     "CarriageContraptionMixin",
-    "CarriageChunkProbeMixin",
     "CarriageMixin",
     "ComparatorBlockMixin",
     "ControlsInputGateMixin",
     "DriverClaimServerMixin",
     "DriverLoadoutGuardMixin",
+    "DriverSeatAdmissionMixin",
     "DriverSeatClickMixin",
     "ElectricTrainSeatCollisionMixin",
     "FluidPropagatorMixin",
@@ -50,8 +51,8 @@
     "TrainHUDUpdateAccessor",
     "TrainMixin",
     "TrainPantographAutoStateMixin",
+    "TrainStopProbeMixin",
     "TrainThrottleGateMixin",
-    "compat.ElectricFanBlockEntityMixin",
-    "TrainStopProbeMixin"
+    "compat.ElectricFanBlockEntityMixin"
   ]
 }
