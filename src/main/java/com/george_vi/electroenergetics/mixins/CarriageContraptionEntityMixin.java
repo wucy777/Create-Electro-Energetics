@@ -146,13 +146,39 @@ public class CarriageContraptionEntityMixin {
         net.minecraft.server.level.ServerPlayer holder = controller == null
                 || self.level().getServer() == null ? null
                 : self.level().getServer().getPlayerList().getPlayer(controller);
+        // THE PROMPT. Create's own is drawn from this same call, which this wrap returns null for - so turning
+        // its branch off turned the prompt off with it, and for a while the mod had no "hold space" prompt at
+        // all: the only lines a driver ever saw were the two ENDINGS (armed, and refused). Reported as "the
+        // hold-space prompt hardly ever appears"; it was never drawn.
+        //
+        // The operator's rule, which is the whole gate:
+        //
+        //   x >= v^2/(2a) + drag     the prompt SHOWS, and holding space from that instant stops at the platform
+        //   x <  that                the prompt is WITHHELD and holding space warns instead
+        //
+        // where a is the brake gear's absolute maximum deceleration and drag is what resistance and grade give
+        // for free. Both sides of that comparison are the same method (TrainTractionModel.arrivalBrakeRate), so
+        // what the prompt promises is exactly what the controller can deliver. The check runs on EVERY pass, not
+        // once: releasing space and holding it again re-evaluates from the new x and v, which is the operator's
+        // requirement - the verdict is a function of where the train is now, never of what it was.
+        if (holder == null)
+            return null;
+
         if (path.distance >= needed) {
+            // Prompt first: the driver must see the invitation before the key does anything.
+            holder.displayClientMessage(Component.translatable(
+                    "electroenergetics.train.arrival.prompt", station.name,
+                    (int) Math.floor(Math.max(path.distance, 0d))), true);
+
+            if (!data.driver.isSpaceHeld())
+                return null;                     // shown, not taken: Create's branch stays down, nothing arms
+
             train.navigation.startNavigation(path);   // the path and its signal reservation, ours
             data.driver.arrivalRefused = false;
             data.driver.autoArrive = true;
             // Remember what the driver had selected, so cancelling can restore it.
             data.driver.autoArriveGear = data.driver.gear;
-            if (holder != null && self.level().getGameTime() % 4 == 0)
+            if (self.level().getGameTime() % 4 == 0)
                 holder.displayClientMessage(Component.translatable(
                         "electroenergetics.train.arrival.active",
                         station.name,
@@ -161,12 +187,11 @@ public class CarriageContraptionEntityMixin {
         }
         if (!data.driver.arrivalRefused) {
             data.driver.arrivalRefused = true;
-            if (holder != null)
-                holder.displayClientMessage(Component.translatable(
-                        "electroenergetics.train.arrival.tooClose",
-                        String.format("%.0f", vMs * 3.6d),
-                        (int) Math.ceil(needed),
-                        (int) Math.floor(Math.max(path.distance, 0d))), true);
+            holder.displayClientMessage(Component.translatable(
+                    "electroenergetics.train.arrival.tooClose",
+                    String.format("%.0f", vMs * 3.6d),
+                    (int) Math.ceil(needed),
+                    (int) Math.floor(Math.max(path.distance, 0d))), true);
         }
         return null;
     }

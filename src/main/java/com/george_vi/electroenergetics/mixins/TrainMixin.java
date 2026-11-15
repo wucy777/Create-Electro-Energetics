@@ -610,13 +610,22 @@ public class TrainMixin implements ICEETrainExtension {
             double dRaw = self.navigation.distanceToDestination;
             double dErr = dRaw + 0.21875d;                       // the curve aims 0.22 Blocks past the station, so the crawl handover lands just past the kill line
             double vMs = Math.abs(self.speed) * 20d;
-            double aMax = TrainTractionModel.frictionBrake();
-            double aUsable = aMax * 0.9d;
+            // THE SAME FIGURE THE GATE USED. One method, called from both places, so a shown prompt and a
+            // completable stop are the same statement - see TrainTractionModel.arrivalBrakeRate.
+            //
+            // This block used to build its own: frictionBrake() taken as the maximum, times 0.9, with the
+            // electric brake and its fade left out entirely. The gate built the same understated number
+            // independently. Two copies of a physics constant is how they drift apart; one call cannot.
+            double gradeTravel = data.trackGrade;
+            double aRate = TrainTractionModel.arrivalBrakeRate(vMs, gradeTravel, carriages);
             double massEff = (1d + CEEConfigs.server().resistanceValues.electricTrainRotatingMassFactor.get())
                     * TrainTractionModel.totalMass(carriages);
-            double gradeTravel = data.trackGrade;
             double aPassive = (TrainTractionModel.runningResistance(vMs, carriages)
                     + TrainTractionModel.gradeResistance(gradeTravel, carriages)) / massEff;
+            // The brake's own share, which is what the controller may command. aRate already includes the
+            // passive terms the train gets for free, so they are taken back out here rather than counted twice.
+            double aMax = Math.max(aRate - aPassive, 0d);
+            double aUsable = aRate;
             // The travel direction toward the trigger, remembered while the train still moves. A
             // train armed FROM A STANDSTILL has no remembered direction, and the fallback is the way
             // the lever's own ACCELERATE notch would drive - the cab's forward, in world
@@ -639,6 +648,9 @@ public class TrainMixin implements ICEETrainExtension {
                 // stale or re-targeted destination, and a train still moving there needs the brake,
                 // not a free coast.
                 double demand = vMs * vMs / (2d * Math.max(Math.abs(dErr), 0.3d));
+                // aUsable already carries the passive terms (the operator's "+ drag"), so the demand is compared
+                // against it directly. Subtracting aPassive again would demand more brake than the train has and
+                // saturate the clamp for the whole approach.
                 aBrake = Math.max(0d, Math.min(demand - aPassive, aMax));
             } else if (dErr > 0.25d
                     && (vMs < 0.05d || Math.signum(self.speed) == Math.signum(dErr) * travelDir)

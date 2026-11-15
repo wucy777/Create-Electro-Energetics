@@ -221,6 +221,7 @@
   "electroenergetics.train.riders.notSeatedBraking": "Over capacity: not enough seats - speed limited to 100 km/h",
   "electroenergetics.train.riders.limited": "Somebody aboard is not seated - speed limited to 100 km/h",
   "electroenergetics.train.riders.seatLocked": "Above 100 km/h the doors are locked - you cannot get off",
+  "electroenergetics.train.arrival.prompt": "Hold space to approach %s - %s Blocks away",
   "electroenergetics.train.arrival.tooClose": "Cannot stop for this station: at %s km/h the brakes need %s Blocks, only %s remain. Slow down and hold space again.",
   "electroenergetics.train.arrival.remoteStop": "The approach was refused, so the train has been remotely stopped at the station. Select a gear to take over.",
   "electroenergetics.train.arrival.active": "Approaching %s - %s Blocks remaining",
