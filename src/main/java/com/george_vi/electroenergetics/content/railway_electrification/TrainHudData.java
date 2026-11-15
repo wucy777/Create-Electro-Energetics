@@ -92,7 +92,9 @@ public final class TrainHudData {
     public record GearState(int gear, boolean confirmDue, int vigilanceStage,
                             boolean emergencyArmed, boolean emergencyPenalty,
                             int cruiseState, boolean regen,
-                            boolean autoArrive, boolean unmanned) {}
+                            boolean autoArrive, boolean unmanned,
+                            /** The position to DRAW, or -1 when the lever itself is what to draw. */
+                            int gearDisplay) {}
 
     private static final Map<UUID, GearState> GEARS = new ConcurrentHashMap<>();
 
@@ -231,9 +233,9 @@ public final class TrainHudData {
     public static void updateGear(UUID trainId, int gear, boolean confirmDue, int vigilanceStage,
                                   boolean emergencyArmed, boolean emergencyPenalty,
                                   int cruiseState, boolean regen,
-                                  boolean autoArrive, boolean unmanned) {
+                                  boolean autoArrive, boolean unmanned, int gearDisplay) {
         GEARS.put(trainId, new GearState(gear, confirmDue, vigilanceStage, emergencyArmed,
-                emergencyPenalty, cruiseState, regen, autoArrive, unmanned));
+                emergencyPenalty, cruiseState, regen, autoArrive, unmanned, gearDisplay));
     }
 
     /** Lever state, or {@code null} when the server has not sent one. */

@@ -638,37 +638,80 @@ public class TrainMixin implements ICEETrainExtension {
                 travelDir = (int) Math.signum(TrainTractionModel.gearAcceleration(signedSpeedMs,
                         gradeToPlusX, carriages, data.powerScale, TrainGear.ACCELERATE, cruiseCommand,
                         TrainTractionModel.frictionBrake(), st.emergencyArmed, data.gearStep) * mirror);
-            double aBrake = 0d;
-            double aTraction = 0d;
+            // THE LEVER IS NOT IN CHARGE ONCE SPACE IS HELD.
+            //
+            // This block used to ADD a brake onto whatever the lever's own law had produced (`a` above, built
+            // from effectiveGear). With the handle left in ACCELERATE - which is exactly what a driver does:
+            // see the prompt, hold space, keep the handle where it was - `a` was POSITIVE and large, and a brake
+            // of a few tenths laid on top of it still left a net acceleration forwards. The train then ran all
+            // the way to the platform under power. The reported sequence, in order:
+            //
+            //   hold space at speed ... still accelerating ... reaches the station ... the front listener
+            //   zeroes the speed (that is the "speed assignment" that cannot be braked out of) ... space is
+            //   still held, the handle is still in ACCELERATE, so the law pulls away again.
+            //
+            // So during an arrival the lever's contribution is DISCARDED, not adjusted. From here to the end of
+            // the block `a` is built only from the controller, in the cab's frame, and it is the whole of the
+            // train's acceleration for this tick. That makes the arrival profile the only thing deciding the
+            // speed, which is what "the approach owns the train" has to mean to be true.
+            //
+            // The controller's own two modes, unchanged in intent: brake at the curve when above it, apply a
+            // modest traction when well below it (an approach armed from a standstill has no speed to brake,
+            // and without that it would never depart).
+            a = 0d;
+            double aDrive = 0d;
             if (Math.abs(dErr) <= 0.25d) {
                 // AT the station: the listener fires on its own at crawl speed; nothing to add.
             } else if (vMs * vMs > 2d * aUsable * Math.abs(dErr)) {
-                // Above the braking curve: brake at the curve's demand, clamped to the service brake.
-                // No direction test: the only way this block sees the trigger behind the train is a
-                // stale or re-targeted destination, and a train still moving there needs the brake,
-                // not a free coast.
+                // Above the braking curve. The demand is what the curve asks for; `aMax` is the brake's own
+                // share and the hard ceiling on it, so no tick of the approach ever exceeds the rate the gate
+                // used to promise the stop - the operator's a-t requirement.
                 double demand = vMs * vMs / (2d * Math.max(Math.abs(dErr), 0.3d));
-                // aUsable already carries the passive terms (the operator's "+ drag"), so the demand is compared
-                // against it directly. Subtracting aPassive again would demand more brake than the train has and
-                // saturate the clamp for the whole approach.
-                aBrake = Math.max(0d, Math.min(demand - aPassive, aMax));
+                aDrive = -Math.signum(self.speed) * Math.max(0d, Math.min(demand - aPassive, aMax));
             } else if (dErr > 0.25d
                     && (vMs < 0.05d || Math.signum(self.speed) == Math.signum(dErr) * travelDir)
                     && vMs * vMs < 0.81d * 2d * aUsable * dErr) {
-                // WELL below the braking curve - the approach has spare budget, so traction brings
-                // the train UP TO the curve instead of waiting for the curve to collapse onto a
-                // standstill. This is what makes holding space from a platform actually travel: an
-                // approach armed at rest has no speed to brake, and without traction it would sit
-                // forever, which would break the guarantee the display threshold makes - a shown
-                // prompt must always end in a completed arrival. The band between 0.9 and 1.0 of the
-                // curve coasts, so a normal boundary-riding approach never flip-flops between power
-                // and brake. The direction guard keeps a wrong guess (a station behind the cab's
-                // forward) from being chased: once the train moves away from the station the
-                // traction stands down and the driver's lever answers for it.
-                aTraction = Math.min(0.5d, data.availableAcceleration * 20d);
+                // WELL below the braking curve: traction brings the train UP TO it. The 0.9-to-1.0 band coasts so
+                // a boundary-riding approach does not flip-flop between power and brake. The direction guard
+                // stops a wrong guess (a station behind the cab's forward) being chased.
+                aDrive = Math.signum(dErr) * travelDir * Math.min(0.5d, data.availableAcceleration * 20d);
             }
-            a -= Math.signum(self.speed) * aBrake;
-            a += Math.signum(dErr) * travelDir * aTraction;
+            // Everything above is in the cab's frame (dErr, travelDir and self.speed are), so this is the one
+            // place that does NOT go back through the mirror: `a` was already un-mirrored at line ~583 and is
+            // re-assigned here outright.
+            boolean arrivalBraking = aDrive < 0d;
+            a = aDrive;
+
+            // THE MOTORS STILL HAVE TO REPORT WHAT THEY RECOVERED.
+            //
+            // gearStep is filled by gearAcceleration, and this block now discards that call's answer - so it was
+            // also discarding the one figure that says how much of the braking the motors did. data.braking is
+            // read from exactly that field for the next circuit build (see the end of this method), so an
+            // arrival braked on the pads alone: full mechanical wear, NOTHING fed back to the line, on the one
+            // manoeuvre a train performs at every station. The operator caught it - "the lever stands down, but
+            // the regeneration must not".
+            //
+            // The motors' share is the electric rate at this speed, faded by the same curve the law uses, and
+            // only when the arrival is actually braking. Whatever the controller commands beyond that is the
+            // friction pads, which regenerate nothing by definition.
+            data.gearStep.dynamicBrake = arrivalBraking
+                    ? TrainTractionModel.dynamicBrake() * TrainTractionModel.dynamicBrakeFade(vMs)
+                    : 0d;
+
+            // AND THE PANEL SHOWS WHAT THE TRAIN IS DOING. The handle is not in charge during an arrival, so
+            // leaving ACCELERATE on display would report the opposite of the truth: the operator's words were
+            // "the position should follow the train's actual behaviour - braking into a station means BRAKE".
+            // Written to gearDisplay, never to gear: the lever is still the driver's own state and three rules
+            // read it (the station release, the accelerate-at-ceiling handover, the cruise capture).
+            st.gearDisplay = aDrive < -1.0e-4d ? TrainGear.BRAKE
+                    : aDrive > 1.0e-4d ? TrainGear.ACCELERATE
+                    : TrainGear.COAST;
+        } else {
+            // NO ARRIVAL, NO OVERRIDE. Cleared here rather than only on the release paths in GameEvents, because
+            // the arrival can end without either of them running - a destination vanishing on its own, this mod
+            // handing the train back to Create, a schedule starting. A stale gearDisplay would leave the panel
+            // reporting BRAKE on a train the driver is accelerating, which is exactly the lie it exists to avoid.
+            st.gearDisplay = null;
         }
 
         // m/s² -> Blocks/Tick². 1 block = 1 m, so only the tick conversion is needed.

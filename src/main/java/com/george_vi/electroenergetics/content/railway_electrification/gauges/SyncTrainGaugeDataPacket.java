@@ -59,7 +59,7 @@ public record SyncTrainGaugeDataPacket(UUID trainId, double voltage, double curr
                                        boolean emergencyPenalty, int cruiseState,
                                        boolean regen, boolean autoArrive, boolean unmanned,
                                        float designMaxSpeed, int controlMode, boolean seatLimited,
-                                       float tickRate)
+                                       float tickRate, int gearDisplay)
         implements ClientboundPacketPayload {
 
     public static final StreamCodec<ByteBuf, SyncTrainGaugeDataPacket> STREAM_CODEC = new StreamCodec<>() {
@@ -76,7 +76,13 @@ public record SyncTrainGaugeDataPacket(UUID trainId, double voltage, double curr
             int motorCars = buffer.readInt();
             float powerPerCarriage = buffer.readFloat();
             boolean manualFullSpeed = buffer.readBoolean();
-            int gear = buffer.readByte();
+            // The lever byte carries TWO positions: the low nibble is the lever itself, the high nibble the
+            // position the panel should DRAW while an arrival is running (15 = no override). Both fit in one
+            // byte, and the split keeps the two questions apart - the input path needs the lever, the HUD needs
+            // what the train is doing, and during an approach they are deliberately different.
+            int gearByte = buffer.readUnsignedByte();
+            int gear = gearByte & 0x0F;
+            int gearDisplay = gearByte >> 4;
             // Packed into one byte, and STILL unchanged in size: the four flags keep
             // bits 0-3, the two-bit warning stage takes bits 4-5, and automatic arrival
             // and unmanned take the last two. This rides a per-train broadcast, so not
@@ -118,7 +124,11 @@ public record SyncTrainGaugeDataPacket(UUID trainId, double voltage, double curr
             buffer.writeInt(p.motorCars);
             buffer.writeFloat(p.powerPerCarriage);
             buffer.writeBoolean(p.manualFullSpeed);
-            buffer.writeByte(p.gear);
+            // The lever byte carries TWO positions: the low nibble is the lever, the high nibble the position
+            // the panel should DRAW while an arrival runs (15 = no override). During a hold-space approach the
+            // lever is not what is driving the train, so the panel needs to be told what is - "the position
+            // follows the train's actual behaviour" was the operator's ruling.
+            buffer.writeByte((p.gear & 0x0F) | ((p.gearDisplay & 0x0F) << 4));
             int flags = (p.confirmDue ? 1 : 0) | (p.emergencyArmed ? 2 : 0)
                     | (p.emergencyPenalty ? 4 : 0) | (p.regen ? 8 : 0)
                     | ((p.vigilanceStage & 3) << 4)
@@ -145,7 +155,7 @@ public record SyncTrainGaugeDataPacket(UUID trainId, double voltage, double curr
                 carriages, motorCars, powerPerCarriage, manualFullSpeed, designMaxSpeed,
                 controlMode);
         TrainHudData.updateGear(trainId, gear, confirmDue, vigilanceStage, emergencyArmed,
-                emergencyPenalty, cruiseState, regen, autoArrive, unmanned);
+                emergencyPenalty, cruiseState, regen, autoArrive, unmanned, gearDisplay);
         TrainHudData.setSeatLimited(trainId, seatLimited);
         TrainHudData.setServerTickRate(tickRate);
         RiderSeatGate.acceptSyncedTickRate(tickRate);

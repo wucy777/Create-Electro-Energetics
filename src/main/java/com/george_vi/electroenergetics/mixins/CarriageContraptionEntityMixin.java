@@ -166,9 +166,9 @@ public class CarriageContraptionEntityMixin {
         double vMs = Math.abs(train.speed) * 20d;
         double gradeTravel = train.speed < 0 ? -data.trackGrade : data.trackGrade;
         double needed = TrainTractionModel.stoppingDistance(vMs, gradeTravel, train.carriages.size());
-        if (true) {   // diagnostic: the gate's own numbers, on by default while the prompt is being fixed
+        if (Boolean.getBoolean("cee.debugApproach")) {
             System.out.println(String.format(
-                    "[gate] v=%.3f x=%.2f needed=%.2f held=%s pathScan=%s",
+                    "[gate] v=%.3f x=%.2f needed=%.2f held=%s station=%s",
                     vMs, path.distance, needed, data.driver.isSpaceHeld(), station.name));
         }
         java.util.UUID controller = self.getControllingPlayer().orElse(null);

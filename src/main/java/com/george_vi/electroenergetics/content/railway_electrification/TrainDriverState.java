@@ -378,6 +378,29 @@ public class TrainDriverState {
      */
     public boolean approachLatch = false;
 
+    /**
+     * How long the train has been at a dead stop during an armed arrival.
+     *
+     * <p>Create's front listener completes an arrival by zeroing the speed outright, and its station bookkeeping
+     * catches up on a later tick. Judging "arrived" on that bookkeeping alone left a one-tick window in which the
+     * approach looked like a release, so the lever was restored and the train pulled away again with space still
+     * held. This counter bridges that window: a dead stop with the key down and a destination that has just gone
+     * is an arrival, and the counter is what tells it from a stop some other system caused.
+     */
+    public int arrivalStopTicks = 0;
+
+    /**
+     * The position the panel should DRAW while an arrival is running, or null to draw the lever as it is.
+     *
+     * <p>During a hold-space arrival the lever no longer decides the speed - the profile does - so the handle a
+     * driver left in ACCELERATE is a lie about what the train is doing. The operator's ruling: the panel shows the
+     * train's ACTUAL behaviour, so a braking approach reads BRAKE and a departure reads ACCELERATE. This is kept
+     * apart from {@code gear} rather than written into it, because the lever is still the driver's own state: three
+     * separate rules read it (the station release, the accelerate-at-ceiling handover, and the capture of a cruise
+     * setpoint), and letting a display concern rewrite it would fire those in the middle of an arrival.
+     */
+    public TrainGear gearDisplay = null;
+
     /** The lever position to restore if the driver cancels before arriving. */
     public TrainGear autoArriveGear = TrainGear.BRAKE;
 

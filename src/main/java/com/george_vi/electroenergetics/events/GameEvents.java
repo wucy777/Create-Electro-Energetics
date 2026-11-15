@@ -741,7 +741,32 @@ public class GameEvents {
                 // or this mod cancelled it below.
                 boolean wasArmed = driver.autoArrive;
                 boolean wasRefused = driver.arrivalRefused;
-                if (driver.isSpaceHeld() && train.getCurrentStation() != null) {
+                // ARRIVED. Two ways to know, and the second one is the one that was missing.
+                //
+                // `getCurrentStation() != null` is Create having checked the train in, which is what a completed
+                // arrival normally looks like. But the front listener zeroes the speed FIRST and the station
+                // bookkeeping lands later (or, driven in against a refusal, may never land at all) - and on the
+                // tick between them this test was false, so the block fell through to "a genuine release" and
+                // RESTORED THE LEVER, ACCELERATE included. That is the reported pull-away: the train stopped at
+                // the platform, the handle returned to accelerate, and it left again with space still held.
+                //
+                // The listener's stop is unmistakable from here, so it is tested directly: a destination that has
+                // just vanished with the key still held and the train at a dead stop is an arrival, whatever
+                // Create's bookkeeping has managed to do by this tick.
+                // A dead stop that PERSISTS. The listener zeroes the speed and the train stays there; a stop some
+                // other system caused (a buffer stop, the driver's own brake) is not an arrival and must not be
+                // parked as one - so the stop has to hold for a moment before it counts. TRIP_TICKS is far too
+                // long; a quarter second is far longer than Create needs to check the train in and far shorter
+                // than a driver would notice.
+                if (driver.isSpaceHeld() && Math.abs(train.speed) < 1.0e-4d && train.navigation != null
+                        && train.navigation.destination == null) {
+                    driver.arrivalStopTicks++;
+                } else if (Math.abs(train.speed) > 1.0e-4d) {
+                    driver.arrivalStopTicks = 0;
+                }
+                boolean stoppedByListener = driver.arrivalStopTicks >= 5;
+                if (driver.isSpaceHeld() && (train.getCurrentStation() != null || stoppedByListener)) {
+                    driver.arrivalStopTicks = 0;
                     // The key is still held and the train is checked in at a station: the listener's
                     // stop fired. The approach is over and the train is at a platform - parked in the
                     // brake, the driver handed back. A hold that was refused and driven in anyway is
@@ -752,6 +777,7 @@ public class GameEvents {
                     driver.autoArrive = false;
                     driver.arrivalRefused = false;
                     driver.approachLatch = true;
+                    driver.gearDisplay = null;
                     driver.failSafe();
                     if (wasRefused) {
                         UUID controller = controllingPlayer(train);
@@ -771,6 +797,8 @@ public class GameEvents {
                     driver.autoArrive = false;
                     driver.arrivalRefused = false;
                     driver.approachLatch = false;
+                    driver.arrivalStopTicks = 0;
+                    driver.gearDisplay = null;
                     if (train.runtime == null || train.runtime.getSchedule() == null)
                         train.navigation.cancelNavigation();
                     if (wasArmed) {
