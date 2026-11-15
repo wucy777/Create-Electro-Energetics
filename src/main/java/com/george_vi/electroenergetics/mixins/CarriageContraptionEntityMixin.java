@@ -3,15 +3,19 @@ package com.george_vi.electroenergetics.mixins;
 import com.george_vi.electroenergetics.content.railway_electrification.CabOrientation;
 import com.george_vi.electroenergetics.content.railway_electrification.ElectricManualSpeed;
 import com.george_vi.electroenergetics.content.railway_electrification.ElectricTrainData;
+import com.george_vi.electroenergetics.content.railway_electrification.TrainTractionModel;
 import com.george_vi.electroenergetics.mixin_interfaces.ICEETrainExtension;
 import com.llamalad7.mixinextras.injector.ModifyExpressionValue;
 import com.simibubi.create.content.trains.entity.Carriage;
 import com.simibubi.create.content.trains.entity.CarriageContraptionEntity;
+import com.simibubi.create.content.trains.entity.Train;
+import com.simibubi.create.content.trains.station.GlobalStation;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.player.Player;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 import java.util.Collection;
@@ -90,5 +94,39 @@ public class CarriageContraptionEntityMixin {
         // further reports, and there is no event to catch. See TrainDriverState.tickSpace.
         if (heldControls.contains(4))
             data.driver.setSpaceHeld();
+    }
+
+    /**
+     * THE APPROACH PROMPT GATE. Create offers "Hold SPACE to approach ..." for any station its scan
+     * finds, however close it is - and a station nearer than the consist's braking distance cannot be
+     * stopped for, so accepting the offer ended in the front listener's speed = 0 snap at the platform.
+     *
+     * <p>While this mod drives the train, the offer is withheld for a station the train cannot stop
+     * for: Create still re-runs this branch every tick the key is held, but no prompt appears and the
+     * arming gate in GameEvents refuses the arrival with a one-time warning carrying the numbers. A
+     * display that showed while x < v^2/(2 a_eff) would be a false promise - the operator's words -
+     * so the gate, not a pass-through, is the whole fix: slowing down while still holding space arms
+     * the approach the moment the distance becomes sufficient, and holding space all the way in
+     * anyway ends in the front listener's stop AT the platform. Fuel trains and unowned trains keep
+     * Create's prompt exactly as it was.
+     */
+    @Inject(method = "displayApproachStationMessage", at = @At("HEAD"), remap = false, cancellable = true)
+    private void electroEnergetics$withholdImpossibleApproach(Player player, GlobalStation station,
+                                                              CallbackInfo ci) {
+        CarriageContraptionEntity self = (CarriageContraptionEntity) (Object) this;
+        Carriage carriage = self.getCarriage();
+        if (carriage == null || carriage.train == null || carriage.train.navigation == null)
+            return;
+        Train train = carriage.train;
+        ElectricTrainData data = ((ICEETrainExtension) train).getElectricTrainData();
+        if (data == null || !data.underElectricControl() || data.driver == null)
+            return;
+        if (train.navigation.destination != station)
+            return;
+        double vMs = Math.abs(train.speed) * 20d;
+        double gradeTravel = train.speed < 0 ? -data.trackGrade : data.trackGrade;
+        double needed = TrainTractionModel.stoppingDistance(vMs, gradeTravel, train.carriages.size());
+        if (train.navigation.distanceToDestination < needed)
+            ci.cancel();
     }
 }

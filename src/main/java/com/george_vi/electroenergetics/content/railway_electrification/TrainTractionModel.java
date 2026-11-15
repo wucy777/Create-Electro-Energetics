@@ -129,6 +129,26 @@ public final class TrainTractionModel {
         return coeff * totalMass(carriages) * G * 1e-3;
     }
 
+    /**
+     * The distance this consist needs to brake to a stand from {@code vMs} [m/s], in Blocks, under the
+     * budget the arrival controller actually has: the service brake at its usable margin, with running
+     * resistance (air drag included - it decelerates a braking train, so it shortens this figure) and
+     * grade already working on the train's side. This is the number the station approach is measured
+     * against: a station closer than this cannot be stopped for, and holding space for it is refused
+     * with a warning instead of being honoured with a speed assignment at the platform.
+     *
+     * <p>{@code gradeTravel} is the grade along the direction of travel: climbing shortens the
+     * distance, descending lengthens it.
+     */
+    public static double stoppingDistance(double vMs, double gradeTravel, int carriages) {
+        double gamma = CEEConfigs.server().resistanceValues.electricTrainRotatingMassFactor.get();
+        double massEff = (1d + gamma) * totalMass(carriages);
+        double aPassive = (runningResistance(vMs, carriages)
+                + gradeResistance(gradeTravel, carriages)) / massEff;
+        double aEff = frictionBrake() * 0.9d + aPassive;
+        return (vMs * vMs) / (2d * Math.max(aEff, 0.05d));
+    }
+
     /** Gravity component along the track [N]. Positive grade = uphill = opposes motion. */
     public static double gradeResistance(double grade, int carriages) {
         if (!CEEConfigs.server().trainValues.electricTrainGradeResistance.get())

@@ -585,22 +585,30 @@ public class TrainMixin implements ICEETrainExtension {
         // THE ARRIVAL. This law owns the speed during a hold-space approach, and the profile is
         // bounded by the friction brake: no moment of the approach may exceed it.
         //
-        // CREATE'S TRIGGER: Navigation declares the arrival once the train is ~0.22 Blocks PAST the
-        // destination reference (distanceToDestination + 0.25 <= 0.03125). Two failure modes this
-        // controller eliminates:
-        //  * a curve that stops the train AT d = 0 never crosses that trigger - the arrival never
-        //    completes, and the restored lever drove the train back into the snap at whatever speed
-        //    remained (the reported 28 km/h -> 0);
-        //  * a train that enters the approach ABOVE the braking curve (space held late, or the
-        //    station closer than the braking distance) cannot follow the curve - the brake saturates
-        //    and Create's snap fired mid-motion at 75 km/h.
-        // The controller brakes along the curve while it is followable, brakes to a stand when it is
-        // not (the honest overshoot - a real consist stops past the platform and backs in), and
-        // creeps the last fraction of a Block into the trigger so the arrival completes at a speed
-        // where Create's snap cannot be felt.
+        // CREATE'S ARRIVAL, stated as the bytecode has it: there is no distance check that fires on a
+        // tick. The arrival completes solely in the front bogey's edge-point listener
+        // (Train.lambda$frontSignalListener$14), which zeroes speed OUTRIGHT the instant the leading
+        // point reaches the destination station's edge point (distanceToDestination = 0), at whatever
+        // speed the train carries. THE LISTENER STAYS NATIVE - the operator ruled that a too-hot
+        // entry earns exactly its stop AT the platform and nothing beyond: nothing passes through,
+        // nothing backs in. What protects the arrival is entirely UPSTREAM of it: GameEvents refuses
+        // the approach whenever the remaining distance is below the consist's stopping distance
+        // (x < v^2/(2 a_eff), the drag the operator asked for inside a_eff), and the approach prompt
+        // is withheld for the same figure - a displayed prompt therefore GUARANTEES a completable
+        // arrival at a sane deceleration. Two failure modes this controller eliminates:
+        //  * a curve that stops the train short of that line never completes the arrival - the
+        //    restored lever drove the train back into the snap at whatever speed remained (the
+        //    reported 28 km/h -> 0);
+        //  * an approach armed above the braking curve used to saturate the brake and end in the
+        //    listener's snap mid-motion at 75 and 95 km/h ("this is not a brake, this is a speed
+        //    assignment"). That entry is refused at the gate now, before it can ever arm.
+        // The controller is a full servo around the curve: traction brings the train up to it when
+        // the approach is armed short of it (including from a standstill at a platform), the brake
+        // holds it to the curve when it is above, and the last Blocks complete at a speed where the
+        // listener's zeroing cannot be felt.
         if (st.autoArrive && self.navigation != null && self.navigation.destination != null) {
             double dRaw = self.navigation.distanceToDestination;
-            double dErr = dRaw + 0.21875d;                       // the signed distance to CREATE's arrival trigger
+            double dErr = dRaw + 0.21875d;                       // the curve aims 0.22 Blocks past the station, so the crawl handover lands just past the kill line
             double vMs = Math.abs(self.speed) * 20d;
             double aMax = TrainTractionModel.frictionBrake();
             double aUsable = aMax * 0.9d;
@@ -610,24 +618,37 @@ public class TrainMixin implements ICEETrainExtension {
             double aPassive = (TrainTractionModel.runningResistance(vMs, carriages)
                     + TrainTractionModel.gradeResistance(gradeTravel, carriages)) / massEff;
             // The travel direction toward the trigger, remembered while the train still moves - the
-            // creep needs it when the train has come to rest short of (or past) the trigger.
+            // traction below needs it when the train has come to rest short of the station. A train
+            // armed from a standstill with no remembered direction gets no traction: the driver
+            // releases space, moves the train a notch with the lever, and holds space again.
             if (vMs > 0.05d)
                 st.arrivalTravelDir = (int) Math.signum(self.speed);
-            boolean toward = Math.signum(self.speed) == Math.signum(dErr) && Math.abs(dErr) > 0.25d;
             double aBrake = 0d;
-            double aCreep = 0d;
+            double aTraction = 0d;
             if (Math.abs(dErr) <= 0.25d) {
-                // AT the trigger: the arrival fires on its own at crawl speed; nothing to add.
-            } else if (toward && vMs * vMs > 2d * aUsable * Math.abs(dErr)) {
+                // AT the station: the listener fires on its own at crawl speed; nothing to add.
+            } else if (vMs * vMs > 2d * aUsable * Math.abs(dErr)) {
                 // Above the braking curve: brake at the curve's demand, clamped to the service brake.
+                // No direction test: the only way this block sees the trigger behind the train is a
+                // stale or re-targeted destination, and a train still moving there needs the brake,
+                // not a free coast.
                 double demand = vMs * vMs / (2d * Math.max(Math.abs(dErr), 0.3d));
                 aBrake = Math.max(0d, Math.min(demand - aPassive, aMax));
-            } else if (vMs <= 0.5d && Math.abs(dErr) > 0.25d) {
-                // Crawling short of (or past) the trigger: creep toward it at <= 0.3 m/s^2.
-                aCreep = Math.min(0.3d, data.availableAcceleration * 20d);
+            } else if (dErr > 0.25d
+                    && vMs * vMs < 0.81d * 2d * aUsable * dErr) {
+                // WELL below the braking curve - the approach has spare budget, so traction brings
+                // the train UP TO the curve instead of waiting for the curve to collapse onto a
+                // standstill. This is what makes holding space from a platform actually travel: an
+                // approach armed at rest has no speed to brake, and without traction it would sit
+                // forever, which would break the guarantee the display threshold makes - a shown
+                // prompt must always end in a completed arrival. The band between 0.9 and 1.0 of the
+                // curve coasts, so a normal boundary-riding approach never flip-flops between power
+                // and brake; traction is for the approach's own run-up and the last crawl home, and
+                // only while the station is genuinely ahead.
+                aTraction = Math.min(0.5d, data.availableAcceleration * 20d);
             }
             a -= Math.signum(self.speed) * aBrake;
-            a += Math.signum(dErr) * st.arrivalTravelDir * aCreep;
+            a += Math.signum(dErr) * st.arrivalTravelDir * aTraction;
         }
 
         // m/s² -> Blocks/Tick². 1 block = 1 m, so only the tick conversion is needed.

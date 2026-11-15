@@ -104,10 +104,17 @@ public final class SeatIntentTracker {
             sent = false;                                  // seated: nothing to report
             return;
         }
-        // Report from well below the ceiling, not only at it. The server needs the answer BEFORE the train
-        // arrives at 28; waiting until 28 meant the first tick of the rule had nothing to use and fell back
-        // to its own lagging position. Edge-triggered, so a steady speed costs no packets.
-        if (Math.abs(train.speed) < 1.0d) {
+        // Report from a walking pace up, not only at the ceiling. The server needs the answer BEFORE the
+        // train is fast enough for the seat rule to matter. Edge-triggered, so a steady speed costs no
+        // packets.
+        //
+        // UNIT FIX: train.speed is Blocks per TICK, and 1.0 bpt is 20 m/s - 72 km/h. The old bare
+        // < 1.0d gate silenced the report for every train below 72 km/h, which is where the seat tests
+        // happen: the server fell back to its own lagging position, and a player who had walked to the
+        // far end of a carriage was seated by where the server thought they had drifted to - the
+        // reported "I stood at the last seat and got one in the carriage behind". Below 1 m/s the
+        // server's lag is a few centimetres and its own position is honest.
+        if (Math.abs(train.speed) * 20d < 1.0d) {
             sent = false;                                  // standing on a stopped train is not a case
             return;
         }

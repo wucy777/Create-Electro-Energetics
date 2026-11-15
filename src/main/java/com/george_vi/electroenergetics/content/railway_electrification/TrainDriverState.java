@@ -362,6 +362,13 @@ public class TrainDriverState {
      */
     public boolean autoArrive = false;
 
+    /**
+     * The stopability gate refused the current hold-space approach (the station is closer than the
+     * consist's braking distance). Latches the one-time warning per hold and clears on release, on
+     * arming, and on every handover back to Create.
+     */
+    public boolean arrivalRefused = false;
+
     /** The lever position to restore if the driver cancels before arriving. */
     public TrainGear autoArriveGear = TrainGear.BRAKE;
 
@@ -866,6 +873,7 @@ public class TrainDriverState {
         // actually handed over. The emergency release is owned solely by the standstill test in
         // GameEvents, so there is one writer and no ordering to get wrong.
         autoArrive = false;
+        arrivalRefused = false;
         spaceTicks = 0;
         powerLossCoasted = false;
         blockedParked = false;

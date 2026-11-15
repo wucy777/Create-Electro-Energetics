@@ -74,6 +74,18 @@ public abstract class RiderRenderGlueMixin {
         // the interpolation across exactly the seat travel of this tick: the rider glides with the
         // rendered train instead of stepping.
         Vec3 current = getPassengerPosition(entity, 1.0f);
+        if (current == null)
+            return;
+        // positionRider does NOT apply the figure getPassengerPosition returns as-is: it adds
+        // SeatEntity.getCustomEntitySeatOffset(entity) and a -0.125 body drop to the Y, and it is that
+        // ADJUSTED y that Entity.setPos writes into the entity. Caching the raw figure made the stored
+        // baseline sit a constant above the applied position, so the render interpolated between two
+        // different heights every frame - a sawtooth bob at tick rate, the reported up-down shake with
+        // MiniHUD showing the true y as perfectly still. Cache exactly what was applied.
+        double appliedY = com.simibubi.create.content.contraptions.actors.seat.SeatEntity
+                .getCustomEntitySeatOffset(entity)
+                + (entity instanceof AbstractContraptionEntity ? 0d : -0.125d);
+        current = current.add(0, appliedY, 0);
         Vec3 previous = electroEnergetics$lastRiderSeat.put(entity.getUUID(), current);
         if (previous == null)
             return;                                    // first tick: no baseline to glue yet

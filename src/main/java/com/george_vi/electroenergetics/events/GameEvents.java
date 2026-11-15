@@ -48,6 +48,7 @@ import net.minecraft.server.MinecraftServer;
 import com.simibubi.create.Create;
 import com.simibubi.create.content.trains.entity.Carriage;
 import com.simibubi.create.content.trains.entity.Train;
+import com.george_vi.electroenergetics.content.railway_electrification.TrainTractionModel;
 import java.util.UUID;
 import dev.engine_room.flywheel.api.event.ReloadLevelRendererEvent;
 import net.createmod.catnip.platform.CatnipServices;
@@ -819,25 +820,77 @@ public class GameEvents {
             boolean arriving = driver.isSpaceHeld() && arrivingAtStation(train);
 
             if (arriving && !driver.autoArrive) {
-                driver.autoArrive = true;
-                // Remember what the driver had selected, so cancelling can restore it.
-                driver.autoArriveGear = driver.gear;
-            } else if (driver.autoArrive && !arriving) {
-                // Arrived, or cancelled. Distinguishing them decides whether the lever is
-                // restored or dropped: Create clears the destination on arrival, so a
-                // train now sitting at a station it was navigating to has arrived.
+                // THE STOPABILITY GATE. The operator's rule, in their own words: with x the distance to
+                // the station and a the brake notch's deceleration, x < v^2/(2a) cannot be stopped for -
+                // so it must not be offered, and it must not be driven. The drag term they asked for is
+                // inside runningResistance (it decelerates a braking train, so it SHORTENS the honest
+                // figure), grade travels with the direction of motion, and the brake carries the same
+                // 0.9 usable margin the arrival curve is held to. Below the distance the approach is
+                // refused: no prompt, no arming, one warning with the numbers. NOTHING passes through
+                // the station and NOTHING backs into it - the front listener stays native, and a
+                // refused hold driven all the way to the platform ends in its stop: the dispatcher's
+                // remote stop, with the driver handed back a parked train.
+                double d = train.navigation.distanceToDestination;
+                double vMs = Math.abs(train.speed) * 20d;
+                double gradeTravel = train.speed < 0 ? -data.trackGrade : data.trackGrade;
+                double needed = TrainTractionModel.stoppingDistance(vMs, gradeTravel, train.carriages.size());
+                if (d < needed) {
+                    if (!driver.arrivalRefused) {
+                        driver.arrivalRefused = true;
+                        UUID controller = controllingPlayer(train);
+                        ServerPlayer holder = controller == null ? null : server.getPlayerList().getPlayer(controller);
+                        if (holder != null)
+                            holder.displayClientMessage(Component.translatable(
+                                    "electroenergetics.train.arrival.tooClose",
+                                    String.format("%.0f", vMs * 3.6d),
+                                    (int) Math.ceil(needed), (int) Math.floor(Math.max(d, 0d))), true);
+                    }
+                } else {
+                    driver.arrivalRefused = false;
+                    driver.autoArrive = true;
+                    // Remember what the driver had selected, so cancelling can restore it.
+                    driver.autoArriveGear = driver.gear;
+                }
+            } else if (!arriving && (driver.autoArrive || driver.arrivalRefused)) {
+                // LEAVE, two ways. A release BEFORE arrival restores the lever AND cancels the
+                // navigation: the approach was the driver's hold-space commitment, and a commitment
+                // that outlives the key would ambush a driver who simply let go - the train would run
+                // on into the station and be stopped there at whatever speed the lever held. Releasing
+                // and pressing again walks the stopability gate fresh, which is exactly the operator's
+                // ruling. An ARRIVAL while the approach was never armed (the refused hold driven all
+                // the way in) is the dispatcher's remote stop: the train is parked in the brake and
+                // the driver is told, which is the outcome the operator named for ignoring the
+                // refusal. A schedule-driven destination is left to Create on both paths.
                 boolean arrived = train.getCurrentStation() != null;
+                boolean wasArmed = driver.autoArrive;
                 driver.autoArrive = false;
-                if (arrived)
+                if (arrived) {
                     driver.failSafe();
-                else if (data.gearAvailable(driver.autoArriveGear))
-                    driver.gear = driver.autoArriveGear;
-                else
-                    // The remembered position commands traction and there is no supply to command
-                    // it with, so restoring it would put the handle on a dead detent. The power-off
-                    // position is what the train is actually doing, and the driver can re-engage a
-                    // traction position once the wire is back.
-                    driver.gear = TrainGear.COAST;
+                    if (driver.arrivalRefused) {
+                        UUID controller = controllingPlayer(train);
+                        ServerPlayer holder = controller == null ? null : server.getPlayerList().getPlayer(controller);
+                        if (holder != null)
+                            holder.displayClientMessage(Component.translatable(
+                                    "electroenergetics.train.arrival.remoteStop"), true);
+                    }
+                } else {
+                    if (train.runtime == null || train.runtime.getSchedule() == null)
+                        train.navigation.cancelNavigation();
+                    // Only a lever the law actually overrode needs restoring: a refused approach never
+                    // touched the gear, and writing a remembered position over a lever the driver has
+                    // since moved would be the mod driving the driver.
+                    if (wasArmed) {
+                        if (data.gearAvailable(driver.autoArriveGear))
+                            driver.gear = driver.autoArriveGear;
+                        else
+                            // The remembered position commands traction and there is no supply to command
+                            // it with, so restoring it would put the handle on a dead detent. The power-off
+                            // position is what the train is actually doing, and the driver can re-engage a
+                            // traction position once the wire is back.
+                            driver.gear = TrainGear.COAST;
+                    }
+                }
+                driver.arrivalRefused = false;
             }
 
             // The lever is deliberately NOT forced to the brake while a station is
