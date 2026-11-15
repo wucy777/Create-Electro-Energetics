@@ -346,99 +346,6 @@ public class TrainDriverState {
      */
     public boolean powerLossCoasted = false;
 
-    // ------------------------------------------------------------------
-    // Automatic station arrival (Create's "hold space" mode)
-    // ------------------------------------------------------------------
-
-    /**
-     * Whether automatic arrival is in progress.
-     *
-     * <p>While this is set, Create's navigation owns the target speed instead of the
-     * lever, which is the whole point: the driver holds space, picks a station, and the
-     * train brakes at the right distance for it. The lever's position is remembered
-     * rather than obeyed, because obeying it is the bug this exists to avoid - an
-     * ACCELERATE lever would otherwise command traction against the approach and drive
-     * straight through the platform.
-     */
-    public boolean autoArrive = false;
-
-    /**
-     * The stopability gate refused the current hold-space approach (the station is closer than the
-     * consist's braking distance). Latches the one-time warning per hold and clears on release, on
-     * arming, and on every handover back to Create.
-     */
-    public boolean arrivalRefused = false;
-
-    /**
-     * One hold of space = one arrival. Set when an approach completes (the front listener's stop at
-     * the platform) and cleared when the key is genuinely released. Without it, the scan that runs
-     * while the key is still held finds the NEXT station and the approach re-arms on the spot: the
-     * operator reported holding space through an arrival and being dispatched onward before the
-     * train had even settled - this latch is what hands a held-space arrival back as a parked train.
-     */
-    public boolean approachLatch = false;
-
-    /**
-     * How long the train has been at a dead stop during an armed arrival.
-     *
-     * <p>Create's front listener completes an arrival by zeroing the speed outright, and its station bookkeeping
-     * catches up on a later tick. Judging "arrived" on that bookkeeping alone left a one-tick window in which the
-     * approach looked like a release, so the lever was restored and the train pulled away again with space still
-     * held. This counter bridges that window: a dead stop with the key down and a destination that has just gone
-     * is an arrival, and the counter is what tells it from a stop some other system caused.
-     */
-    public int arrivalStopTicks = 0;
-
-    /**
-     * The position the panel should DRAW while an arrival is running, or null to draw the lever as it is.
-     *
-     * <p>During a hold-space arrival the lever no longer decides the speed - the profile does - so the handle a
-     * driver left in ACCELERATE is a lie about what the train is doing. The operator's ruling: the panel shows the
-     * train's ACTUAL behaviour, so a braking approach reads BRAKE and a departure reads ACCELERATE. This is kept
-     * apart from {@code gear} rather than written into it, because the lever is still the driver's own state: three
-     * separate rules read it (the station release, the accelerate-at-ceiling handover, and the capture of a cruise
-     * setpoint), and letting a display concern rewrite it would fire those in the middle of an arrival.
-     */
-    public TrainGear gearDisplay = null;
-
-    /** The lever position to restore if the driver cancels before arriving. */
-    public TrainGear autoArriveGear = TrainGear.BRAKE;
-
-    /**
-     * The world-frame direction (+1 / -1) the train was traveling during the arrival approach,
-     * remembered while it still moves. The terminal creep (the last fraction of a Block into the
-     * arrival trigger, or the back-up after an overshoot) needs a traction direction when the
-     * train has come to rest - at rest, {@code Math.signum(speed)} is zero and says nothing.
-     */
-    public int arrivalTravelDir = 0;
-
-    /**
-     * Ticks since the controls last reported the space key held.
-     *
-     * <p>A countdown rather than a flag because Create stops calling
-     * {@code CarriageContraptionEntity.control} the moment no key is held at all - so
-     * there is no "space was released" event to listen for, only the absence of
-     * further reports. A short grace, the same idea as {@link #driverTicks}, keeps a
-     * dropped packet from cancelling an approach mid-brake.
-     */
-    public int spaceTicks = 0;
-
-    /** Record that the space key is held, refreshing the grace. Called from control(). */
-    public void setSpaceHeld() {
-        spaceTicks = 5;
-    }
-
-    /** Called each train tick, before the motion is integrated. */
-    public void tickSpace() {
-        if (spaceTicks > 0)
-            spaceTicks--;
-    }
-
-    /** Whether the driver appears to be holding space, within the grace period. */
-    public boolean isSpaceHeld() {
-        return spaceTicks > 0;
-    }
-
     /**
      * The speed cruise is holding, in Blocks/Second, SIGNED in the driving cab's frame.
      *
@@ -863,10 +770,8 @@ public class TrainDriverState {
         // transition, leaving a powered train with its pantograph still up and therefore not
         // actually handed over. The emergency release is owned solely by the standstill test in
         // GameEvents, so there is one writer and no ordering to get wrong.
-        autoArrive = false;
-        arrivalRefused = false;
-        approachLatch = false;
-        spaceTicks = 0;
+        // The hold-space approach is Create's own now: this mod no longer keeps any arrival state to clear.
+        // It used to reset autoArrive, arrivalRefused, approachLatch and spaceTicks here.
         powerLossCoasted = false;
         blockedParked = false;
     }

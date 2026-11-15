@@ -155,12 +155,7 @@ public class TrainControlHud implements LayeredDraw.Layer {
 
         TrainGear[] gears = TrainGear.values();
         int serverGear = gear.gear();
-        // During a hold-space arrival the lever is not what is driving the train, so the scale marks the train's
-        // ACTUAL behaviour: braking into a station reads BRAKE, a departure reads ACCELERATE. The server computes
-        // it (TrainDriverState.gearDisplay) and sends 15 when the lever itself is the honest answer.
-        int current = gear.gearDisplay() >= 0 && gear.gearDisplay() < gears.length
-                ? gear.gearDisplay()
-                : TrainControlInput.displayGear(serverGear);
+        int current = TrainControlInput.displayGear(serverGear);
         boolean valid = current >= 0 && current < gears.length;
         TrainGear selected = valid ? gears[current] : TrainGear.BRAKE;
 

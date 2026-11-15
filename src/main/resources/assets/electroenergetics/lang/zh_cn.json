@@ -539,10 +539,6 @@
   "electroenergetics.train.riders.notSeatedBraking": "超载：座位不足，列车限速 100 km/h",
   "electroenergetics.train.riders.limited": "车内有玩家未就座，列车限速 100 km/h",
   "electroenergetics.train.riders.seatLocked": "车速超过 100 km/h，行驶中禁止下车",
-  "electroenergetics.train.arrival.prompt": "按住空格进站 %s：距离 %s 格",
-  "electroenergetics.train.arrival.tooClose": "刹不住该站：%s km/h 需要制动距离 %s 格，当前仅剩 %s 格。请先减速再按空格进站",
-  "electroenergetics.train.arrival.remoteStop": "进站申请已被拒绝，列车已在站台远程停车。请重新选档接管。",
-  "electroenergetics.train.arrival.active": "进站中 %s：剩余 %s 格",
   "electroenergetics.train.panto.autoOff": "停用",
   "key.electroenergetics.pantograph_toggle": "列车：自动/停用受电弓",
   "electroenergetics.train.panto.up": "已升弓",
@@ -599,7 +595,6 @@
   "electroenergetics.train.lamp.regen": "再生",
   "electroenergetics.train.status.warn": "即将超时，请确认",
   "electroenergetics.train.status.overdue": "已超时——即将制动",
-  "electroenergetics.train.status.arriving": "自动进站中",
   "electroenergetics.train.status.unmanned": "无人驾驶——请确认或接管",
   "electroenergetics.train.panto.parked": "停用：降弓保持",
   "electroenergetics.train.hint.autoPark": "自动/停用"

@@ -889,13 +889,11 @@ public class CatenaryModule {
                                         driver.emergencyArmed, driver.emergencyPenalty,
                                         trainData.cruiseState.ordinal(),
                                         trainData.regenPower > 0d,
-                                        driver.autoArrive, driver.unmanned,
+                                        driver.unmanned,
                                         (float) TrainTractionModel.designMaxSpeed(),
                                         trainData.controlMode.ordinal(), RiderSeatGate.ceilingRuleApplies(train),
                                         com.george_vi.electroenergetics.content.railway_electrification
-                                                .RiderSeatGate.currentTickRate(),
-                                        driver.gearDisplay != null
-                                                ? driver.gearDisplay.ordinal() : 15)
+                                                .RiderSeatGate.currentTickRate())
                         );
                         trainData.lastSyncedVoltage = voltage;
                         trainData.lastSyncedCurrent = totalCurrent;

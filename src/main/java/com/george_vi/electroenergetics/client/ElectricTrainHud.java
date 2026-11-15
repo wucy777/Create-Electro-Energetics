@@ -402,11 +402,6 @@ public class ElectricTrainHud
             return tr("electroenergetics.train.status.warn");
         if (gear.confirmDue())
             return tr("electroenergetics.train.status.confirm");
-        // Automatic arrival outranks the lever readout: while it is running, the lever is
-        // not what is commanding the train, and saying "holding 100" would be a lie about
-        // a train that is braking for a platform.
-        if (gear.autoArrive())
-            return tr("electroenergetics.train.status.arriving");
         // Unmanned is shown even while the clock is still only amber, because it changes
         // what the driver has to do about it - there is nobody at the desk to press the
         // button, so the warning cannot be answered where it is being displayed.

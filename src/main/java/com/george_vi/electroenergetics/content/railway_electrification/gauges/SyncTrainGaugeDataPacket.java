@@ -45,7 +45,6 @@ import java.util.UUID;
  * @param emergencyPenalty whether the post-emergency speed cap is in force
  * @param cruiseState      what cruise decided, as a {@code CruiseState} ordinal
  * @param regen            whether the motors are feeding the line right now
- * @param autoArrive       Create's navigation is running an automatic station arrival
  * @param unmanned         the driver has left the controls and the clock is running
  * @param designMaxSpeed   the ceiling the consist is ALLOWED, supply or not; see
  *                         {@code TrainHudData.maxSpeedFor}
@@ -57,9 +56,9 @@ public record SyncTrainGaugeDataPacket(UUID trainId, double voltage, double curr
                                        int gear, boolean confirmDue, int vigilanceStage,
                                        boolean emergencyArmed,
                                        boolean emergencyPenalty, int cruiseState,
-                                       boolean regen, boolean autoArrive, boolean unmanned,
+                                       boolean regen, boolean unmanned,
                                        float designMaxSpeed, int controlMode, boolean seatLimited,
-                                       float tickRate, int gearDisplay)
+                                       float tickRate)
         implements ClientboundPacketPayload {
 
     public static final StreamCodec<ByteBuf, SyncTrainGaugeDataPacket> STREAM_CODEC = new StreamCodec<>() {
@@ -76,17 +75,11 @@ public record SyncTrainGaugeDataPacket(UUID trainId, double voltage, double curr
             int motorCars = buffer.readInt();
             float powerPerCarriage = buffer.readFloat();
             boolean manualFullSpeed = buffer.readBoolean();
-            // The lever byte carries TWO positions: the low nibble is the lever itself, the high nibble the
-            // position the panel should DRAW while an arrival is running (15 = no override). Both fit in one
-            // byte, and the split keeps the two questions apart - the input path needs the lever, the HUD needs
-            // what the train is doing, and during an approach they are deliberately different.
-            int gearByte = buffer.readUnsignedByte();
-            int gear = gearByte & 0x0F;
-            int gearDisplay = gearByte >> 4;
-            // Packed into one byte, and STILL unchanged in size: the four flags keep
-            // bits 0-3, the two-bit warning stage takes bits 4-5, and automatic arrival
-            // and unmanned take the last two. This rides a per-train broadcast, so not
-            // growing it is the point - and the byte was already being sent.
+            int gear = buffer.readByte();
+            // Packed into one byte, and unchanged in size: the four flags keep bits 0-3 between them and the
+            // two-bit warning stage takes bits 4-5. Bit 6 is free - it carried the automatic-arrival flag while
+            // this mod ran its own hold-space approach, and the mechanism has been handed back to Create, which
+            // has its own prompt and its own navigation. Unmanned is bit 7.
             int flags = buffer.readUnsignedByte();
             int cruiseState = buffer.readByte();
             float designMaxSpeed = buffer.readFloat();
@@ -101,14 +94,13 @@ public record SyncTrainGaugeDataPacket(UUID trainId, double voltage, double curr
             boolean emergencyPenalty = (flags & 4) != 0;
             boolean regen = (flags & 8) != 0;
             int vigilanceStage = (flags >> 4) & 3;
-            boolean autoArrive = (flags & 64) != 0;
             boolean unmanned = (flags & 128) != 0;
             float tickRate = buffer.readFloat();
             return new SyncTrainGaugeDataPacket(trainId, voltage, current, maxSpeed, power,
                     grade, powered, carriages, motorCars, powerPerCarriage, manualFullSpeed,
                     gear, confirmDue, vigilanceStage, emergencyArmed, emergencyPenalty,
-                    cruiseState, regen, autoArrive, unmanned, designMaxSpeed, controlMode, seatLimited,
-                    tickRate, gearDisplay);
+                    cruiseState, regen, unmanned, designMaxSpeed, controlMode, seatLimited,
+                    tickRate);
         }
 
         @Override
@@ -124,15 +116,11 @@ public record SyncTrainGaugeDataPacket(UUID trainId, double voltage, double curr
             buffer.writeInt(p.motorCars);
             buffer.writeFloat(p.powerPerCarriage);
             buffer.writeBoolean(p.manualFullSpeed);
-            // The lever byte carries TWO positions: the low nibble is the lever, the high nibble the position
-            // the panel should DRAW while an arrival runs (15 = no override). During a hold-space approach the
-            // lever is not what is driving the train, so the panel needs to be told what is - "the position
-            // follows the train's actual behaviour" was the operator's ruling.
-            buffer.writeByte((p.gear & 0x0F) | ((p.gearDisplay & 0x0F) << 4));
+            buffer.writeByte(p.gear);
             int flags = (p.confirmDue ? 1 : 0) | (p.emergencyArmed ? 2 : 0)
                     | (p.emergencyPenalty ? 4 : 0) | (p.regen ? 8 : 0)
                     | ((p.vigilanceStage & 3) << 4)
-                    | (p.autoArrive ? 64 : 0) | (p.unmanned ? 128 : 0);
+                    | (p.unmanned ? 128 : 0);
             buffer.writeByte(flags);
             buffer.writeByte(p.cruiseState);
             buffer.writeFloat(p.designMaxSpeed);
@@ -155,7 +143,7 @@ public record SyncTrainGaugeDataPacket(UUID trainId, double voltage, double curr
                 carriages, motorCars, powerPerCarriage, manualFullSpeed, designMaxSpeed,
                 controlMode);
         TrainHudData.updateGear(trainId, gear, confirmDue, vigilanceStage, emergencyArmed,
-                emergencyPenalty, cruiseState, regen, autoArrive, unmanned, gearDisplay);
+                emergencyPenalty, cruiseState, regen, unmanned);
         TrainHudData.setSeatLimited(trainId, seatLimited);
         TrainHudData.setServerTickRate(tickRate);
         RiderSeatGate.acceptSyncedTickRate(tickRate);
