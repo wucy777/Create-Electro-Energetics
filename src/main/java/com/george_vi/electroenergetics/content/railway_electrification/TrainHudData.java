@@ -43,7 +43,8 @@ public final class TrainHudData {
     public record Sample(float maxSpeed, float power, float voltage, double grade,
                          boolean powered, int carriages, int motorCars,
                          float powerPerCarriage, boolean manualFullSpeed,
-                         float designMaxSpeed, int controlMode) {}
+                         float designMaxSpeed, int controlMode,
+                         float stationDistance, float brakeDistance) {}
 
     private static final Map<UUID, Sample> SAMPLES = new ConcurrentHashMap<>();
 
@@ -167,10 +168,11 @@ public final class TrainHudData {
     public static void update(UUID trainId, float maxSpeed, float power, float voltage,
                               double grade, boolean powered, int carriages, int motorCars,
                               float powerPerCarriage, boolean manualFullSpeed,
-                              float designMaxSpeed, int controlMode) {
+                              float designMaxSpeed, int controlMode,
+                              float stationDistance, float brakeDistance) {
         SAMPLES.put(trainId, new Sample(maxSpeed, power, voltage, grade, powered,
                 carriages, motorCars, powerPerCarriage, manualFullSpeed, designMaxSpeed,
-                controlMode));
+                controlMode, stationDistance, brakeDistance));
     }
 
     /**
@@ -379,7 +381,7 @@ public final class TrainHudData {
         PANTOGRAPHS.keySet().removeIf(gone);
         PANTOGRAPH_LOCKED.removeIf(gone);
         AUTO_RAISE.removeIf(gone);
-        OVERLOADED.removeIf(gone);
+        SEAT_LIMITED.removeIf(gone);
         // These two were missed, so they accumulated for every train the client had ever seen. Small, but it is
         // the same leak the other seven lines exist to stop.
         CLAIM_CARRIAGE.keySet().removeIf(gone);
@@ -466,20 +468,20 @@ public final class TrainHudData {
         return CARRIAGE_COUNT.getOrDefault(trainId, 0);
     }
 
-    /** Trains the server last reported as over capacity. */
-    private static final java.util.Set<UUID> OVERLOADED =
+    /** Trains the server last reported as held at the ceiling because somebody aboard can move. */
+    private static final java.util.Set<UUID> SEAT_LIMITED =
             java.util.concurrent.ConcurrentHashMap.newKeySet();
 
-    /** Whether the server last reported this train as over capacity. */
-    public static boolean overloaded(UUID trainId) {
-        return OVERLOADED.contains(trainId);
+    /** Whether the server last reported this train as held at the ceiling by the seat rule. */
+    public static boolean seatLimited(UUID trainId) {
+        return SEAT_LIMITED.contains(trainId);
     }
 
-    public static void setOverloaded(UUID trainId, boolean overloaded) {
-        if (overloaded)
-            OVERLOADED.add(trainId);
+    public static void setSeatLimited(UUID trainId, boolean limited) {
+        if (limited)
+            SEAT_LIMITED.add(trainId);
         else
-            OVERLOADED.remove(trainId);
+            SEAT_LIMITED.remove(trainId);
     }
 
     private static final java.util.Set<UUID> AUTO_RAISE =

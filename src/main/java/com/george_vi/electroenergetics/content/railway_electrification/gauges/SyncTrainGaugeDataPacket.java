@@ -58,8 +58,8 @@ public record SyncTrainGaugeDataPacket(UUID trainId, double voltage, double curr
                                        boolean emergencyArmed,
                                        boolean emergencyPenalty, int cruiseState,
                                        boolean regen, boolean autoArrive, boolean unmanned,
-                                       float designMaxSpeed, int controlMode, boolean overloaded,
-                                       float tickRate)
+                                       float designMaxSpeed, int controlMode, boolean seatLimited,
+                                       float tickRate, float stationDistance, float brakeDistance)
         implements ClientboundPacketPayload {
 
     public static final StreamCodec<ByteBuf, SyncTrainGaugeDataPacket> STREAM_CODEC = new StreamCodec<>() {
@@ -89,7 +89,7 @@ public record SyncTrainGaugeDataPacket(UUID trainId, double voltage, double curr
             // position is refused, and the lever would move and then snap back.
             int modeByte = buffer.readByte();
             int controlMode = modeByte & 3;
-            boolean overloaded = (modeByte & 4) != 0;
+            boolean seatLimited = (modeByte & 4) != 0;
             boolean confirmDue = (flags & 1) != 0;
             boolean emergencyArmed = (flags & 2) != 0;
             boolean emergencyPenalty = (flags & 4) != 0;
@@ -98,11 +98,13 @@ public record SyncTrainGaugeDataPacket(UUID trainId, double voltage, double curr
             boolean autoArrive = (flags & 64) != 0;
             boolean unmanned = (flags & 128) != 0;
             float tickRate = buffer.readFloat();
+            float stationDistance = buffer.readFloat();
+            float brakeDistance = buffer.readFloat();
             return new SyncTrainGaugeDataPacket(trainId, voltage, current, maxSpeed, power,
                     grade, powered, carriages, motorCars, powerPerCarriage, manualFullSpeed,
                     gear, confirmDue, vigilanceStage, emergencyArmed, emergencyPenalty,
-                    cruiseState, regen, autoArrive, unmanned, designMaxSpeed, controlMode, overloaded,
-                    tickRate);
+                    cruiseState, regen, autoArrive, unmanned, designMaxSpeed, controlMode, seatLimited,
+                    tickRate, stationDistance, brakeDistance);
         }
 
         @Override
@@ -129,11 +131,13 @@ public record SyncTrainGaugeDataPacket(UUID trainId, double voltage, double curr
             // Which control scheme the server has this train in. Without it the client cannot know
             // whether to show the electric panel, because the decision depends on whether a
             // pantograph is within reach of catenary - server-side geometry the client never sees.
-            buffer.writeByte((p.controlMode & 3) | (p.overloaded ? 4 : 0));
+            buffer.writeByte((p.controlMode & 3) | (p.seatLimited ? 4 : 0));
             // How many ticks the server ran in the last second. Four bytes on a payload that already carries
             // nine floats, sent per train per update, and it is the only way the client can convert a speed
             // field into metres per second and get the same answer the train is actually moving at.
             buffer.writeFloat(p.tickRate);
+            buffer.writeFloat(p.stationDistance);
+            buffer.writeFloat(p.brakeDistance);
         }
     };
 
@@ -143,10 +147,10 @@ public record SyncTrainGaugeDataPacket(UUID trainId, double voltage, double curr
         ClientTrainGaugeData.update(trainId, voltage, current);
         TrainHudData.update(trainId, maxSpeed, power, (float) voltage, grade, powered,
                 carriages, motorCars, powerPerCarriage, manualFullSpeed, designMaxSpeed,
-                controlMode);
+                controlMode, stationDistance, brakeDistance);
         TrainHudData.updateGear(trainId, gear, confirmDue, vigilanceStage, emergencyArmed,
                 emergencyPenalty, cruiseState, regen, autoArrive, unmanned);
-        TrainHudData.setOverloaded(trainId, overloaded);
+        TrainHudData.setSeatLimited(trainId, seatLimited);
         TrainHudData.setServerTickRate(tickRate);
         RiderSeatGate.acceptSyncedTickRate(tickRate);
     }

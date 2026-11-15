@@ -351,72 +351,6 @@ public class TrainDriverState {
     // ------------------------------------------------------------------
 
     /**
-     * Whether automatic arrival is in progress.
-     *
-     * <p>While this is set, Create's navigation owns the target speed instead of the
-     * lever, which is the whole point: the driver holds space, picks a station, and the
-     * train brakes at the right distance for it. The lever's position is remembered
-     * rather than obeyed, because obeying it is the bug this exists to avoid - an
-     * ACCELERATE lever would otherwise command traction against the approach and drive
-     * straight through the platform.
-     */
-    public boolean autoArrive = false;
-
-    /**
-     * The stopability gate refused the current hold-space approach (the station is closer than the
-     * consist's braking distance). Latches the one-time warning per hold and clears on release, on
-     * arming, and on every handover back to Create.
-     */
-    public boolean arrivalRefused = false;
-
-    /**
-     * One hold of space = one arrival. Set when an approach completes (the front listener's stop at
-     * the platform) and cleared when the key is genuinely released. Without it, the scan that runs
-     * while the key is still held finds the NEXT station and the approach re-arms on the spot: the
-     * operator reported holding space through an arrival and being dispatched onward before the
-     * train had even settled - this latch is what hands a held-space arrival back as a parked train.
-     */
-    public boolean approachLatch = false;
-
-    /** The lever position to restore if the driver cancels before arriving. */
-    public TrainGear autoArriveGear = TrainGear.BRAKE;
-
-    /**
-     * The world-frame direction (+1 / -1) the train was traveling during the arrival approach,
-     * remembered while it still moves. The terminal creep (the last fraction of a Block into the
-     * arrival trigger, or the back-up after an overshoot) needs a traction direction when the
-     * train has come to rest - at rest, {@code Math.signum(speed)} is zero and says nothing.
-     */
-    public int arrivalTravelDir = 0;
-
-    /**
-     * Ticks since the controls last reported the space key held.
-     *
-     * <p>A countdown rather than a flag because Create stops calling
-     * {@code CarriageContraptionEntity.control} the moment no key is held at all - so
-     * there is no "space was released" event to listen for, only the absence of
-     * further reports. A short grace, the same idea as {@link #driverTicks}, keeps a
-     * dropped packet from cancelling an approach mid-brake.
-     */
-    public int spaceTicks = 0;
-
-    /** Record that the space key is held, refreshing the grace. Called from control(). */
-    public void setSpaceHeld() {
-        spaceTicks = 5;
-    }
-
-    /** Called each train tick, before the motion is integrated. */
-    public void tickSpace() {
-        if (spaceTicks > 0)
-            spaceTicks--;
-    }
-
-    /** Whether the driver appears to be holding space, within the grace period. */
-    public boolean isSpaceHeld() {
-        return spaceTicks > 0;
-    }
-
-    /**
      * The speed cruise is holding, in Blocks/Second, SIGNED in the driving cab's frame.
      *
      * <p>Positive is the normal case: the train was already running the way the ACCELERATE
@@ -777,47 +711,6 @@ public class TrainDriverState {
      */
     public boolean riderBrakeNotified = false;
 
-    /**
-     * True while there are more players aboard than there are seats for them.
-     *
-     * <p>The only thing this caps: while it holds, the train may not exceed Create's ceiling and the
-     * accelerate position is refused. It is a capacity limit, not a "somebody is standing" penalty - a
-     * player on their feet below the ceiling is free to walk around, which is the whole point of seating
-     * them in the first place.
-     */
-    public boolean overloaded = false;
-
-    /**
-     * Ticks the train has been seen with somebody standing while there are seats to give them.
-     *
-     * <p>Seating needs a round trip: the server asks each standing player which seat they are nearest, the
-     * client answers, and the answer is applied on a later tick. Judging overload on the very first tick that
-     * somebody is standing therefore reports "overloaded" and applies the ceiling brake for people who are
-     * about to be seated anyway - reported as "the train has plenty of empty seats but it complains about
-     * overloading and brakes to 28, then seats me".
-     *
-     * <p>So the verdict waits {@link RiderSeatGate#SEAT_INTENT_GRACE_TICKS} ticks. Seating is attempted on
-     * every one of those ticks; only a standing player who is still standing after the grace is overload.
-     */
-    public int unseatedTicks = 0;
-
-    /**
-     * The position the lever was in when the capacity limit forced it down to CRUISE, or null if it did not.
-     *
-     * <p>At the ceiling the accelerate position is dropped to cruise - the train holds the limit instead of
-     * pushing against it. When the overload clears, the drop is lifted: the lever goes back to what it was
-     * if the driver has not moved it in the meantime, and if they have, their choice stands.
-     */
-    public TrainGear gearBeforeOverloadDrop = null;
-
-    /**
-     * True while the capacity rule is braking the train down to the ceiling.
-     *
-     * <p>Without this the brake was indistinguishable from one the driver had applied, so nothing released
-     * it when the speed reached the ceiling: the train braked past 28 and went on to a stand. A limit that
-     * stops the train is not a limit.
-     */
-    public boolean overloadBraking = false;
 
     /**
      * The vigilance device tripping: brake the train to a stand and drop the lever.
@@ -881,10 +774,6 @@ public class TrainDriverState {
         // transition, leaving a powered train with its pantograph still up and therefore not
         // actually handed over. The emergency release is owned solely by the standstill test in
         // GameEvents, so there is one writer and no ordering to get wrong.
-        autoArrive = false;
-        arrivalRefused = false;
-        approachLatch = false;
-        spaceTicks = 0;
         powerLossCoasted = false;
         blockedParked = false;
     }

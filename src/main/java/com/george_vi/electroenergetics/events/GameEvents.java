@@ -308,32 +308,22 @@ public class GameEvents {
                 // left stranded on. The one latch that survives is the message - riderBrakeNotified - and it is
                 // cleared in the atCeiling block's own else branch.
                 if (atCeiling) {
-                    // THE LIMIT, AND NOTHING ELSE. There is no seating pass and no overload verdict any more.
+                    // THE LIMIT, AND NOTHING ELSE. There is no seating pass, no overload verdict, and no brake.
                     //
-                    // The operator's decision: seat allocation is what produced most of this mod's bugs, and the
-                    // nearest-seat rule could never be made to agree with what a player sees. So a train with
-                    // somebody free to move inside it is simply held at the ceiling instead - a rule that covers
-                    // every case the overload machinery was reaching for, and does it without moving anybody.
+                    // The operator's rule, restated after the last build put the train on its brakes: reaching
+                    // the ceiling HANDS OVER TO CRUISE and holds there. It does not brake. The only position
+                    // taken away is accelerate, because that is the one that would keep feeding power into a
+                    // train already at its limit; brake, coast and reverse are all left to the driver.
                     //
-                    // Above the ceiling (a player boarded a train already running faster) the brake brings it
-                    // down; at the ceiling the lever becomes cruise so the train HOLDS the limit rather than
-                    // pushing against it. Both sides are written from the actual speed, so a missed latch cannot
-                    // strand the brake on.
-                    double speed = Math.abs(train.speed);
-                    if (speed > RiderSeatGate.createCeilingBpt() + 1.0e-4d) {
-                        if (driver.gear != TrainGear.BRAKE)
-                            driver.gear = TrainGear.BRAKE;
-                    } else if (driver.gear == TrainGear.ACCELERATE) {
-                        // Accelerate is the one position that would keep feeding power into a train already at
-                        // its limit. The brake, coast and reverse are all left alone - a driver has a reason to
-                        // use any of them at the ceiling.
+                    // Speed above the ceiling is a different matter and is handled by the clamp where the law
+                    // writes train.speed - this block never needs to look at it.
+                    if (driver.gear == TrainGear.ACCELERATE) {
                         driver.gear = TrainGear.CRUISE;
                         driver.captureCruiseSetpointFromWorld(RiderSeatGate.bptToMs(train.speed));
-                    }
-
-                    if (!driver.riderBrakeNotified && speed > RiderSeatGate.createCeilingBpt() + 1.0e-4d) {
-                        driver.riderBrakeNotified = true;
-                        notifyRiders(train, "electroenergetics.train.riders.overloaded");
+                        if (!driver.riderBrakeNotified) {
+                            driver.riderBrakeNotified = true;
+                            notifyRiders(train, "electroenergetics.train.riders.limited");
+                        }
                     }
                 } else if (driver.riderBrakeNotified) {
                     driver.riderBrakeNotified = false;
@@ -341,7 +331,7 @@ public class GameEvents {
             } else {
                 // Handed back to Create: the seat limit is this mod's rule and must not outlive the mode
                 // that owns it. Leaving the flag set capped a train this mod no longer drives.
-                driver.overloaded = false;
+
             }
 
             // A train under a running SCHEDULE is Create's to drive, not this mode's.
@@ -702,90 +692,6 @@ public class GameEvents {
                 driver.blockedParked = false;   // moved again: allow a future park
             }
 
-            // Automatic station arrival, the driver holding space with a destination.
-            //
-            // Create's Navigation runs the approach and stops the train at the platform;
-            // the gear law follows Navigation's commanded speed while this is set (see
-            // TrainMixin). Two transitions have to be handled here, because this is the
-            // once-per-tick hook that sees both the controls and the train's state:
-            //
-            //   ENTER  the driver holds space and Create has started a navigation
-            //   LEAVE  the space key is released, or the train has arrived
-            //
-            // On release before arrival the lever is restored, so the driver gets the
-            // train back exactly as they left it and can carry on - cancelling an
-            // approach should not also silently change the gear.
-            //
-            // On arrival the lever is dropped to the BRAKE and the train is parked,
-            // which is what stops the reported bug: with the lever left in ACCELERATE,
-            // releasing space at the platform pulled the train straight back out again,
-            // because the gear law saw a traction position and obeyed it. Parking in the
-            // brake means departure needs an explicit gear selection, which is also what
-            // a real train does.
-            driver.tickSpace();
-            boolean arriving = driver.isSpaceHeld() && arrivingAtStation(train);
-
-            // THE STOPABILITY GATE lives where the prompt is drawn: control() evaluates it at the
-            // same instant it decides whether the approach prompt shows, and arms the approach on
-            // the same verdict - one evaluation, one moment, with no window for an accelerating
-            // train to outgrow its braking distance between the two (see
-            // CarriageContraptionEntityMixin's approachGate). This hook handles only the ENDING of
-            // an approach: the release, or the front listener's stop.
-            if (!arriving && (driver.autoArrive || driver.arrivalRefused)) {
-                // LEAVE, classified by WHY the approach ended, because the ending decides who owns
-                // the train. The destination only ever vanishes two ways while this state is live:
-                // the front listener's stop fired (it clears it exactly there, and Create's scan-fail
-                // path provably does not - its cleanup touches only the client-facing message flag),
-                // or this mod cancelled it below.
-                boolean wasArmed = driver.autoArrive;
-                boolean wasRefused = driver.arrivalRefused;
-                if (driver.isSpaceHeld() && train.getCurrentStation() != null) {
-                    // The key is still held and the train is checked in at a station: the listener's
-                    // stop fired. The approach is over and the train is at a platform - parked in the
-                    // brake, the driver handed back. A hold that was refused and driven in anyway is
-                    // the dispatcher's remote stop the operator named; a hold that was armed gets the
-                    // same parking, which is what an arrival already did. The latch is what stops
-                    // the still-held key from re-arming the scan's next station: one hold, one
-                    // arrival, and the next departure asks for a fresh press.
-                    driver.autoArrive = false;
-                    driver.arrivalRefused = false;
-                    driver.approachLatch = true;
-                    driver.failSafe();
-                    if (wasRefused) {
-                        UUID controller = controllingPlayer(train);
-                        ServerPlayer holder = controller == null ? null : server.getPlayerList().getPlayer(controller);
-                        if (holder != null)
-                            holder.displayClientMessage(Component.translatable(
-                                    "electroenergetics.train.arrival.remoteStop"), true);
-                    }
-                } else if (!driver.isSpaceHeld()) {
-                    // A genuine release: the grace (spaceTicks) has expired, so the key is truly up.
-                    // The approach was the driver's hold-space commitment, and a commitment that
-                    // outlives the key would ambush a driver who simply let go - the train would run
-                    // on into the station and be stopped there at whatever speed the lever held.
-                    // Releasing and pressing again walks the stopability gate fresh, which is exactly
-                    // the operator's ruling. Only a lever the law actually overrode needs restoring:
-                    // a refused approach never touched the gear.
-                    driver.autoArrive = false;
-                    driver.arrivalRefused = false;
-                    driver.approachLatch = false;
-                    if (train.runtime == null || train.runtime.getSchedule() == null)
-                        train.navigation.cancelNavigation();
-                    if (wasArmed) {
-                        if (data.gearAvailable(driver.autoArriveGear))
-                            driver.gear = driver.autoArriveGear;
-                        else
-                            // The remembered position commands traction and there is no supply to command
-                            // it with, so restoring it would put the handle on a dead detent. The power-off
-                            // position is what the train is actually doing, and the driver can re-engage a
-                            // traction position once the wire is back.
-                            driver.gear = TrainGear.COAST;
-                    }
-                }
-                // else: the key is still held and the train is not checked in anywhere - the
-                // destination is between Create's scans. Leave the approach state alone; the next
-                // scan re-sets it and this state continues.
-            }
 
             // The lever is deliberately NOT forced to the brake while a station is
             // held. An earlier version did that to stop a train being dispatched
@@ -797,21 +703,6 @@ public class GameEvents {
             // impossible. Leaving the lever alone is also harmless: reverse is capped
             // at a walking pace and takes an explicit selection.
         }
-    }
-
-    /**
-     * Whether Create is currently navigating this train to a station.
-     *
-     * <p>The test is simply "a destination is set". That is what the space key does
-     * when held away from a station - it starts a navigation to the nearest station the
-     * train can approach - and it is also the state the space key is obeyed in above,
-     * which is what keeps the two in step. A train already sitting at a station has no
-     * destination, so holding space there does not re-enter automatic arrival: that
-     * case is the "already arrived" prompt, and re-arming would restart a journey the
-     * driver has just completed.
-     */
-    private static boolean arrivingAtStation(Train train) {
-        return train.navigation != null && train.navigation.destination != null;
     }
 
     /**

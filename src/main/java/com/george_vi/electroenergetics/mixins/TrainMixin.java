@@ -391,25 +391,6 @@ public class TrainMixin implements ICEETrainExtension {
      * an unpowered one, or a scheduled one with a destination - falls through to
      * Create unchanged.
      */
-    /**
-     * During a hold-space arrival the gear law owns the train's speed and follows the arrival brake's
-     * physically bounded curve. Create's own space-approach would answer the same command with its
-     * unbounded integration - its target collapses to zero at the end of the stop and the lerp pulls the
-     * speed down with it, a deceleration far past the service brake at the last moment, which is the
-     * felt spike. So while the arrival runs, this method is a no-op: the law writes, Create watches.
-     *
-     * <p>Everything else passes through untouched: scheduled trains, the W/S path, and any caller this
-     * mod does not own keep Create's approach exactly as it was.
-     */
-    @WrapMethod(method = "approachTargetSpeed")
-    private void electroEnergetics$ownArrivalApproach(float targetSpeed, Operation<Void> original) {
-        Train self = (Train) (Object) this;
-        ElectricTrainData data = electroenergetics$electricTrainData;
-        if (data.underElectricControl() && data.driver != null && data.driver.autoArrive)
-            return;
-        original.call(targetSpeed);
-    }
-
     @WrapMethod(method = "tickPassiveSlowdown")
     private void electroEnergetics$tickPassiveSlowdown(Operation<Void> original) {
         Train self = (Train) (Object) this;
@@ -435,11 +416,6 @@ public class TrainMixin implements ICEETrainExtension {
         // driver would recognise. The vigilance clock still runs while unmanned and
         // still brakes the train at TRIP_TICKS, so this defers the stop, it does not
         // remove it.
-        // autoArrive is NOT excluded here: the law owns the speed during a hold-space arrival too.
-        // Create's own approach commands a target that collapses faster than any train can brake, and
-        // its integration answers that with a deceleration spike at the very end of the stop - felt
-        // well past the service brake, past the emergency brake. See the arrival block in applyGearLaw
-        // for the physically bounded curve that replaces it.
         if (data.underElectricControl() && data.driver.underGearControl()) {
             applyGearLaw(self, data);
             return;
@@ -491,11 +467,6 @@ public class TrainMixin implements ICEETrainExtension {
         // The emergency brake is the one that holds the lever, and that is enforced where gear commands arrive,
         // not here - see TrainDriverState.emergencyHeldGear.
         TrainGear effectiveGear = st.vigilanceTripped ? TrainGear.BRAKE : st.gear;
-        // The arrival drives through the coast term: drag and gravity are integrated by the switch as
-        // usual, and the arrival brake below adds exactly what the profile demands - so a trip fired
-        // mid-approach does not fight the curve, and neither does the lever.
-        if (st.autoArrive)
-            effectiveGear = TrainGear.COAST;
 
         // AUTOMATIC ARRIVAL: Create's navigation commands the speed, not the lever.
         //
@@ -530,11 +501,7 @@ public class TrainMixin implements ICEETrainExtension {
         // Only for a gear that commands movement: selecting the brake or cutting the
         // power at a platform should leave the train checked in, which is what lets
         // the schedule resume and what makes the arrival look like an arrival.
-        //
-        // Never while arriving automatically: releasing the station there would undo
-        // the arrival the moment the train touched the platform, and the train would
-        // pull straight back out - a station the driver cannot actually stop at.
-        if (!st.autoArrive && effectiveGear.appliesTraction() && self.getCurrentStation() != null)
+        if (effectiveGear.appliesTraction() && self.getCurrentStation() != null)
             self.leaveStation();
 
         // WHICH WAY THE DRIVING CAB FACES.
@@ -581,83 +548,6 @@ public class TrainMixin implements ICEETrainExtension {
 
         // Back out of the mirror: the law worked in the cab's frame, and the speed it writes is the train's own.
         a *= mirror;
-
-        // THE ARRIVAL. This law owns the speed during a hold-space approach, and the profile is
-        // bounded by the friction brake: no moment of the approach may exceed it.
-        //
-        // CREATE'S ARRIVAL, stated as the bytecode has it: there is no distance check that fires on a
-        // tick. The arrival completes solely in the front bogey's edge-point listener
-        // (Train.lambda$frontSignalListener$14), which zeroes speed OUTRIGHT the instant the leading
-        // point reaches the destination station's edge point (distanceToDestination = 0), at whatever
-        // speed the train carries. THE LISTENER STAYS NATIVE - the operator ruled that a too-hot
-        // entry earns exactly its stop AT the platform and nothing beyond: nothing passes through,
-        // nothing backs in. What protects the arrival is entirely UPSTREAM of it: GameEvents refuses
-        // the approach whenever the remaining distance is below the consist's stopping distance
-        // (x < v^2/(2 a_eff), the drag the operator asked for inside a_eff), and the approach prompt
-        // is withheld for the same figure - a displayed prompt therefore GUARANTEES a completable
-        // arrival at a sane deceleration. Two failure modes this controller eliminates:
-        //  * a curve that stops the train short of that line never completes the arrival - the
-        //    restored lever drove the train back into the snap at whatever speed remained (the
-        //    reported 28 km/h -> 0);
-        //  * an approach armed above the braking curve used to saturate the brake and end in the
-        //    listener's snap mid-motion at 75 and 95 km/h ("this is not a brake, this is a speed
-        //    assignment"). That entry is refused at the gate now, before it can ever arm.
-        // The controller is a full servo around the curve: traction brings the train up to it when
-        // the approach is armed short of it (including from a standstill at a platform), the brake
-        // holds it to the curve when it is above, and the last Blocks complete at a speed where the
-        // listener's zeroing cannot be felt.
-        if (st.autoArrive && self.navigation != null && self.navigation.destination != null) {
-            double dRaw = self.navigation.distanceToDestination;
-            double dErr = dRaw + 0.21875d;                       // the curve aims 0.22 Blocks past the station, so the crawl handover lands just past the kill line
-            double vMs = Math.abs(self.speed) * 20d;
-            double aMax = TrainTractionModel.frictionBrake();
-            double aUsable = aMax * 0.9d;
-            double massEff = (1d + CEEConfigs.server().resistanceValues.electricTrainRotatingMassFactor.get())
-                    * TrainTractionModel.totalMass(carriages);
-            double gradeTravel = data.trackGrade;
-            double aPassive = (TrainTractionModel.runningResistance(vMs, carriages)
-                    + TrainTractionModel.gradeResistance(gradeTravel, carriages)) / massEff;
-            // The travel direction toward the trigger, remembered while the train still moves. A
-            // train armed FROM A STANDSTILL has no remembered direction, and the fallback is the way
-            // the lever's own ACCELERATE notch would drive - the cab's forward, in world
-            // coordinates - so holding space at a platform departs toward the station instead of
-            // sitting forever.
-            if (vMs > 0.05d)
-                st.arrivalTravelDir = (int) Math.signum(self.speed);
-            int travelDir = st.arrivalTravelDir;
-            if (travelDir == 0)
-                travelDir = (int) Math.signum(TrainTractionModel.gearAcceleration(signedSpeedMs,
-                        gradeToPlusX, carriages, data.powerScale, TrainGear.ACCELERATE, cruiseCommand,
-                        TrainTractionModel.frictionBrake(), st.emergencyArmed, data.gearStep) * mirror);
-            double aBrake = 0d;
-            double aTraction = 0d;
-            if (Math.abs(dErr) <= 0.25d) {
-                // AT the station: the listener fires on its own at crawl speed; nothing to add.
-            } else if (vMs * vMs > 2d * aUsable * Math.abs(dErr)) {
-                // Above the braking curve: brake at the curve's demand, clamped to the service brake.
-                // No direction test: the only way this block sees the trigger behind the train is a
-                // stale or re-targeted destination, and a train still moving there needs the brake,
-                // not a free coast.
-                double demand = vMs * vMs / (2d * Math.max(Math.abs(dErr), 0.3d));
-                aBrake = Math.max(0d, Math.min(demand - aPassive, aMax));
-            } else if (dErr > 0.25d
-                    && (vMs < 0.05d || Math.signum(self.speed) == Math.signum(dErr) * travelDir)
-                    && vMs * vMs < 0.81d * 2d * aUsable * dErr) {
-                // WELL below the braking curve - the approach has spare budget, so traction brings
-                // the train UP TO the curve instead of waiting for the curve to collapse onto a
-                // standstill. This is what makes holding space from a platform actually travel: an
-                // approach armed at rest has no speed to brake, and without traction it would sit
-                // forever, which would break the guarantee the display threshold makes - a shown
-                // prompt must always end in a completed arrival. The band between 0.9 and 1.0 of the
-                // curve coasts, so a normal boundary-riding approach never flip-flops between power
-                // and brake. The direction guard keeps a wrong guess (a station behind the cab's
-                // forward) from being chased: once the train moves away from the station the
-                // traction stands down and the driver's lever answers for it.
-                aTraction = Math.min(0.5d, data.availableAcceleration * 20d);
-            }
-            a -= Math.signum(self.speed) * aBrake;
-            a += Math.signum(dErr) * travelDir * aTraction;
-        }
 
         // m/s² -> Blocks/Tick². 1 block = 1 m, so only the tick conversion is needed.
         double next = self.speed + a / RiderSeatGate.accelerationDivisor();
@@ -717,7 +607,7 @@ public class TrainMixin implements ICEETrainExtension {
         // its own train, and the client learns of it on the next gear sync. The driver
         // sees the handle move to CRUISE, which is the honest report of what the train
         // is now doing.
-        if (st.gear == TrainGear.ACCELERATE && !st.vigilanceTripped && !st.autoArrive
+        if (st.gear == TrainGear.ACCELERATE && !st.vigilanceTripped
                 && !st.emergencyArmed
                 && TrainTractionModel.atDesignCeiling(Math.abs(com.george_vi.electroenergetics.content.railway_electrification.RiderSeatGate.bptToMs(next)), carriages)) {
             st.gear = TrainGear.CRUISE;

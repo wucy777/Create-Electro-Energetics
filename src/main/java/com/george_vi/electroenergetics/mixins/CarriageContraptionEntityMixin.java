@@ -12,7 +12,6 @@ import com.simibubi.create.content.trains.entity.Carriage;
 import com.simibubi.create.content.trains.entity.CarriageContraptionEntity;
 import com.simibubi.create.content.trains.entity.Navigation;
 import com.simibubi.create.content.trains.entity.Train;
-import com.simibubi.create.content.trains.graph.DiscoveredPath;
 import com.simibubi.create.content.trains.station.GlobalStation;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
@@ -94,31 +93,16 @@ public class CarriageContraptionEntityMixin {
         // which the controls block reads as "take me to the next station" - the button
         // Create's own HUD calls the automatic arrival control.
         //
-        // A countdown rather than a flag: Create stops calling this method entirely once
-        // no key is held, so the release of space is only ever visible as the absence of
-        // further reports, and there is no event to catch. See TrainDriverState.tickSpace.
-        if (heldControls.contains(4))
-            data.driver.setSpaceHeld();
     }
 
     /**
-     * THE OWN APPROACH. The operator ruled Create's hold-space machinery unfit for this mod's
-     * driving model and asked for a separate one, so this wrap is the seam: for a driven electric
-     * train, Create's scan still runs (its result is our input) but its branch STANDS DOWN - this
-     * handler returns null, control() takes the cleanup path, and nothing Create-side navigates,
-     * prompts or re-arms. What remains of Create is machinery, not policy: the path find (which
-     * also carries the signal reservation once started), the distance the scan keeps fresh, and the
-     * front listener that completes an arrival at crawl speed.
-     *
-     * <p>The lifecycle is the mod's, in this one evaluation per tick while the key is held: latch
-     * (one hold = one arrival - after an arrival the key still being down asks for nothing) ->
-     * armed (the servo owns the speed; nothing re-arms behind its back) -> the gate on the FRESH
-     * path find, not on the navigation's mutable distance: stoppable (x >= v^2/(2 a_eff), the drag
-     * the operator asked for inside a_eff) means startNavigation here - the reservation, the servo,
-     * and a ~5 Hz action-bar readout; otherwise one warning per press with the numbers and the
-     * lever keeps the train (driving in anyway ends in the listener's stop AT the platform, which
-     * GameEvents parks as the dispatcher's remote stop). Fuel trains and unowned trains keep
-     * Create's branch exactly as it was.
+     * THE SPACE KEY STANDS DOWN for a driven electric train. The operator removed the hold-space
+     * station approach from this mod's driving model entirely: braking judgment belongs to the
+     * driver, working from the HUD's own figures (the next-station distance and what braking NOW
+     * would cost, both on the left panel). Create's scan branch - its navigation, its prompt, its
+     * arming - must therefore do nothing on such a train: returning null here takes control()'s
+     * space branch down the cleanup path, which touches only the client message flag. Fuel trains,
+     * unowned trains and scheduled trains' own automation pass through exactly as Create wrote it.
      */
     @WrapOperation(method = "control", at = @At(value = "INVOKE",
             target = "Lcom/simibubi/create/content/trains/entity/Navigation;findNearestApproachable(Z)Lcom/simibubi/create/content/trains/station/GlobalStation;"),
@@ -128,46 +112,11 @@ public class CarriageContraptionEntityMixin {
         GlobalStation station = original.call(navigation, doubleEnded);
         CarriageContraptionEntity self = (CarriageContraptionEntity) (Object) this;
         Carriage carriage = self.getCarriage();
-        if (carriage == null || carriage.train == null || carriage.train.navigation == null)
+        if (carriage == null || carriage.train == null)
             return station;
-        Train train = carriage.train;
-        ElectricTrainData data = ((ICEETrainExtension) train).getElectricTrainData();
+        ElectricTrainData data = ((ICEETrainExtension) carriage.train).getElectricTrainData();
         if (data == null || !data.underElectricControl() || data.driver == null)
             return station;
-        if (station == null || data.driver.approachLatch || data.driver.autoArrive)
-            return null;                     // Create stands down; the mod owns the hold
-        DiscoveredPath path = train.navigation.findPathTo(station, -1.0d);
-        if (path == null || path.destination != station)
-            return null;
-        double vMs = Math.abs(train.speed) * 20d;
-        double gradeTravel = train.speed < 0 ? -data.trackGrade : data.trackGrade;
-        double needed = TrainTractionModel.stoppingDistance(vMs, gradeTravel, train.carriages.size());
-        java.util.UUID controller = self.getControllingPlayer().orElse(null);
-        net.minecraft.server.level.ServerPlayer holder = controller == null
-                || self.level().getServer() == null ? null
-                : self.level().getServer().getPlayerList().getPlayer(controller);
-        if (path.distance >= needed) {
-            train.navigation.startNavigation(path);   // the path and its signal reservation, ours
-            data.driver.arrivalRefused = false;
-            data.driver.autoArrive = true;
-            // Remember what the driver had selected, so cancelling can restore it.
-            data.driver.autoArriveGear = data.driver.gear;
-            if (holder != null && self.level().getGameTime() % 4 == 0)
-                holder.displayClientMessage(Component.translatable(
-                        "electroenergetics.train.arrival.active",
-                        station.name,
-                        (int) Math.ceil(Math.max(train.navigation.distanceToDestination, 0d))), true);
-            return null;
-        }
-        if (!data.driver.arrivalRefused) {
-            data.driver.arrivalRefused = true;
-            if (holder != null)
-                holder.displayClientMessage(Component.translatable(
-                        "electroenergetics.train.arrival.tooClose",
-                        String.format("%.0f", vMs * 3.6d),
-                        (int) Math.ceil(needed),
-                        (int) Math.floor(Math.max(path.distance, 0d))), true);
-        }
-        return null;
+        return null;                         // the space key means nothing on this train
     }
 }
