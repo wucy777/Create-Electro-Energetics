@@ -28,6 +28,13 @@ public class TrainStopProbeMixin {
     private void electroEnergetics$stateDump(Level level, CallbackInfo ci) {
         Train self = (Train) (Object) this;
         try {
+            // OFF BY DEFAULT. This ran unconditionally: every tick on every train did a game-time read, and every
+            // twentieth did a carriage scan, a 32-point braking-distance integration and a String.format, then
+            // wrote a line to stdout. The lines are worth having while a fault is being chased, and the operator
+            // asked for this one by name - but on a running save it is a log file that grows without limit and a
+            // string built per train per second for nobody to read. -Dcee.debugProbe=true turns it back on.
+            if (!Boolean.getBoolean("cee.debugProbe"))
+                return;
             var data = ((ICEETrainExtension) self).getElectricTrainData();
             if (data == null || data.driver == null)
                 return;

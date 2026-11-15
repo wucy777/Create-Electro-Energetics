@@ -223,11 +223,47 @@ public final class RiderSeatGate {
     private static volatile java.lang.reflect.Method tickrateAccessor = null;
     private static boolean tickrateResolved = false;
 
+    /**
+     * Whether the commanded tick rate is not twenty, CACHED and refreshed once per server tick.
+     *
+     * <p><b>This used to be a reflective call every time it was asked.</b> {@code maxSpeed()} asks it, and Create
+     * calls {@code maxSpeed()} for every train on every tick - so the whole chain ran per train per tick:
+     * {@code ServerLifecycleHooks.getCurrentServer()}, a walk of {@code getAllLevels()} to reach the first level's
+     * tick rate manager, and a {@code Method.invoke} on it. Reflection on the hot path is the one thing that makes a
+     * one-line gate expensive, and a fleet of trains multiplies it by its size.
+     *
+     * <p>The answer cannot change between ticks in any way the train could observe. A {@code /tick rate} command is
+     * a player action applied between ticks; a one-tick lag on it is invisible next to the train's own speed
+     * integration, which is what the cap acts on. So it is resolved in {@link #noteServerTick()}, which the server
+     * calls exactly once per tick and which already exists for the rate measurement, and read here for free.
+     *
+     * <p>Three states, and the difference matters: UNKNOWN before the first server tick (behaves as twenty, the
+     * safe answer, and is what a client sees before it is told anything), {@code false} at twenty, {@code true}
+     * otherwise.
+     */
+    private static final int OVERSPEED_UNKNOWN = -1;
+    private static final int OVERSPEED_NO = 0;
+    private static final int OVERSPEED_YES = 1;
+
+    private static volatile int overspeedState = OVERSPEED_UNKNOWN;
+
     public static boolean overspeedTickRate() {
+        return overspeedState == OVERSPEED_YES;
+    }
+
+    /**
+     * The reflective probe itself, run once per server tick from {@link #noteServerTick()}.
+     *
+     * <p>Never throws: a mapping that cannot reach the manager leaves the answer at "twenty", which is the
+     * behaviour everything here had before any of this existed.
+     */
+    private static void refreshOverspeed() {
         try {
             Object server = net.neoforged.neoforge.server.ServerLifecycleHooks.getCurrentServer();
-            if (server == null)
-                return false;
+            if (server == null) {
+                overspeedState = OVERSPEED_UNKNOWN;
+                return;
+            }
             Object manager = null;
             if (server instanceof net.minecraft.server.MinecraftServer ms) {
                 // Every level on the server shares one tick rate manager; any of them will answer.
@@ -235,21 +271,29 @@ public final class RiderSeatGate {
                 if (levels.hasNext())
                     manager = levels.next().tickRateManager();
             }
-            if (manager == null)
-                return false;
+            if (manager == null) {
+                overspeedState = OVERSPEED_UNKNOWN;
+                return;
+            }
+            java.lang.reflect.Method accessor = tickrateAccessor;
             if (!tickrateResolved) {
-                tickrateAccessor = manager.getClass().getMethod("tickrate");
+                accessor = manager.getClass().getMethod("tickrate");
+                tickrateAccessor = accessor;
                 tickrateResolved = true;
             }
-            if (tickrateAccessor == null)
-                return false;
-            Object rate = tickrateAccessor.invoke(manager);
-            if (rate instanceof Number number)
-                return Math.abs(number.floatValue() - 20f) > 0.2f;
+            if (accessor == null) {
+                overspeedState = OVERSPEED_UNKNOWN;
+                return;
+            }
+            Object rate = accessor.invoke(manager);
+            if (rate instanceof Number number) {
+                overspeedState = Math.abs(number.floatValue() - 20f) > 0.2f ? OVERSPEED_YES : OVERSPEED_NO;
+                return;
+            }
         } catch (Throwable ignored) {
             // No answer is the safe answer: behave as though the rate were twenty.
         }
-        return false;
+        overspeedState = OVERSPEED_UNKNOWN;
     }
 
     /** The ceiling in Blocks per tick that applies right now. */
@@ -328,6 +372,10 @@ public final class RiderSeatGate {
      * per train and inflate the count by the size of the fleet.
      */
     public static void noteServerTick() {
+        // THE ONE REFLECTIVE PROBE PER TICK. Deliberately first, before any early return: the rate measurement
+        // below skips the first tick and any bad gap, but the overspeed answer must be refreshed on every tick
+        // regardless, because maxSpeed() reads it for every train and a stale answer is a wrong speed cap.
+        refreshOverspeed();
         long now = System.nanoTime();
         long previous = lastServerTickNanos;
         lastServerTickNanos = now;
@@ -1469,14 +1517,6 @@ public final class RiderSeatGate {
             if (contraption == null)
                 continue;
 
-            java.util.Set<UUID> aboard = new java.util.HashSet<>();
-            for (Entity passenger : entity.getIndirectPassengers())
-                aboard.add(passenger.getUUID());
-            // A seat is held only by somebody actually in it - offline claims included. Since rejoining no
-            // longer restores a seat (the player stands where they logged out and the normal rules seat them
-            // from there), a claim left by an absent player does nothing except make that seat illegal for
-            // everyone else, and for the returning player themselves when they stand next to it.
-
             Map<UUID, Integer> mapping;
             try {
                 mapping = contraption.getSeatMapping();
@@ -1486,24 +1526,27 @@ public final class RiderSeatGate {
             if (mapping == null || mapping.isEmpty())
                 continue;
 
-            // Who is actually riding THIS carriage, asked of the entity rather than derived from the passenger
-            // list. getIndirectPassengers is rebuilt by Create and is briefly empty for a rider at speed - the
-            // list is the thing that lags, not the ride. Pruning on the list alone therefore deleted the seat of
-            // a player who was sitting in it, at which point the driver read as "not aboard", the claim was
-            // released, and the train went on without them while still holding their reserved seat.
+            // WHO IS ACTUALLY HERE, tested directly against the mapping instead of materialised into sets.
             //
-            // That is the operator being thrown out while holding J and never touching the dismount key.
-            java.util.Set<UUID> ridingHere = new java.util.HashSet<>();
-            for (Entity rider : entity.getPassengers())
-                ridingHere.add(rider.getUUID());
-            for (Entity rider : entity.getIndirectPassengers())
-                ridingHere.add(rider.getUUID());
-
+            // This used to build TWO HashSets per carriage per tick - `aboard` from getIndirectPassengers, and
+            // `ridingHere` from getPassengers plus getIndirectPassengers - and then ask them the same question.
+            // On a forty-carriage train that was eighty HashSet allocations every tick, eighty per tick of pure
+            // garbage for an answer that needs no allocation at all. This method runs once per tick per train
+            // from the driver-state pass, so it is squarely on the steady-state path.
+            //
+            // The two sets are also largely redundant: getIndirectPassengers is the RECURSIVE list, so it already
+            // contains every direct passenger getPassengers returns. The reason both were checked is documented
+            // below and is preserved exactly - a rider missing from the recursive list at speed must still count
+            // as riding - but that is one predicate, not two containers.
+            //
+            // The seat mapping is a handful of entries (one per seat that is taken), while the passenger lists are
+            // the same handful. Iterating the MAPPING and testing membership by scanning the lists is therefore no
+            // worse than the set lookups it replaces, and it allocates nothing.
             boolean changed = false;
             java.util.Iterator<Map.Entry<UUID, Integer>> it = mapping.entrySet().iterator();
             while (it.hasNext()) {
                 UUID seated = it.next().getKey();
-                if (aboard.contains(seated) || ridingHere.contains(seated))
+                if (isPresentOnCarriage(entity, seated))
                     continue;
                 it.remove();
                 changed = true;
@@ -1518,6 +1561,28 @@ public final class RiderSeatGate {
                 CACHE.remove(train.id);
             }
         }
+    }
+
+    /**
+     * Whether this player is on this carriage, by either of the two lists Create keeps - no allocation.
+     *
+     * <p>{@code getIndirectPassengers} is rebuilt by Create and is briefly empty for a rider at speed: the list
+     * lags, not the ride. Pruning on that list alone deleted the seat of a player who was sitting in it, at which
+     * point the driver read as "not aboard", the claim was released, and the train went on without them while
+     * still holding their reserved seat - the operator being thrown out while holding J and never touching the
+     * dismount key.
+     *
+     * <p>So BOTH lists are consulted, which is exactly what the two sets did, and {@code getPassengers} is checked
+     * first because it is the shorter of the two.
+     */
+    private static boolean isPresentOnCarriage(CarriageContraptionEntity entity, UUID player) {
+        for (Entity rider : entity.getPassengers())
+            if (player.equals(rider.getUUID()))
+                return true;
+        for (Entity rider : entity.getIndirectPassengers())
+            if (player.equals(rider.getUUID()))
+                return true;
+        return false;
     }
 
     /**

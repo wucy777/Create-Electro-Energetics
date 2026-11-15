@@ -123,16 +123,16 @@ public class CarriageContraptionEntityMixin {
     @WrapOperation(method = "control", at = @At(value = "INVOKE",
             target = "Lcom/simibubi/create/content/trains/entity/Navigation;findNearestApproachable(Z)Lcom/simibubi/create/content/trains/station/GlobalStation;"),
             remap = false)
-    private GlobalStation electroEnergetics$ownApproach(Navigation navigation, boolean doubleEnded,
+    private GlobalStation electroEnergetics$ownApproach(Navigation navigation, boolean forward,
                                                         Operation<GlobalStation> original) {
         CarriageContraptionEntity self = (CarriageContraptionEntity) (Object) this;
         Carriage carriage = self.getCarriage();
         if (carriage == null || carriage.train == null || carriage.train.navigation == null)
-            return original.call(navigation, doubleEnded);
+            return original.call(navigation, forward);
         Train train = carriage.train;
         ElectricTrainData data = ((ICEETrainExtension) train).getElectricTrainData();
         if (data == null || !data.underElectricControl() || data.driver == null)
-            return original.call(navigation, doubleEnded);
+            return original.call(navigation, forward);
 
         // CREATE'S OWN SCAN IS THE WRONG TOOL, AND THIS IS WHY THE PROMPT NEVER SHOWED.
         //
@@ -152,24 +152,38 @@ public class CarriageContraptionEntityMixin {
         // That is the whole report: "the prompt never appears, and when it finally says anything it says it cannot
         // stop". Both statements are the same scan refusing to look.
         //
-        // So the scan is done here, once, from the train's own position: every station on the graph, the one whose
-        // path is shortest, with no speed-dependent floor. What a human driver considers "the next station" does
-        // not change because the train is slow.
-        GlobalStation station = electroEnergetics$nearestStation(navigation);
-        if (station == null)
-            return original.call(navigation, doubleEnded);   // nothing reachable: Create may answer as it likes
-        if (data.driver.approachLatch || data.driver.autoArrive)
-            return null;                     // Create stands down; the mod owns the hold
-        DiscoveredPath path = train.navigation.findPathTo(station, -1.0d);
-        if (path == null || path.destination != station)
-            return null;
+        // So the scan is done here, once, from the train's own position, with the speed-dependent floor and the
+        // turning-circle test removed - see electroEnergetics$nearestStationPath. The backward direction is asked
+        // for exactly as Create asks for it: a double-ended train driving backwards approaches through its rear cab,
+        // and searching forwards regardless would report a station behind it as unreachable.
+        //
+        // The stopping distance is computed FIRST, because it is also what bounds the scan: a station further away
+        // than the train's own stopping distance plus a margin cannot be prompted for yet, so looking for it is
+        // wasted frontier.
         double vMs = Math.abs(train.speed) * 20d;
         double gradeTravel = train.speed < 0 ? -data.trackGrade : data.trackGrade;
-        double needed = TrainTractionModel.stoppingDistance(vMs, gradeTravel, train.carriages.size());
+        double needed = electroEnergetics$stoppingDistance(vMs, gradeTravel, train.carriages.size());
+        DiscoveredPath path = electroEnergetics$nearestStationPath(navigation, forward, needed);
+        if (path == null)
+            return original.call(navigation, forward);   // nothing reachable: Create may answer as it likes
+        GlobalStation station = path.destination;
+        // WHICH STATION COUNTS AS "THE NEXT ONE".
+        //
+        // Create signs the path distance by the direction it drives in: positive is ahead of the leading end,
+        // negative is behind it (a station the train would have to REVERSE into). The operator's rule is about
+        // the station the train is running AT, and a station behind it is not that - Create's own directional
+        // scan never offered one either. So a negative distance is not an approach, and it must not raise the
+        // "cannot stop" warning for a station the driver is not heading for.
+        if (path.distance <= 0d) {
+            data.driver.arrivalRefused = false;
+            return null;
+        }
+        if (data.driver.approachLatch || data.driver.autoArrive)
+            return null;                     // Create stands down; the mod owns the hold
         if (Boolean.getBoolean("cee.debugApproach")) {
             System.out.println(String.format(
-                    "[gate] v=%.3f x=%.2f needed=%.2f held=%s station=%s",
-                    vMs, path.distance, needed, data.driver.isSpaceHeld(), station.name));
+                    "[gate] v=%.3f x=%.2f needed=%.2f held=%s station=%s forward=%s",
+                    vMs, path.distance, needed, data.driver.isSpaceHeld(), station.name, forward));
         }
         java.util.UUID controller = self.getControllingPlayer().orElse(null);
         net.minecraft.server.level.ServerPlayer holder = controller == null
@@ -226,37 +240,117 @@ public class CarriageContraptionEntityMixin {
     }
 
     /**
-     * The nearest station this train can actually path to, with no speed-dependent floor.
+     * The floor and the headroom of the station scan, in Blocks.
      *
-     * <p>Create's own scan passes {@code minDistance = max(32, ...)} and rejects stations beyond the distance the
-     * train would need to turn around - both functions of speed, both useless at a crawl. This asks the graph for
-     * every station and takes the shortest path. The list is small (stations on one rail network, not blocks), and
-     * the call happens where Create's scan used to, so the cost is the same order.
+     * <p>The scan is bounded by the distance at which the answer can still matter: the prompt may only be shown when
+     * the remaining distance reaches the stopping distance, so a station further away than that plus a margin is one
+     * the driver has not reached the decision point for yet. Bounding the search there keeps it cheap at a crawl and
+     * no more expensive than Create's own scan at speed, without changing the guarantee in the direction that
+     * matters: <b>a prompt that shows is always a stop that can be made</b>.
+     *
+     * <p>The floor is what makes the operator's own test work. At their measured 0.883 m/s the stopping distance is
+     * 0.45 Blocks, and a scan bounded by that would find nothing at all - which is exactly the pathology this
+     * replaces. 64 Blocks is the same order as Create's own 32-Block floor, so a station four Blocks away is seen,
+     * and the scan stays trivial.
+     *
+     * <p>{@code control()} runs once per tick per driven train (ControlsServerHandler.tick -> control), so the bound
+     * is not a nicety: an open-ended scan here would be a whole-graph Dijkstra every tick.
      */
     @org.spongepowered.asm.mixin.Unique
-    private GlobalStation electroEnergetics$nearestStation(Navigation navigation) {
+    private static final double APPROACH_SCAN_FLOOR = 64d;
+    @org.spongepowered.asm.mixin.Unique
+    private static final double APPROACH_SCAN_MARGIN = 64d;
+
+    /**
+     * The stopping distance, straight from the model.
+     *
+     * <p>Deliberately NOT memoised. A cache here would have to be keyed per train - {@code control()} runs for
+     * every driven train in the same tick - and a shared one would hand one train another's figure, which is a
+     * wrong braking distance silently promising a stop that cannot be made. The integral is 33 evaluations of
+     * {@code arrivalBrakeRate}, which is a handful of multiplies and two config reads each: of the order of a
+     * thousand arithmetic operations per tick per driven train. That is noise next to Create's own path search on
+     * the same tick, and correctness is worth more than it.
+     */
+    @org.spongepowered.asm.mixin.Unique
+    private static double electroEnergetics$stoppingDistance(double vMs, double gradeTravel, int carriages) {
+        return TrainTractionModel.stoppingDistance(vMs, gradeTravel, carriages);
+    }
+
+    /**
+     * The path to the nearest reachable station, with no speed-dependent floor and no turn-around requirement.
+     *
+     * <p>Create's own scan passes {@code minDistance = .75 v^2/(2a)} and {@code maxDistance = max(32, 1.5 v^2/(2a))}
+     * - both functions of speed - and rejects a station whose distance is BELOW the turning circle, which is a rule
+     * for an AUTOMATIC train that must be able to reverse out of a station afterwards. A driver asking whether the
+     * next station is stoppable for is asking a different question, and the answer does not change because the
+     * train is slow. At the operator's measured crawl (0.883 m/s) the turning circle collapses to 0.29 Blocks, so
+     * every station four Blocks away failed it - the reported "the prompt never appears".
+     *
+     * <h2>The previous version of this method never returned a station at all</h2>
+     *
+     * <p>It called {@code navigation.search(0, -1, true, all, ...)} and then iterated {@code all}. But
+     * {@code destinations} is an INPUT to {@code search}, never an output: it is only read, for the octile distance
+     * estimate that orders the frontier -
+     *
+     * <pre>
+     *     if (destinations != null &amp;&amp; !destinations.isEmpty()) {
+     *         remainingDist = Double.MAX_VALUE;
+     *         for (GlobalStation destination : destinations) { ...octile... }
+     *     }
+     * </pre>
+     *
+     * - and nothing in {@code search} adds to it. Checked against the shipped jar (Create 6.0.10): the only
+     * {@code ArrayList} calls inside {@code search} are {@code iterator()} twice and {@code isEmpty()} once, and
+     * there is no {@code add}. So the list came back exactly as it went in - empty - and the loop under it never
+     * ran. On top of that the maxDistance passed was 0, and {@code search} drops every frontier entry whose
+     * distance exceeds maxDistance, so the scan was not merely useless but almost empty. The method returned null on
+     * every tick, the wrap fell through to Create's speed-limited scan, and the prompt went with it.
+     *
+     * <p>So the scan is done the way Create does it - one bounded {@code search} whose callback returns true to
+     * accept a station and stop - with the speed-dependent terms removed.
+     *
+     * @return the path to the nearest reachable, unoccupied station, or null when there is none in range
+     */
+    @org.spongepowered.asm.mixin.Unique
+    private DiscoveredPath electroEnergetics$nearestStationPath(Navigation navigation, boolean forward,
+                                                               double needed) {
         try {
-            Train train = ((CarriageContraptionEntity) (Object) this).getCarriage().train;
-            if (train == null || train.graph == null)
+            Carriage carriage = ((CarriageContraptionEntity) (Object) this).getCarriage();
+            if (carriage == null || carriage.train == null || carriage.train.graph == null)
                 return null;
-            // The 5-argument form: (minDistance, maxDistance, doubleEnded, results, test).
-            // minDistance = 0 and maxDistance = -1 are exactly "no floor, no ceiling" - which is the whole
-            // point. The lambda accepts every station the graph reaches; the path find below decides which.
-            java.util.ArrayList<GlobalStation> all = new java.util.ArrayList<>();
-            navigation.search(0d, -1d, true, all,
-                    (distance, maxDistance, edgeMap, edgePair, candidate) -> true);
-            GlobalStation best = null;
-            double bestDistance = Double.MAX_VALUE;
-            for (GlobalStation candidate : all) {
-                DiscoveredPath path = train.navigation.findPathTo(candidate, -1.0d);
-                if (path == null || path.destination != candidate)
-                    continue;
-                if (path.distance < bestDistance) {
-                    bestDistance = path.distance;
-                    best = candidate;
-                }
-            }
-            return best;
+            Train train = carriage.train;
+            // THE BOUND. The prompt can only ever show once x >= needed, so a station beyond needed plus a margin
+            // is one whose decision point has not arrived yet. The floor is what keeps the crawl case working: at
+            // 0.883 m/s `needed` is 0.45 Blocks, and a scan bounded by that would find nothing - the pathology this
+            // whole method replaces. Bounded at 64 Blocks it sees the station four Blocks away, for the same order
+            // of work Create's own 32-Block floor does.
+            double scanRange = Math.max(APPROACH_SCAN_FLOOR, needed + APPROACH_SCAN_MARGIN);
+            // The callback's contract: return true to accept and END the search. The frontier is a priority queue
+            // ordered by distance, so the first station that passes is the nearest one - which is why this needs no
+            // candidate list and no second pass.
+            com.simibubi.create.content.trains.station.GlobalStation[] found =
+                    new com.simibubi.create.content.trains.station.GlobalStation[1];
+            // destinations = null on purpose: the octile estimate that list triggers is only an accelerator when
+            // the destinations are known in advance. Here it is whatever we find, so the estimate would be pure
+            // per-frontier-node cost over a list that says nothing.
+            navigation.search(scanRange, -1d, forward, null,
+                    (distance, cost, edgeMap, edgePair, station) -> {
+                        // A station another train is standing at is not available to approach: Create's own rule,
+                        // and the reason an occupied platform must not be offered.
+                        Train present = station.getPresentTrain();
+                        if (present != null && present != train)
+                            return false;
+                        found[0] = station;
+                        return true;
+                    });
+            if (found[0] == null)
+                return null;
+            // The path, for its distance and its signal reservation. findPathTo is told to look only at this one
+            // station, so it costs one search per direction rather than one per station on the network.
+            DiscoveredPath path = navigation.findPathTo(found[0], -1.0d);
+            if (path == null || path.destination != found[0])
+                return null;
+            return path;
         } catch (Throwable ignored) {
             return null;                     // a scan that throws must not take the tick with it
         }
