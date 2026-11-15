@@ -300,137 +300,43 @@ public class GameEvents {
                 // the next gradient, the limit is declared over, the lever returns to accelerate and the
                 // whole cycle starts again. The condition is re-evaluated when the train is at the speed the
                 // rule is about, and not in between.
-                boolean atCeiling = RiderSeatGate.atOrAboveCeiling(train);
+                boolean atCeiling = RiderSeatGate.ceilingRuleApplies(train);
 
-                // The release has to happen OUTSIDE the at-ceiling gate. Braking is what brings the speed
-                // down, so by the time the train is below the ceiling the block above is skipped entirely -
-                // and the brake it applied is never taken off. That is a brake that cannot stop braking:
-                // it goes past 28 and continues to a stand, which is exactly the complaint.
-                // Capacity can clear at any speed - the last standing passenger gets off while the train is
-                // rolling slowly, say. Waiting until the train next reaches 28 to notice would keep the
-                // limit and the forced cruise on a train that is no longer over capacity.
-                //
-                // This only clears on the actual condition (nobody standing), never merely because the
-                // speed dropped - that was the flapping: reach 28, drop to cruise, dip under, clear,
-                // accelerate, repeat.
-                if (!atCeiling && driver.overloaded && !RiderSeatGate.anyUnseated(train)) {
-                    driver.overloaded = false;
-                    driver.riderBrakeNotified = false;
-                    driver.overloadBraking = false;
-                    if (driver.gearBeforeOverloadDrop != null) {
-                        if (driver.gear == TrainGear.CRUISE)
-                            driver.gear = driver.gearBeforeOverloadDrop;
-                        driver.gearBeforeOverloadDrop = null;
-                    }
-                }
-
-                if (!atCeiling && driver.overloadBraking) {
-                    driver.overloadBraking = false;
-                    if (driver.gear == TrainGear.BRAKE) {
-                        driver.captureCruiseSetpointFromWorld(RiderSeatGate.bptToMs(train.speed));
-                        driver.gear = TrainGear.CRUISE;
-                    }
-                }
-
+                // NO RELEASE BLOCK ANY MORE. It existed to take a forced cruise or a forced brake back off once the
+                // seating pass had emptied the train. There is no seating pass: whether the limit applies is
+                // decided fresh every tick from the speed and whether anybody is free to move, so it cannot be
+                // left stranded on. The one latch that survives is the message - riderBrakeNotified - and it is
+                // cleared in the atCeiling block's own else branch.
                 if (atCeiling) {
-
-                boolean unseated = RiderSeatGate.anyUnseated(train);
-                boolean driverNeedsSeat = RiderSeatGate.claimedDriverNeedsSeat(train);
-                if (unseated || driverNeedsSeat) {
-                    // Standing passenger selection waits for the client's rendered frame. The driver seat is
-                    // handled independently because the current driver is excluded from overload counting.
+                    // THE LIMIT, AND NOTHING ELSE. There is no seating pass and no overload verdict any more.
                     //
-                    // One request per player, not one per tick: a silent client would otherwise be sent a
-                    // packet every tick for as long as the train sat at the ceiling. `markRequested` is what
-                    // makes the second and later ticks no-ops, and the answer clears it.
-                    for (var standing : RiderSeatGate.unseatedPlayers(train)) {
-                        if (standing instanceof net.minecraft.server.level.ServerPlayer serverPlayer
-                                && SeatIntentStore.get(standing.getUUID()) == null
-                                && SeatIntentStore.requestedTick(standing.getUUID()) == null) {
-                            SeatIntentStore.markRequested(standing.getUUID(), server.getTickCount());
-                            net.createmod.catnip.platform.CatnipServices.NETWORK.sendToClient(
-                                    serverPlayer, new RequestSeatIntentPacket());
-                        }
-                    }
-                    RiderSeatGate.trySeatAll(train, server.getTickCount());
-                    unseated = RiderSeatGate.anyUnseated(train);
-                }
-
-                // Nobody is overload until they have been standing, unseated, for the length of a seating
-                // round trip. See TrainDriverState.unseatedTicks: the pass below has already tried to seat
-                // them this tick, so a seat that exists has been offered to them before this is read.
-                if (unseated)
-                    driver.unseatedTicks = Math.min(driver.unseatedTicks + 1,
-                            com.george_vi.electroenergetics.content.railway_electrification.RiderSeatGate
-                                    .SEAT_INTENT_GRACE_TICKS);
-                else
-                    driver.unseatedTicks = 0;
-
-                boolean trulyOverloaded = driver.unseatedTicks
-                        >= com.george_vi.electroenergetics.content.railway_electrification.RiderSeatGate
-                                .SEAT_INTENT_GRACE_TICKS;
-
-                driver.overloaded = trulyOverloaded;
-                if (trulyOverloaded) {
-                    // Two different situations, and only one of them is a braking matter.
+                    // The operator's decision: seat allocation is what produced most of this mod's bugs, and the
+                    // nearest-seat rule could never be made to agree with what a player sees. So a train with
+                    // somebody free to move inside it is simply held at the ceiling instead - a rule that covers
+                    // every case the overload machinery was reaching for, and does it without moving anybody.
                     //
-                    // Above the ceiling - somebody teleported aboard a train already running faster than
-                    // the limit - the overspeed has to come down, so the brake takes it there.
-                    //
-                    // At the ceiling, which is where a train under the limit normally is, the accelerate
-                    // position is DROPPED TO CRUISE instead: the train holds the limit rather than pushing
-                    // against it. Braking here would slow the train every time it reached the speed it is
-                    // allowed to do, which is what it used to do.
-                    double speed = Math.abs(train.speed);
-                    // Hysteresis-free on purpose. The old form tested `speed > ceiling + 1e-4` to decide
-                    // "brake" and then relied on a latch (`overloadBraking`) to put the lever back into cruise
-                    // once the brake had done its work. The latch is cleared in two other places, and when one
-                    // of them wins the train brakes to the ceiling and then simply stays in BRAKE - reported as
-                    // "it brakes to 28 but never goes to cruise and holds it".
-                    //
-                    // Written as a two-sided rule instead: above the ceiling, brake; at or below it, hold the
-                    // ceiling. Neither branch depends on how the train got there, so a missed latch cannot
+                    // Above the ceiling (a player boarded a train already running faster) the brake brings it
+                    // down; at the ceiling the lever becomes cruise so the train HOLDS the limit rather than
+                    // pushing against it. Both sides are written from the actual speed, so a missed latch cannot
                     // strand the brake on.
+                    double speed = Math.abs(train.speed);
                     if (speed > RiderSeatGate.createCeilingBpt() + 1.0e-4d) {
-                        // Above the ceiling: brake, and REMEMBER that the brake is ours. Reaching the ceiling
-                        // has to release it - otherwise the train brakes past 28 and stops, which is a
-                        // stop, not a speed limit.
-                        driver.overloadBraking = true;
                         if (driver.gear != TrainGear.BRAKE)
                             driver.gear = TrainGear.BRAKE;
-                    } else {
-                        driver.overloadBraking = false;
-                        // At or under the ceiling: hold it, whatever the lever was doing. Braking is only ever
-                        // a way of getting DOWN to the ceiling; at the ceiling it is a fault, because it slows
-                        // a train that is already doing exactly what it is allowed to do.
-                        if (driver.gear == TrainGear.BRAKE || driver.gear == TrainGear.ACCELERATE) {
-                            if (driver.gear == TrainGear.ACCELERATE)
-                                driver.gearBeforeOverloadDrop = TrainGear.ACCELERATE;
-                            // Cruise holds whatever speed it was TOLD to hold, and that number is only
-                            // captured when the driver selects the position themselves. Forcing the position
-                            // without it left the target at its old value - zero, on a train that had never
-                            // cruised - so "hold this speed" meant "brake to a stand".
-                            driver.captureCruiseSetpointFromWorld(RiderSeatGate.bptToMs(train.speed));
-                            driver.gear = TrainGear.CRUISE;
-                        }
+                    } else if (driver.gear == TrainGear.ACCELERATE) {
+                        // Accelerate is the one position that would keep feeding power into a train already at
+                        // its limit. The brake, coast and reverse are all left alone - a driver has a reason to
+                        // use any of them at the ceiling.
+                        driver.gear = TrainGear.CRUISE;
+                        driver.captureCruiseSetpointFromWorld(RiderSeatGate.bptToMs(train.speed));
                     }
 
-                    if (!driver.riderBrakeNotified) {
+                    if (!driver.riderBrakeNotified && speed > RiderSeatGate.createCeilingBpt() + 1.0e-4d) {
                         driver.riderBrakeNotified = true;
                         notifyRiders(train, "electroenergetics.train.riders.overloaded");
                     }
-                } else {
+                } else if (driver.riderBrakeNotified) {
                     driver.riderBrakeNotified = false;
-                    driver.overloadBraking = false;
-                    // Overload cleared: lift the forced downshift, but never overrule the driver. If the
-                    // lever is still the cruise this put it in, it goes back; otherwise they moved it and
-                    // their position stands.
-                    if (driver.gearBeforeOverloadDrop != null) {
-                        if (driver.gear == TrainGear.CRUISE)
-                            driver.gear = driver.gearBeforeOverloadDrop;
-                        driver.gearBeforeOverloadDrop = null;
-                    }
-                }
                 }
             } else {
                 // Handed back to Create: the seat limit is this mod's rule and must not outlive the mode
@@ -834,7 +740,15 @@ public class GameEvents {
                 double vMs = Math.abs(train.speed) * 20d;
                 double gradeTravel = train.speed < 0 ? -data.trackGrade : data.trackGrade;
                 double needed = TrainTractionModel.stoppingDistance(vMs, gradeTravel, train.carriages.size());
-                if (d < needed) {
+                // ONE TICK OF TRAVEL of leniency, here and never in the display gate. The display
+                // evaluates inside control(), mid-tick; this gate runs on ServerTickEvent.Post, after
+                // the train has moved again, so its distance is up to one tick of travel smaller. At
+                // the boundary the two verdicts could disagree: the prompt shows, the hold is refused.
+                // The operator's guarantee is "if the prompt shows and I hold space, the approach
+                // engages" - so the LENIENT side is the arming, and the display stays exactly on the
+                // operator's formula. The curve's own 0.9 margin dwarfs one tick of travel.
+                double travelSlack = vMs * 0.05d;
+                if (d < needed - travelSlack) {
                     if (!driver.arrivalRefused) {
                         driver.arrivalRefused = true;
                         UUID controller = controllingPlayer(train);
@@ -852,33 +766,41 @@ public class GameEvents {
                     driver.autoArriveGear = driver.gear;
                 }
             } else if (!arriving && (driver.autoArrive || driver.arrivalRefused)) {
-                // LEAVE, two ways. A release BEFORE arrival restores the lever AND cancels the
-                // navigation: the approach was the driver's hold-space commitment, and a commitment
-                // that outlives the key would ambush a driver who simply let go - the train would run
-                // on into the station and be stopped there at whatever speed the lever held. Releasing
-                // and pressing again walks the stopability gate fresh, which is exactly the operator's
-                // ruling. An ARRIVAL while the approach was never armed (the refused hold driven all
-                // the way in) is the dispatcher's remote stop: the train is parked in the brake and
-                // the driver is told, which is the outcome the operator named for ignoring the
-                // refusal. A schedule-driven destination is left to Create on both paths.
-                boolean arrived = train.getCurrentStation() != null;
+                // LEAVE, classified by WHY the approach ended, because the ending decides who owns
+                // the train. The destination only ever vanishes two ways while this state is live:
+                // the front listener's stop fired (it clears it exactly there, and Create's scan-fail
+                // path provably does not - its cleanup touches only the client-facing message flag),
+                // or this mod cancelled it below.
                 boolean wasArmed = driver.autoArrive;
-                driver.autoArrive = false;
-                if (arrived) {
+                boolean wasRefused = driver.arrivalRefused;
+                if (driver.isSpaceHeld() && train.getCurrentStation() != null) {
+                    // The key is still held and the train is checked in at a station: the listener's
+                    // stop fired. The approach is over and the train is at a platform - parked in the
+                    // brake, the driver handed back. A hold that was refused and driven in anyway is
+                    // the dispatcher's remote stop the operator named; a hold that was armed gets the
+                    // same parking, which is what an arrival already did.
+                    driver.autoArrive = false;
+                    driver.arrivalRefused = false;
                     driver.failSafe();
-                    if (driver.arrivalRefused) {
+                    if (wasRefused) {
                         UUID controller = controllingPlayer(train);
                         ServerPlayer holder = controller == null ? null : server.getPlayerList().getPlayer(controller);
                         if (holder != null)
                             holder.displayClientMessage(Component.translatable(
                                     "electroenergetics.train.arrival.remoteStop"), true);
                     }
-                } else {
+                } else if (!driver.isSpaceHeld()) {
+                    // A genuine release: the grace (spaceTicks) has expired, so the key is truly up.
+                    // The approach was the driver's hold-space commitment, and a commitment that
+                    // outlives the key would ambush a driver who simply let go - the train would run
+                    // on into the station and be stopped there at whatever speed the lever held.
+                    // Releasing and pressing again walks the stopability gate fresh, which is exactly
+                    // the operator's ruling. Only a lever the law actually overrode needs restoring:
+                    // a refused approach never touched the gear.
+                    driver.autoArrive = false;
+                    driver.arrivalRefused = false;
                     if (train.runtime == null || train.runtime.getSchedule() == null)
                         train.navigation.cancelNavigation();
-                    // Only a lever the law actually overrode needs restoring: a refused approach never
-                    // touched the gear, and writing a remembered position over a lever the driver has
-                    // since moved would be the mod driving the driver.
                     if (wasArmed) {
                         if (data.gearAvailable(driver.autoArriveGear))
                             driver.gear = driver.autoArriveGear;
@@ -890,7 +812,9 @@ public class GameEvents {
                             driver.gear = TrainGear.COAST;
                     }
                 }
-                driver.arrivalRefused = false;
+                // else: the key is still held and the train is not checked in anywhere - the
+                // destination is between Create's scans. Leave the approach state alone; the next
+                // scan re-sets it and this state continues.
             }
 
             // The lever is deliberately NOT forced to the brake while a station is

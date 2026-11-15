@@ -138,6 +138,22 @@ public final class RiderSeatGate {
     }
 
     /**
+     * Whether the ceiling rule applies to this train: it is AT the ceiling AND somebody aboard is free to move.
+     *
+     * <p>This is the whole of the seat rule now, and it replaces both the seating pass and the overload verdict.
+     * The operator's reasoning: a train may run at any speed its driver likes as long as everybody inside it is
+     * seated, because a seated rider cannot be thrown about. The moment somebody is on their feet - or on the roof,
+     * or anywhere the seat mapping does not account for - the train is held at the ceiling instead.
+     *
+     * <p>Nobody is ever moved. That is the entire point of replacing the seating pass: allocation was the source of
+     * most of this mod's bugs, and the nearest-seat rule could never be made to agree with what a player sees from
+     * inside the carriage. A rule that slows the train cannot be wrong about which seat somebody is in.
+     */
+    public static boolean ceilingRuleApplies(Train train) {
+        return atOrAboveCeiling(train) && anyUnseated(train);
+    }
+
+    /**
      * Ticks per second, live, as a double.
      *
      * <p>Everything that converts between Blocks-per-tick and metres-per-second has to agree on this figure, or the
