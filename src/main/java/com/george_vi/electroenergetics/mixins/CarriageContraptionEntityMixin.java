@@ -127,6 +127,11 @@ public class CarriageContraptionEntityMixin {
                                                         Operation<GlobalStation> original) {
         GlobalStation station = original.call(navigation, doubleEnded);
         CarriageContraptionEntity self = (CarriageContraptionEntity) (Object) this;
+        System.out.println("[gate-entry] station=" + (station == null ? "null" : station.name)
+                + " held=" + (((ICEETrainExtension) ((Carriage) self.getCarriage()).train)
+                        .getElectricTrainData().driver != null
+                        && ((ICEETrainExtension) ((Carriage) self.getCarriage()).train)
+                        .getElectricTrainData().driver.isSpaceHeld()));
         Carriage carriage = self.getCarriage();
         if (carriage == null || carriage.train == null || carriage.train.navigation == null)
             return station;
@@ -142,6 +147,11 @@ public class CarriageContraptionEntityMixin {
         double vMs = Math.abs(train.speed) * 20d;
         double gradeTravel = train.speed < 0 ? -data.trackGrade : data.trackGrade;
         double needed = TrainTractionModel.stoppingDistance(vMs, gradeTravel, train.carriages.size());
+        if (true) {   // diagnostic: the gate's own numbers, on by default while the prompt is being fixed
+            System.out.println(String.format(
+                    "[gate] v=%.3f x=%.2f needed=%.2f held=%s pathScan=%s",
+                    vMs, path.distance, needed, data.driver.isSpaceHeld(), station.name));
+        }
         java.util.UUID controller = self.getControllingPlayer().orElse(null);
         net.minecraft.server.level.ServerPlayer holder = controller == null
                 || self.level().getServer() == null ? null
