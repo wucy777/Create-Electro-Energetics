@@ -185,22 +185,6 @@ public class ElectricTrainData {
     // Gradient along the direction of travel (rise / run). Positive = uphill.
     public double trackGrade = 0d;
 
-    /**
-     * Distance to the nearest station the train can actually pull into, in Blocks; -1 means the
-     * search found nothing (or the train has nobody driving it). Nearest APPROACHABLE, so a
-     * junction resolves to the closest stop the consist can reach from here - the figure the
-     * driver judges their braking against on the HUD's left panel. Recomputed once per second,
-     * staggered by train id.
-     */
-    public float stationDistance = -1f;
-
-    /**
-     * What braking NOW would cost, in Blocks, under the same budget the old arrival controller
-     * was held to: the service brake at its usable margin, with drag and grade already
-     * decelerating. One formula per tick - it moves with the speed and the grade underneath it.
-     */
-    public float brakeDistance = 0f;
-
     // Electrical power actually being drawn by the traction [W]. Reported on
     // the driver's HUD.
     public double displayPower = 0d;

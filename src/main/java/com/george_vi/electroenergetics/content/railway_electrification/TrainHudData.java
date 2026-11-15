@@ -43,8 +43,7 @@ public final class TrainHudData {
     public record Sample(float maxSpeed, float power, float voltage, double grade,
                          boolean powered, int carriages, int motorCars,
                          float powerPerCarriage, boolean manualFullSpeed,
-                         float designMaxSpeed, int controlMode,
-                         float stationDistance, float brakeDistance) {}
+                         float designMaxSpeed, int controlMode) {}
 
     private static final Map<UUID, Sample> SAMPLES = new ConcurrentHashMap<>();
 
@@ -168,11 +167,10 @@ public final class TrainHudData {
     public static void update(UUID trainId, float maxSpeed, float power, float voltage,
                               double grade, boolean powered, int carriages, int motorCars,
                               float powerPerCarriage, boolean manualFullSpeed,
-                              float designMaxSpeed, int controlMode,
-                              float stationDistance, float brakeDistance) {
+                              float designMaxSpeed, int controlMode) {
         SAMPLES.put(trainId, new Sample(maxSpeed, power, voltage, grade, powered,
                 carriages, motorCars, powerPerCarriage, manualFullSpeed, designMaxSpeed,
-                controlMode, stationDistance, brakeDistance));
+                controlMode));
     }
 
     /**

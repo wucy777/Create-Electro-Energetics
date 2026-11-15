@@ -7,11 +7,9 @@ import com.george_vi.electroenergetics.content.railway_electrification.ElectricT
 import com.george_vi.electroenergetics.content.railway_electrification.TrainControlMode;
 import com.george_vi.electroenergetics.content.railway_electrification.TrainControlModeLogic;
 import com.george_vi.electroenergetics.content.railway_electrification.TrainDriverState;
-import com.george_vi.electroenergetics.content.railway_electrification.TrainGear;
 import com.george_vi.electroenergetics.content.railway_electrification.RiderSeatGate;
+import com.george_vi.electroenergetics.content.railway_electrification.TrainGear;
 import com.george_vi.electroenergetics.content.railway_electrification.TrainTractionModel;
-import com.simibubi.create.content.trains.graph.DiscoveredPath;
-import com.simibubi.create.content.trains.station.GlobalStation;
 import com.george_vi.electroenergetics.content.railway_electrification.gauges.SyncTrainGaugeDataPacket;
 import com.george_vi.electroenergetics.content.railway_electrification.pantograph.SyncTrainPantographsPacket;
 import com.george_vi.electroenergetics.content.railway_electrification.pantograph.TrainPantographEntry;
@@ -852,29 +850,6 @@ public class CatenaryModule {
                 trainData.availableAcceleration = 0f;
             }
 
-            // The driver's judgment aids for the HUD's left panel: what braking NOW would cost,
-            // and how far the nearest station the train can pull into is. The brake figure is one
-            // formula per tick; the station search is one path find per second, and only for a
-            // train with somebody at the controls, staggered by train id so the searches do not
-            // burst on one tick.
-            if (driver != null && driver.claimOwner != null) {
-                trainData.brakeDistance =
-                        (float) TrainTractionModel.stoppingDistance(trainSpeedMs, grade, carriages);
-                if ((level.getGameTime() + (train.id.hashCode() & 31)) % 20 == 0) {
-                    GlobalStation near = train.navigation == null ? null
-                            : train.navigation.findNearestApproachable(train.doubleEnded);
-                    if (near == null) {
-                        trainData.stationDistance = -1f;
-                    } else {
-                        DiscoveredPath path = train.navigation.findPathTo(near, -1.0d);
-                        trainData.stationDistance = path == null ? -1f : (float) path.distance;
-                    }
-                }
-            } else {
-                trainData.brakeDistance = 0f;
-                trainData.stationDistance = -1f;
-            }
-
             // Sync to clients for the gauges and the driver's HUD, now that this
             // tick's traction values are known. Throttled: only when something
             // moved appreciably, or every few ticks as a keep-alive.
@@ -914,12 +889,11 @@ public class CatenaryModule {
                                         driver.emergencyArmed, driver.emergencyPenalty,
                                         trainData.cruiseState.ordinal(),
                                         trainData.regenPower > 0d,
-                                        false, driver.unmanned,
+                                        driver.autoArrive, driver.unmanned,
                                         (float) TrainTractionModel.designMaxSpeed(),
                                         trainData.controlMode.ordinal(), RiderSeatGate.ceilingRuleApplies(train),
                                         com.george_vi.electroenergetics.content.railway_electrification
-                                                .RiderSeatGate.currentTickRate(),
-                                        trainData.stationDistance, trainData.brakeDistance)
+                                                .RiderSeatGate.currentTickRate())
                         );
                         trainData.lastSyncedVoltage = voltage;
                         trainData.lastSyncedCurrent = totalCurrent;

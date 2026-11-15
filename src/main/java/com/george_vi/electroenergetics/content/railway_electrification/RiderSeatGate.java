@@ -1679,19 +1679,18 @@ public final class RiderSeatGate {
     /**
      * Applies the ceiling to a value that is already in Blocks per tick.
      *
-     * <p>Gated on the seat rule, not on an overload verdict: a train whose occupants are all seated may run at any
-     * speed, and one with somebody free to move is held at the ceiling. The verdict is computed here rather than
-     * read from a stored flag, so it cannot be left stranded by a flag that nobody writes any more - which is exactly
-     * what happened when the overload machinery was removed and this method kept reading its field.
-     *
-     * <p>Which side is asking matters for the RESULT. The server can answer from the world; the client cannot, and
-     * a client that answered "not limited" would put the speed bar on the wrong denominator. So the client is told
-     * through the gauge packet, and {@link TrainHudData#seatLimited} is that answer.
+     * <p>Gated on OVERLOAD, not on "somebody is standing". A player on their feet below the ceiling is the
+     * intended way to move around a train; only when there are more people than seats does the ceiling
+     * apply.
      */
     public static float clamp(Train train, float blocksPerTick) {
         if (blocksPerTick <= (float) createCeilingBpt())
             return blocksPerTick;
 
+        // Which side is asking matters here. The server owns the flag; the client is told it through the
+        // gauge packet. Reading the server field on the client returns false always, which left the HUD's
+        // speed-bar denominator uncapped while the server was actually holding the train to the ceiling -
+        // the bar then read low for the whole overload.
         var carriage = train.carriages.isEmpty() ? null : train.carriages.get(0).anyAvailableEntity();
         boolean limited;
         if (carriage != null && carriage.level().isClientSide()) {
@@ -1699,6 +1698,9 @@ public final class RiderSeatGate {
         } else {
             limited = ceilingRuleApplies(train);
         }
+        // The cap is 28 m/s, and this method's answer is Blocks per TICK - so the ceiling has to be divided by the
+        // tick rate, not by a hardcoded 20. At /tick rate 500 the old form returned 1.4 Blocks/tick, which is
+        // 700 m/s there: the overload cap did nothing at all.
         return limited ? (float) createCeilingBpt() : blocksPerTick;
     }
 }

@@ -224,8 +224,6 @@
   "electroenergetics.train.arrival.tooClose": "Cannot stop for this station: at %s km/h the brakes need %s Blocks, only %s remain. Slow down and hold space again.",
   "electroenergetics.train.arrival.remoteStop": "The approach was refused, so the train has been remotely stopped at the station. Select a gear to take over.",
   "electroenergetics.train.arrival.active": "Approaching %s - %s Blocks remaining",
-  "electroenergetics.train.row.station": "Next stop",
-  "electroenergetics.train.row.brake": "Brake now",
   "electroenergetics.train.panto.autoOff": "PARKED",
   "key.electroenergetics.pantograph_toggle": "Train: auto/park pantograph",
   "electroenergetics.train.panto.up": "Raised",

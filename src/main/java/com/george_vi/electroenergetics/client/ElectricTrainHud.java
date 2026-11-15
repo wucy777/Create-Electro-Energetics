@@ -111,8 +111,6 @@ public class ElectricTrainHud
     private String textPower = "";
     private String textCatenary = "";
     private String textCars = "";
-    private String textStation = "";
-    private String textBrake = "";
     private int cachedSpeed = Integer.MIN_VALUE;
     private int cachedCap = Integer.MIN_VALUE;
     private int cachedGear = Integer.MIN_VALUE;
@@ -123,8 +121,6 @@ public class ElectricTrainHud
     private boolean cachedPowered;
     private double cachedGrade = Double.NaN;
     private float cachedPerCarriage = Float.NaN;
-    private int cachedStation = Integer.MIN_VALUE;
-    private int cachedBrake = Integer.MIN_VALUE;
 
     /**
      * The lever sample this frame, held for the status line and the gear row. Not
@@ -221,7 +217,7 @@ public class ElectricTrainHud
 
         var font = mc.font;
         int x = MARGIN;
-        int y = graphics.guiHeight() - MARGIN - LINE_HEIGHT * 10;
+        int y = graphics.guiHeight() - MARGIN - LINE_HEIGHT * 8;
 
         int label = 0x9AA0A6;
         int value = 0xFFFFFF;
@@ -256,17 +252,12 @@ public class ElectricTrainHud
                 : Math.max(1, train.carriages.size());
         int motorsI = sample.motorCars();
         boolean powered = sample.powered();
-        // The two judgment figures, quantised to whole Blocks; -1 means no station was found.
-        int stationI = sample.stationDistance() < 0f ? -1
-                : (int) Math.round(sample.stationDistance());
-        int brakeI = (int) Math.round(sample.brakeDistance());
 
         if (speedI != cachedSpeed || capI != cachedCap || gearI != cachedGear
                 || powerKwI != cachedPowerKw || deciVoltI != cachedDeciVolt
                 || cars != cachedCars || motorsI != cachedMotors
                 || powered != cachedPowered || sample.grade() != cachedGrade
-                || sample.powerPerCarriage() != cachedPerCarriage
-                || stationI != cachedStation || brakeI != cachedBrake) {
+                || sample.powerPerCarriage() != cachedPerCarriage) {
             cachedSpeed = speedI;
             cachedCap = capI;
             cachedGear = gearI;
@@ -277,11 +268,9 @@ public class ElectricTrainHud
             cachedPowered = powered;
             cachedGrade = sample.grade();
             cachedPerCarriage = sample.powerPerCarriage();
-            cachedStation = stationI;
-            cachedBrake = brakeI;
             rebuildText(speedI, capI, gearI, powerKwI, deciVoltI,
                     cars, motorsI, powered, sample.grade(),
-                    sample.powerPerCarriage(), stationI, brakeI);
+                    sample.powerPerCarriage());
         }
 
         drawRow(graphics, font, x, y, 0, label, tr("electroenergetics.train.row.speed"), value, textSpeed);
@@ -294,10 +283,6 @@ public class ElectricTrainHud
         // Carriage count and how many of them actually pull, so the rating above
         // can be sanity-checked at a glance.
         drawRow(graphics, font, x, y, 6, label, tr("electroenergetics.train.row.cars"), value, textCars);
-        // The driver's braking judgment, per the operator's ruling: the mod does not approach for
-        // them - the panel states the two figures a driver needs to make the call themselves.
-        drawRow(graphics, font, x, y, 7, label, tr("electroenergetics.train.row.station"), value, textStation);
-        drawRow(graphics, font, x, y, 8, label, tr("electroenergetics.train.row.brake"), value, textBrake);
 
         // Warning lamps, as a strip above the rows.
         //
@@ -324,7 +309,7 @@ public class ElectricTrainHud
         // the one readout that says whether the set is holding its speed.
         String status = statusLine();
         if (!status.isEmpty())
-            graphics.drawString(font, status, x, y + LINE_HEIGHT * 9 + 2, statusColor(), true);
+            graphics.drawString(font, status, x, y + LINE_HEIGHT * 7 + 2, statusColor(), true);
     }
 
     /**
@@ -417,6 +402,11 @@ public class ElectricTrainHud
             return tr("electroenergetics.train.status.warn");
         if (gear.confirmDue())
             return tr("electroenergetics.train.status.confirm");
+        // Automatic arrival outranks the lever readout: while it is running, the lever is
+        // not what is commanding the train, and saying "holding 100" would be a lie about
+        // a train that is braking for a platform.
+        if (gear.autoArrive())
+            return tr("electroenergetics.train.status.arriving");
         // Unmanned is shown even while the clock is still only amber, because it changes
         // what the driver has to do about it - there is nobody at the desk to press the
         // button, so the warning cannot be answered where it is being displayed.
@@ -470,7 +460,7 @@ public class ElectricTrainHud
      */
     private void rebuildText(int speed, int cap, int gear, int powerKw, int deciVolt,
                              int cars, int motors, boolean powered, double grade,
-                             float perCarriage, int stationBlocks, int brakeBlocks) {
+                             float perCarriage) {
         // With no supply the traction can sustain nothing, so the ceiling is
         // reported as zero. Showing "0 / 0" there would read as a broken readout,
         // so the ceiling is left blank and the catenary row explains why.
@@ -525,8 +515,6 @@ public class ElectricTrainHud
         textCatenary = String.format("%.1f", deciVolt / 10d) + " kV"
                 + (powered ? "" : " " + tr("electroenergetics.train.value.unpowered"));
         textCars = cars + "  (" + motors + " " + tr("electroenergetics.train.value.motorised") + ")";
-        textStation = stationBlocks < 0 ? "--" : String.format("%.0f m", (double) stationBlocks);
-        textBrake = brakeBlocks <= 0 ? "--" : String.format("%.0f m", (double) brakeBlocks);
     }
 
     /**
