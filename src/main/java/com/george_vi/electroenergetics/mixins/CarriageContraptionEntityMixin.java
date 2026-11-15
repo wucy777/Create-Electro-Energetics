@@ -125,21 +125,40 @@ public class CarriageContraptionEntityMixin {
             remap = false)
     private GlobalStation electroEnergetics$ownApproach(Navigation navigation, boolean doubleEnded,
                                                         Operation<GlobalStation> original) {
-        GlobalStation station = original.call(navigation, doubleEnded);
         CarriageContraptionEntity self = (CarriageContraptionEntity) (Object) this;
-        System.out.println("[gate-entry] station=" + (station == null ? "null" : station.name)
-                + " held=" + (((ICEETrainExtension) ((Carriage) self.getCarriage()).train)
-                        .getElectricTrainData().driver != null
-                        && ((ICEETrainExtension) ((Carriage) self.getCarriage()).train)
-                        .getElectricTrainData().driver.isSpaceHeld()));
         Carriage carriage = self.getCarriage();
         if (carriage == null || carriage.train == null || carriage.train.navigation == null)
-            return station;
+            return original.call(navigation, doubleEnded);
         Train train = carriage.train;
         ElectricTrainData data = ((ICEETrainExtension) train).getElectricTrainData();
         if (data == null || !data.underElectricControl() || data.driver == null)
-            return station;
-        if (station == null || data.driver.approachLatch || data.driver.autoArrive)
+            return original.call(navigation, doubleEnded);
+
+        // CREATE'S OWN SCAN IS THE WRONG TOOL, AND THIS IS WHY THE PROMPT NEVER SHOWED.
+        //
+        // findNearestApproachable is written for an AUTOMATIC train that must be able to turn around after the
+        // stop, so it searches with two limits of its own:
+        //
+        //     turnaround  = 0.75 * v^2 / (2a)          -- and a station is rejected when turnaround < its distance
+        //     minDistance = max(32.0, 1.5 * v^2/(2a))  -- stations nearer than this are not even considered
+        //
+        // Both are functions of SPEED. At a crawl - the operator's test: 1 m/s, edging up to the platform - the
+        // turnaround figure collapses to a fraction of a Block and every station fails the first test, while the
+        // 32-Block floor hides everything within 32 Blocks anyway. Measured behaviour, straight from the probe:
+        //
+        //     [gate] v=0.883 x=-0.43 needed=0.45 station=Track Station
+        //
+        // x NEGATIVE - the train was already level with the platform before the scan ever admitted it existed.
+        // That is the whole report: "the prompt never appears, and when it finally says anything it says it cannot
+        // stop". Both statements are the same scan refusing to look.
+        //
+        // So the scan is done here, once, from the train's own position: every station on the graph, the one whose
+        // path is shortest, with no speed-dependent floor. What a human driver considers "the next station" does
+        // not change because the train is slow.
+        GlobalStation station = electroEnergetics$nearestStation(navigation);
+        if (station == null)
+            return original.call(navigation, doubleEnded);   // nothing reachable: Create may answer as it likes
+        if (data.driver.approachLatch || data.driver.autoArrive)
             return null;                     // Create stands down; the mod owns the hold
         DiscoveredPath path = train.navigation.findPathTo(station, -1.0d);
         if (path == null || path.destination != station)
@@ -204,5 +223,42 @@ public class CarriageContraptionEntityMixin {
                     (int) Math.floor(Math.max(path.distance, 0d))), true);
         }
         return null;
+    }
+
+    /**
+     * The nearest station this train can actually path to, with no speed-dependent floor.
+     *
+     * <p>Create's own scan passes {@code minDistance = max(32, ...)} and rejects stations beyond the distance the
+     * train would need to turn around - both functions of speed, both useless at a crawl. This asks the graph for
+     * every station and takes the shortest path. The list is small (stations on one rail network, not blocks), and
+     * the call happens where Create's scan used to, so the cost is the same order.
+     */
+    @org.spongepowered.asm.mixin.Unique
+    private GlobalStation electroEnergetics$nearestStation(Navigation navigation) {
+        try {
+            Train train = ((CarriageContraptionEntity) (Object) this).getCarriage().train;
+            if (train == null || train.graph == null)
+                return null;
+            // The 5-argument form: (minDistance, maxDistance, doubleEnded, results, test).
+            // minDistance = 0 and maxDistance = -1 are exactly "no floor, no ceiling" - which is the whole
+            // point. The lambda accepts every station the graph reaches; the path find below decides which.
+            java.util.ArrayList<GlobalStation> all = new java.util.ArrayList<>();
+            navigation.search(0d, -1d, true, all,
+                    (distance, maxDistance, edgeMap, edgePair, candidate) -> true);
+            GlobalStation best = null;
+            double bestDistance = Double.MAX_VALUE;
+            for (GlobalStation candidate : all) {
+                DiscoveredPath path = train.navigation.findPathTo(candidate, -1.0d);
+                if (path == null || path.destination != candidate)
+                    continue;
+                if (path.distance < bestDistance) {
+                    bestDistance = path.distance;
+                    best = candidate;
+                }
+            }
+            return best;
+        } catch (Throwable ignored) {
+            return null;                     // a scan that throws must not take the tick with it
+        }
     }
 }
